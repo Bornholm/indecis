@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"os"
+	"runtime/debug"
 	"strconv"
 
 	"github.com/xolo-gateway/xolo/pkg/pluginsdk"
@@ -50,5 +52,12 @@ func loadBackend(dir, question string) (*modelBackend, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Une requête à vide prépare les poids pour l'inférence (la première
+	// requête réelle n'en paie pas le coût), puis la mémoire temporaire du
+	// chargement est rendue au système.
+	if _, err := m.Decide(context.Background(), "warm-up"); err != nil {
+		return nil, err
+	}
+	debug.FreeOSMemory()
 	return newModelBackend(m, question)
 }

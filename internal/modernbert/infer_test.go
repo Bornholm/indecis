@@ -185,3 +185,27 @@ func TestEncodeInt8(t *testing.T) {
 		}
 	}
 }
+
+// SetInt8 garde le mode compact : les matrices float32 sont libérées dès
+// qu'une source permet de les relire.
+func TestCompactInt8(t *testing.T) {
+	m, tok := loadBekko(t)
+	b := NewBatch([][]int32{tok.Encode("Bonjour")}, m.Cfg.PadID)
+	saved := map[string][]float32{}
+	for _, L := range m.Layers {
+		for _, p := range []*Param{L.Wqkv, L.Wo, L.Wi, L.WoMLP} {
+			saved[p.Name] = append([]float32(nil), p.W...)
+		}
+	}
+	m.SetCompact(func(name string) ([]float32, error) { return append([]float32(nil), saved[name]...), nil })
+	m.SetInt8(true)
+	defer func() {
+		m.SetInt8(false)
+		m.restoreWeights()
+		m.source = nil
+	}()
+	m.Encode(b)
+	if m.Layers[0].Wqkv.W != nil {
+		t.Fatal("les matrices devraient être libérées en int8 compact")
+	}
+}

@@ -52,6 +52,9 @@ func main() {
 	fmt.Printf("mémoire         RSS %s (avant %s), tas %s\n", mib(rss()), mib(before), mib(heap()))
 
 	ctx := context.Background()
+	m.Decide(ctx, "warm-up") // prépare les poids, comme le plugin au démarrage
+	debug.FreeOSMemory()
+	fmt.Printf("après préchauffage RSS %s (propre %s), tas %s\n", mib(rss()), mib(procStatus("RssAnon:")), mib(heap()))
 	system := "You are a customer support assistant for an online electronics shop. Only answer questions about orders, deliveries and returns."
 	cases := []struct {
 		name string
@@ -95,7 +98,8 @@ func main() {
 		fmt.Printf("%-15s %3d tokens  médiane %6.2f ms  p90 %6.2f ms\n", c.name, n,
 			ms(lat[len(lat)/2]), ms(lat[len(lat)*9/10]))
 	}
-	fmt.Printf("mémoire finale  RSS %s, pic %s\n", mib(rss()), mib(peak()))
+	fmt.Printf("mémoire finale  RSS %s (propre %s, fichier projeté %s), pic %s\n",
+		mib(rss()), mib(procStatus("RssAnon:")), mib(procStatus("RssFile:")), mib(peak()))
 
 	if *eval != "" {
 		var ex []dataset.Example

@@ -20,9 +20,11 @@
 package tokenizer
 
 import (
+	"bufio"
+	"bytes"
 	"container/heap"
-	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strings"
@@ -65,12 +67,16 @@ const maxCache = 1 << 16
 
 // Load lit un tokenizer.json.
 func Load(path string) (*Tokenizer, error) {
-	b, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	return Parse(b)
+	defer f.Close()
+	return read(bufio.NewReaderSize(f, 1<<16))
 }
+
+// Parse lit le contenu d'un tokenizer.json.
+func Parse(data []byte) (*Tokenizer, error) { return read(bytes.NewReader(data)) }
 
 type fileJSON struct {
 	AddedTokens []struct {
@@ -101,17 +107,15 @@ type fileJSON struct {
 		Pair   []templatePiece `json:"pair"`
 	} `json:"post_processor"`
 	Model struct {
-		Type                    string           `json:"type"`
-		Dropout                 *float64         `json:"dropout"`
-		UnkToken                string           `json:"unk_token"`
-		ContinuingSubwordPrefix *string          `json:"continuing_subword_prefix"`
-		EndOfWordSuffix         *string          `json:"end_of_word_suffix"`
-		FuseUnk                 bool             `json:"fuse_unk"`
-		ByteFallback            bool             `json:"byte_fallback"`
-		IgnoreMerges            bool             `json:"ignore_merges"`
-		Vocab                   map[string]int32 `json:"vocab"`
-		Merges                  json.RawMessage  `json:"merges"`
-	} `json:"model"`
+		Type                    string   `json:"type"`
+		Dropout                 *float64 `json:"dropout"`
+		UnkToken                string   `json:"unk_token"`
+		ContinuingSubwordPrefix *string  `json:"continuing_subword_prefix"`
+		EndOfWordSuffix         *string  `json:"end_of_word_suffix"`
+		FuseUnk                 bool     `json:"fuse_unk"`
+		ByteFallback            bool     `json:"byte_fallback"`
+		IgnoreMerges            bool     `json:"ignore_merges"`
+	} `json:"model"` // vocab et merges sont lus en flux (voir decode)
 }
 
 type templatePiece struct {
@@ -142,11 +146,10 @@ func matches(pieces []templatePiece, want ...string) bool {
 	return true
 }
 
-// Parse lit le contenu d'un tokenizer.json.
-func Parse(data []byte) (*Tokenizer, error) {
-	var f fileJSON
-	if err := json.Unmarshal(data, &f); err != nil {
-		return nil, fmt.Errorf("tokenizer: %w", err)
+func read(r io.Reader) (*Tokenizer, error) {
+	f, byID, pairs, err := decode(r)
+	if err != nil {
+		return nil, err
 	}
 	if err := checkSupported(&f); err != nil {
 		return nil, err
@@ -157,27 +160,17 @@ func Parse(data []byte) (*Tokenizer, error) {
 		added: make(map[byte][]addedToken),
 		cache: make(map[string][]int32),
 	}
-	maxID := int32(-1)
-	for _, id := range f.Model.Vocab {
-		if id < 0 {
-			return nil, fmt.Errorf("tokenizer: id %d négatif", id)
-		}
-		maxID = max(maxID, id)
-	}
 	for _, a := range f.AddedTokens {
-		maxID = max(maxID, a.ID)
-	}
-	byID := make([]string, maxID+1)
-	for s, id := range f.Model.Vocab {
-		if byID[id] != "" {
-			return nil, fmt.Errorf("tokenizer: id %d attribué deux fois", id)
+		if a.ID < 0 {
+			return nil, fmt.Errorf("tokenizer: id %d négatif", a.ID)
 		}
-		byID[id] = s
+		for int(a.ID) >= len(byID) {
+			byID = append(byID, "")
+		}
 	}
-	t.vocab = newStrTable(byID)
+	vocab := newStrTable(byID)
+	t.vocab = vocab
 	t.size = len(byID)
-	vocab := f.Model.Vocab
-	f.Model.Vocab = nil
 
 	for _, a := range f.AddedTokens {
 		if a.Normalized || a.SingleWord || a.Content == "" {
@@ -214,15 +207,11 @@ func Parse(data []byte) (*Tokenizer, error) {
 		t.bytes[i] = id
 	}
 
-	pairs, err := parseMerges(f.Model.Merges)
-	if err != nil {
-		return nil, err
-	}
 	entries := make([]mergeEntry, 0, len(pairs))
 	for rank, p := range pairs {
-		a, okA := vocab[p[0]]
-		b, okB := vocab[p[1]]
-		id, okM := vocab[p[0]+p[1]]
+		a, okA := vocab.lookup(p[0])
+		b, okB := vocab.lookup(p[1])
+		id, okM := vocab.lookup(p[0] + p[1])
 		if !okA || !okB || !okM {
 			return nil, fmt.Errorf("tokenizer: merge %q %q hors vocabulaire", p[0], p[1])
 		}
@@ -258,27 +247,6 @@ func checkSupported(f *fileJSON) error {
 		return fmt.Errorf("tokenizer: gabarits attendus : <bos> A <eos> et <bos> A <eos> B <eos>")
 	}
 	return nil
-}
-
-// parseMerges accepte les deux formats : ["a","b"] et "a b".
-func parseMerges(raw json.RawMessage) ([][2]string, error) {
-	var pairs [][2]string
-	if err := json.Unmarshal(raw, &pairs); err == nil {
-		return pairs, nil
-	}
-	var legacy []string
-	if err := json.Unmarshal(raw, &legacy); err != nil {
-		return nil, fmt.Errorf("tokenizer: merges: %w", err)
-	}
-	pairs = make([][2]string, len(legacy))
-	for i, s := range legacy {
-		a, b, ok := strings.Cut(s, " ")
-		if !ok {
-			return nil, fmt.Errorf("tokenizer: merge invalide %q", s)
-		}
-		pairs[i] = [2]string{a, b}
-	}
-	return pairs, nil
 }
 
 func pairKey(a, b int32) uint64 { return uint64(uint32(a))<<32 | uint64(uint32(b)) }

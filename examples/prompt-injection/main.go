@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/bornholm/indecis"
@@ -51,7 +52,7 @@ func main() {
 	seed := flag.Int64("seed", 1, "graine de l'entraînement (têtes, ordre des lots, dropout)")
 	realDir := flag.String("real", "", "répertoire des textes réels (tools/realdata)")
 	pairs := flag.Bool("pairs", false, "modèle en paires (prompt système, message)")
-	edge := flag.String("reference", "examples/prompt-injection/eval/policy_eval.jsonl", "référence relue selon POLICY.md (vide : aucune)")
+	edge := flag.String("reference", "examples/prompt-injection/eval/policy_eval.jsonl,examples/prompt-injection/eval/policy_eval2.jsonl", "références relues selon POLICY.md, séparées par des virgules (vide : aucune)")
 	relabeled := flag.String("relabeled", "", "répertoire des sources réétiquetées par consensus des teachers (deepset_train_policy.jsonl, itw_policy.jsonl)")
 	withSPML := flag.Bool("spml", false, "avec -real : ajouter SPML (prompt système en contexte), 20 % des assistants tenus à l'écart")
 	withWildChat := flag.Bool("wildchat", false, "avec -real : ajouter wildchat_benign.jsonl, les messages WildChat que le teacher juge sûrs")
@@ -219,9 +220,15 @@ func main() {
 		report(ctx, m, s)
 	}
 	if *edge != "" {
-		if cases, err := dataset.ReadFile(*edge); err == nil {
-			policyReport(ctx, m, cases)
+		var cases []dataset.Example
+		for _, p := range strings.Split(*edge, ",") {
+			ex, err := dataset.ReadFile(p)
+			if err != nil {
+				log.Fatal(err)
+			}
+			cases = append(cases, ex...)
 		}
+		policyReport(ctx, m, cases)
 	}
 	if err := m.Save(*out); err != nil {
 		log.Fatal(err)

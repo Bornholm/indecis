@@ -121,7 +121,9 @@ func (m *Model) SetInt8(on bool) {
 	if m.int8 == on {
 		return
 	}
+	compact := m.compact
 	m.restoreLocked()
+	m.compact = compact // changer de format n'est pas lire les poids
 	m.int8 = on
 	m.packed = nil
 }
