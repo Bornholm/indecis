@@ -1,9 +1,11 @@
 package indecis
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -49,15 +51,17 @@ type Info struct {
 
 // Model est un modèle de décision : un encodeur et une tête par question.
 type Model struct {
-	schema       Schema
-	enc          *modernbert.Model
-	tok          *tokenizer.Tokenizer
-	tokenizerRaw []byte
-	heads        []*head
-	temps        []float64
-	maxLen       int
-	paired       bool
-	info         Info
+	schema Schema
+	enc    *modernbert.Model
+	tok    *tokenizer.Tokenizer
+	// tokenizerPath est le tokenizer.json d'origine, recopié par Save. Le
+	// garder en mémoire coûterait 34 Mo pour un usage rare.
+	tokenizerPath string
+	heads         []*head
+	temps         []float64
+	maxLen        int
+	paired        bool
+	info          Info
 }
 
 // Input est un texte à juger et son contexte éventuel.
@@ -132,16 +136,13 @@ func New(backboneDir string, schema Schema, seed int64, opts ...Option) (*Model,
 	if err != nil {
 		return nil, err
 	}
-	raw, err := os.ReadFile(filepath.Join(backboneDir, "tokenizer.json"))
-	if err != nil {
-		return nil, err
-	}
-	tok, err := tokenizer.Parse(raw)
+	tokPath := filepath.Join(backboneDir, "tokenizer.json")
+	tok, err := tokenizer.Load(tokPath)
 	if err != nil {
 		return nil, err
 	}
 	m := &Model{
-		schema: schema, enc: enc, tok: tok, tokenizerRaw: raw,
+		schema: schema, enc: enc, tok: tok, tokenizerPath: tokPath,
 		maxLen: 256, info: Info{Backbone: filepath.Base(backboneDir)},
 	}
 	for _, o := range opts {
@@ -243,12 +244,10 @@ func (m *Model) logits(ctx context.Context, inputs []Input, batchSize int) ([][]
 		for j, i := range idx {
 			seqs[j] = ids[i]
 		}
-		b := modernbert.NewBatch(seqs, m.enc.Cfg.PadID)
-		s, err := m.enc.Forward(b)
+		pooled, err := m.enc.Encode(modernbert.NewBatch(seqs, m.enc.Cfg.PadID))
 		if err != nil {
 			return nil, err
 		}
-		pooled := modernbert.MeanPool(s.Hidden, b, H)
 		for j, i := range idx {
 			x := pooled[j*H : (j+1)*H]
 			out[i] = make([][]float64, len(m.heads))
@@ -284,6 +283,7 @@ const formatVersion = "indecis/1"
 const (
 	exactRows   = "indecis.embeddings.exact_rows"
 	exactValues = "indecis.embeddings.exact_values"
+	embName     = "embeddings.tok_embeddings.weight"
 )
 
 // Save écrit le modèle dans dir. Le répertoire reste lisible par
@@ -302,10 +302,11 @@ func (m *Model) Save(dir string) error {
 	// sont plus représentables exactement : elles sont ajoutées en float32,
 	// pour que Load redonne le modèle au bit près.
 	emb := m.enc.Emb
-	tensors[emb.Name] = safetensors.Tensor{Shape: emb.Shape, Data: emb.W, DType: "BF16"}
+	embW := m.enc.EmbeddingMatrix()
+	tensors[emb.Name] = safetensors.Tensor{Shape: emb.Shape, Data: embW, DType: "BF16"}
 	var rows, values []float32
 	for r := 0; r < emb.Shape[0]; r++ {
-		row := emb.W[r*H : (r+1)*H]
+		row := embW[r*H : (r+1)*H]
 		for _, v := range row {
 			if safetensors.FromBF16(safetensors.ToBF16(v)) != v {
 				rows = append(rows, float32(r)) // exact : r < 2^24
@@ -322,15 +323,13 @@ func (m *Model) Save(dir string) error {
 		tensors["heads."+h.q.Name+".weight"] = safetensors.Tensor{Shape: []int{h.rows, H}, Data: h.w}
 		tensors["heads."+h.q.Name+".bias"] = safetensors.Tensor{Shape: []int{h.outs}, Data: h.b}
 	}
-	f, err := os.Create(filepath.Join(dir, fileWeights))
+	// Chaque fichier est écrit à côté puis renommé : un modèle chargé depuis
+	// dir lit ses poids dans le fichier projeté en mémoire, qui ne doit pas
+	// être réécrit en place.
+	err := writeFile(filepath.Join(dir, fileWeights), func(w io.Writer) error {
+		return safetensors.Write(w, tensors, map[string]string{"format": "pt"})
+	})
 	if err != nil {
-		return err
-	}
-	if err := safetensors.Write(f, tensors, map[string]string{"format": "pt"}); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
 		return err
 	}
 
@@ -347,10 +346,14 @@ func (m *Model) Save(dir string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(dir, fileConfig), cfgJSON, 0o644); err != nil {
+	if err := writeBytes(filepath.Join(dir, fileConfig), cfgJSON); err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(dir, fileTokenizer), m.tokenizerRaw, 0o644); err != nil {
+	tokRaw, err := os.ReadFile(m.tokenizerPath)
+	if err != nil {
+		return fmt.Errorf("indecis: tokenizer d'origine : %w", err)
+	}
+	if err := writeBytes(filepath.Join(dir, fileTokenizer), tokRaw); err != nil {
 		return err
 	}
 	meta, err := json.MarshalIndent(metaJSON{
@@ -359,7 +362,40 @@ func (m *Model) Save(dir string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, fileMeta), meta, 0o644)
+	return writeBytes(filepath.Join(dir, fileMeta), meta)
+}
+
+// writeFile écrit path par un fichier temporaire renommé ensuite.
+func writeFile(path string, write func(io.Writer) error) error {
+	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name()) // sans effet après le renommage
+	bw := bufio.NewWriterSize(f, 1<<20)
+	if err := write(bw); err != nil {
+		f.Close()
+		return err
+	}
+	if err := bw.Flush(); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Chmod(0o644); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), path)
+}
+
+func writeBytes(path string, b []byte) error {
+	return writeFile(path, func(w io.Writer) error {
+		_, err := w.Write(b)
+		return err
+	})
 }
 
 // Load lit un modèle écrit par Save.
@@ -386,16 +422,47 @@ func Load(dir string, opts ...Option) (*Model, error) {
 	if err := json.Unmarshal(cb, &cfg); err != nil {
 		return nil, err
 	}
-	tensors, _, err := safetensors.ReadFile(filepath.Join(dir, fileWeights))
+	// Les poids sont projetés en mémoire. La table d'embeddings, écrite en
+	// bf16 par Save, est lue sur place ; le reste est décodé en float32.
+	f, err := safetensors.Open(filepath.Join(dir, fileWeights))
 	if err != nil {
 		return nil, err
+	}
+	tensors := map[string]safetensors.Tensor{}
+	var table *mappedEmbeddings
+	for _, name := range f.Names() {
+		if name == exactRows || name == exactValues {
+			continue
+		}
+		if dtype, shape, raw, _ := f.Raw(name); name == embName && dtype == "BF16" && len(shape) == 2 && shape[1] == cfg.Hidden {
+			rows, _, err := f.Tensor(exactRows)
+			if err != nil {
+				return nil, err
+			}
+			_, _, values, _ := f.Raw(exactValues)
+			if table, err = newMappedEmbeddings(cfg.Hidden, raw, rows.Data, values); err != nil {
+				return nil, err
+			}
+			tensors[name] = safetensors.Tensor{Shape: shape}
+			continue
+		}
+		t, _, err := f.Tensor(name)
+		if err != nil {
+			return nil, err
+		}
+		tensors[name] = t
 	}
 	enc, err := modernbert.FromTensors(cfg, tensors)
 	if err != nil {
 		return nil, err
 	}
-	if rows, ok := tensors[exactRows]; ok {
-		values := tensors[exactValues]
+	if table != nil {
+		enc.SetEmbeddingTable(table)
+	} else if rows, ok, _ := f.Tensor(exactRows); ok {
+		values, _, err := f.Tensor(exactValues)
+		if err != nil {
+			return nil, err
+		}
 		H := cfg.Hidden
 		if len(values.Data) != len(rows.Data)*H {
 			return nil, fmt.Errorf("indecis: lignes exactes mal formées")
@@ -408,15 +475,12 @@ func Load(dir string, opts ...Option) (*Model, error) {
 			copy(enc.Emb.W[id*H:(id+1)*H], values.Data[i*H:(i+1)*H])
 		}
 	}
-	raw, err := os.ReadFile(filepath.Join(dir, fileTokenizer))
+	tokPath := filepath.Join(dir, fileTokenizer)
+	tok, err := tokenizer.Load(tokPath)
 	if err != nil {
 		return nil, err
 	}
-	tok, err := tokenizer.Parse(raw)
-	if err != nil {
-		return nil, err
-	}
-	m := &Model{schema: meta.Schema, enc: enc, tok: tok, tokenizerRaw: raw, maxLen: meta.MaxLen, paired: meta.Paired, info: meta.Info}
+	m := &Model{schema: meta.Schema, enc: enc, tok: tok, tokenizerPath: tokPath, maxLen: meta.MaxLen, paired: meta.Paired, info: meta.Info}
 	H := cfg.Hidden
 	for _, q := range meta.Schema {
 		h := newHead(q, H, rand.New(rand.NewSource(0)))

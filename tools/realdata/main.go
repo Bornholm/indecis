@@ -54,6 +54,7 @@ func main() {
 	exclude := flag.String("exclude", "", "jeux d'évaluation à exclure, séparés par des virgules")
 	only := flag.String("only", "", "ne collecter que ces sorties (ex. spml,oasst2), séparées par des virgules")
 	salt := flag.String("salt", "", "change les pages tirées, pour un échantillon distinct du premier")
+	pages := flag.Int("pages", 0, "nombre de pages de 100 lignes à tirer par source échantillonnée (0 : celui de la source)")
 	flag.Parse()
 	if *out == "" {
 		log.Fatal("-out est obligatoire")
@@ -146,6 +147,9 @@ func main() {
 	for _, s := range sources {
 		if *only != "" && !strings.Contains(","+*only+",", ","+s.out+",") {
 			continue
+		}
+		if *pages > 0 && s.pages > 0 {
+			s.pages = *pages
 		}
 		ex, dropped, err := collect(ctx, s, index, *salt)
 		if err != nil {

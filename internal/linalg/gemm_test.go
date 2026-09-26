@@ -128,3 +128,31 @@ func BenchmarkMatMul(b *testing.B) {
 		})
 	}
 }
+
+func TestMatMulPacked_MatchesMatMul(t *testing.T) {
+	r := rand.New(rand.NewSource(3))
+	for _, s := range [][3]int{{1, 1, 1}, {7, 384, 1152}, {15, 1152, 384}, {33, 300, 17}, {80, 520, 40}} {
+		m, k, n := s[0], s[1], s[2]
+		for _, transB := range []bool{false, true} {
+			a := randSlice(r, m*k)
+			b := randSlice(r, k*n)
+			want := make([]float32, m*n)
+			MatMul(want, a, b, m, k, n, false, transB, false)
+			p := PackB(b, k, n, transB)
+			clear(b) // le paquet ne dépend plus de b
+			got := make([]float32, m*n)
+			MatMulPacked(got, a, p, m, false)
+			for i := range got {
+				if got[i] != want[i] {
+					t.Fatalf("%v transB=%v : [%d] %v, attendu %v", s, transB, i, got[i], want[i])
+				}
+			}
+			MatMulPacked(got, a, p, m, true)
+			for i := range got {
+				if got[i] != 2*want[i] && math.Abs(float64(got[i]-2*want[i])) > 1e-4 {
+					t.Fatalf("%v accumulate : [%d] %v, attendu %v", s, i, got[i], 2*want[i])
+				}
+			}
+		}
+	}
+}

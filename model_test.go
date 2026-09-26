@@ -106,6 +106,41 @@ func TestFitLearnsAndSaveLoadRoundTrips(t *testing.T) {
 			}
 		}
 	}
+
+	// Un modèle chargé lit ses embeddings dans le fichier projeté : le
+	// sauvegarder par-dessus lui-même doit fonctionner, et redonner le même
+	// modèle.
+	if err := loaded.Save(dir); err != nil {
+		t.Fatal(err)
+	}
+	again, err := loaded.Decide(ctx, texts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	third, err := reloaded.Decide(ctx, texts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range texts {
+		for name, a := range after[i] {
+			if again[i][name].P != a.P || third[i][name].P != a.P {
+				t.Fatalf("%q/%s : %v, %v puis %v", texts[i], name, a.P, again[i][name].P, third[i][name].P)
+			}
+		}
+	}
+
+	// Et il se réentraîne : la table est alors recopiée en float32.
+	opts.Epochs, opts.Progress = 1, nil
+	if err := reloaded.Fit(ctx, toyData, opts); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reloaded.Decide(ctx, texts...); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // Des exemples de calibration parfaitement séparés ne doivent pas faire

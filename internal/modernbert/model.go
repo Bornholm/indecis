@@ -95,6 +95,13 @@ type Model struct {
 
 	ropeMu sync.Mutex
 	rope   map[float64]*ropeTable
+
+	// embTable remplace Emb.W quand la table est lue à la demande.
+	embTable EmbeddingTable
+	// packed contient les poids empaquetés pour Encode, nil s'ils sont à
+	// refaire.
+	packMu sync.Mutex
+	packed []packedLayer
 }
 
 // Load lit config.json et model.safetensors dans dir.

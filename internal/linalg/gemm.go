@@ -96,6 +96,8 @@ type gemm struct {
 	// bloc de k courant
 	pc, kb int
 	bpack  []float32
+	// pre, s'il est défini, fournit B déjà empaquetée.
+	pre *PackedB
 
 	tasksM, tasksN int
 	next           atomic.Int64
@@ -120,15 +122,21 @@ func (g *gemm) run(limit int) {
 	}
 	g.tasksN = (g.n + g.ncr - 1) / g.ncr
 
-	panels := (g.n + g.nr - 1) / g.nr
-	g.bpack = getBuf(panels * g.nr * min(kc, g.k))
-	defer putBuf(g.bpack)
+	if g.pre == nil {
+		panels := (g.n + g.nr - 1) / g.nr
+		g.bpack = getBuf(panels * g.nr * min(kc, g.k))
+		defer putBuf(g.bpack)
+	}
 
 	workers := min(active, g.tasksM*g.tasksN)
 
 	for g.pc = 0; g.pc < g.k; g.pc += kc {
 		g.kb = min(kc, g.k-g.pc)
-		g.packB()
+		if g.pre != nil {
+			g.bpack = g.pre.blocks[g.pc/kc]
+		} else {
+			g.packB()
+		}
 		g.next.Store(0)
 		if workers == 1 {
 			g.work()
@@ -258,6 +266,67 @@ func (g *gemm) packB() {
 			clear(d[cols:])
 		}
 	}
+}
+
+// PackedB est un opérande B empaqueté une fois pour toutes. Les poids d'un
+// modèle ne changent pas entre deux requêtes : les empaqueter à chaque
+// produit coûtait près d'un cinquième du temps d'inférence.
+type PackedB struct {
+	k, n, nr int
+	blocks   [][]float32 // un bloc par tranche de kc lignes de op(B)
+}
+
+// PackB empaquette op(B), k×n : B est stockée k×n, ou n×k si transB. Le
+// résultat ne dépend plus de b, qui peut changer ensuite.
+func PackB(b []float32, k, n int, transB bool) *PackedB {
+	if len(b) < k*n {
+		panic("linalg: PackB: slice too short")
+	}
+	p := &PackedB{k: k, n: n, nr: nr()}
+	g := &gemm{b: b, k: k, n: n, transB: transB, nr: p.nr}
+	panels := (n + p.nr - 1) / p.nr
+	for g.pc = 0; g.pc < k; g.pc += kc {
+		g.kb = min(kc, k-g.pc)
+		g.bpack = make([]float32, panels*p.nr*g.kb)
+		g.packB()
+		p.blocks = append(p.blocks, g.bpack)
+	}
+	return p
+}
+
+// Size est le nombre de float32 occupés.
+func (p *PackedB) Size() int {
+	n := 0
+	for _, b := range p.blocks {
+		n += len(b)
+	}
+	return n
+}
+
+// MatMulPacked est MatMul avec un B empaqueté par PackB : C = A·op(B), A
+// étant m×k.
+func MatMulPacked(c, a []float32, b *PackedB, m int, accumulate bool) {
+	k, n := b.k, b.n
+	if m == 0 || n == 0 || k == 0 {
+		if !accumulate && k == 0 {
+			clear(c[:m*n])
+		}
+		return
+	}
+	if len(c) < m*n || len(a) < m*k {
+		panic("linalg: MatMulPacked: slice too short")
+	}
+	if b.nr != nr() {
+		panic("linalg: MatMulPacked: B empaquetée pour un autre micro-noyau")
+	}
+	g := &gemm{
+		c: c, a: a,
+		m: m, k: k, n: n,
+		accumulate: accumulate,
+		nr:         b.nr,
+		pre:        b,
+	}
+	g.run(Workers())
 }
 
 var bufPool sync.Pool

@@ -99,6 +99,11 @@ func (m *Model) Fit(ctx context.Context, examples []dataset.Example, opts TrainO
 	m.recordPriors(data)
 
 	H := m.enc.Cfg.Hidden
+	// L'entraînement modifie les poids : la table d'embeddings doit être en
+	// float32, et les poids empaquetés pour l'inférence sont refaits après
+	// chaque pas (Progress peut évaluer le modèle en cours de route).
+	m.enc.Materialize()
+	defer m.enc.Invalidate()
 	grads := m.enc.EnableGrad()
 	var encDense []optim.Dense
 	for _, p := range m.enc.Params() {
@@ -143,6 +148,7 @@ func (m *Model) Fit(ctx context.Context, examples []dataset.Example, opts TrainO
 			f := schedule(step)
 			encOpt.Step(opts.LR*f, encDense, encSparse)
 			headOpt.Step(opts.HeadLR*f, headDense, nil)
+			m.enc.Invalidate()
 			m.enc.ZeroGrad(grads)
 			for _, h := range m.heads {
 				h.zeroGrad()

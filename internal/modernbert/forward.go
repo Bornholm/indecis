@@ -80,7 +80,7 @@ func (m *Model) Forward(b Batch) (*State, error) {
 
 	s.emb = make([]float32, N*H)
 	for r, id := range b.IDs {
-		copy(s.emb[r*H:(r+1)*H], m.Emb.W[int(id)*H:(int(id)+1)*H])
+		m.embRow(id, s.emb[r*H:(r+1)*H])
 	}
 	x := make([]float32, N*H)
 	layerNorm(x, s.emb, m.EmbNorm.W, N, H, cfg.NormEps, &s.embLN)

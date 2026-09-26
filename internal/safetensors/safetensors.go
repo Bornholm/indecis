@@ -54,49 +54,126 @@ func ReadFile(path string) (map[string]Tensor, map[string]string, error) {
 
 // Parse décode un contenu safetensors complet.
 func Parse(b []byte) (map[string]Tensor, map[string]string, error) {
-	if len(b) < 8 {
-		return nil, nil, fmt.Errorf("safetensors: fichier tronqué")
+	f, err := parseHeader(b)
+	if err != nil {
+		return nil, nil, err
 	}
-	n := binary.LittleEndian.Uint64(b[:8])
-	if n > maxHeader || 8+n > uint64(len(b)) {
-		return nil, nil, fmt.Errorf("safetensors: en-tête de %d octets invalide", n)
-	}
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(b[8:8+n], &raw); err != nil {
-		return nil, nil, fmt.Errorf("safetensors: en-tête : %w", err)
-	}
-	data := b[8+n:]
-
-	var meta map[string]string
-	out := make(map[string]Tensor, len(raw))
-	for name, msg := range raw {
-		if name == "__metadata__" {
-			if err := json.Unmarshal(msg, &meta); err != nil {
-				return nil, nil, fmt.Errorf("safetensors: métadonnées : %w", err)
-			}
-			continue
-		}
-		var e entry
-		if err := json.Unmarshal(msg, &e); err != nil {
-			return nil, nil, fmt.Errorf("safetensors: %s : %w", name, err)
-		}
-		t, err := decode(e, data)
+	out := make(map[string]Tensor, len(f.entries))
+	for name, e := range f.entries {
+		t, err := decode(e, f.data)
 		if err != nil {
 			return nil, nil, fmt.Errorf("safetensors: %s : %w", name, err)
 		}
 		out[name] = t
 	}
-	return out, meta, nil
+	return out, f.meta, nil
 }
 
-func decode(e entry, data []byte) (Tensor, error) {
-	t := Tensor{Shape: e.Shape}
-	n := t.Len()
+// File est un fichier safetensors dont les tenseurs sont décodés à la
+// demande. Ouvert par Open, son contenu est projeté en mémoire quand le
+// système le permet : les tenseurs laissés bruts (Raw) ne coûtent alors que
+// les pages effectivement lues, partagées entre processus.
+//
+// Le fichier ne doit pas être modifié en place tant que File est utilisé :
+// le remplacer par un renommage est sans danger.
+type File struct {
+	entries map[string]entry
+	meta    map[string]string
+	data    []byte
+}
+
+// Open ouvre un fichier safetensors sans décoder ses tenseurs.
+func Open(path string) (*File, error) {
+	b, err := mapFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return parseHeader(b)
+}
+
+func parseHeader(b []byte) (*File, error) {
+	if len(b) < 8 {
+		return nil, fmt.Errorf("safetensors: fichier tronqué")
+	}
+	n := binary.LittleEndian.Uint64(b[:8])
+	if n > maxHeader || 8+n > uint64(len(b)) {
+		return nil, fmt.Errorf("safetensors: en-tête de %d octets invalide", n)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(b[8:8+n], &raw); err != nil {
+		return nil, fmt.Errorf("safetensors: en-tête : %w", err)
+	}
+	f := &File{entries: make(map[string]entry, len(raw)), data: b[8+n:]}
+	for name, msg := range raw {
+		if name == "__metadata__" {
+			if err := json.Unmarshal(msg, &f.meta); err != nil {
+				return nil, fmt.Errorf("safetensors: métadonnées : %w", err)
+			}
+			continue
+		}
+		var e entry
+		if err := json.Unmarshal(msg, &e); err != nil {
+			return nil, fmt.Errorf("safetensors: %s : %w", name, err)
+		}
+		if _, _, err := e.bytes(f.data); err != nil {
+			return nil, fmt.Errorf("safetensors: %s : %w", name, err)
+		}
+		f.entries[name] = e
+	}
+	return f, nil
+}
+
+// Names liste les tenseurs du fichier, triés.
+func (f *File) Names() []string {
+	names := make([]string, 0, len(f.entries))
+	for name := range f.entries {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// Meta retourne les métadonnées du fichier.
+func (f *File) Meta() map[string]string { return f.meta }
+
+// Tensor décode un tenseur en float32.
+func (f *File) Tensor(name string) (Tensor, bool, error) {
+	e, ok := f.entries[name]
+	if !ok {
+		return Tensor{}, false, nil
+	}
+	t, err := decode(e, f.data)
+	if err != nil {
+		return t, true, fmt.Errorf("safetensors: %s : %w", name, err)
+	}
+	return t, true, nil
+}
+
+// Raw retourne un tenseur sans le décoder : son dtype, sa forme et ses
+// octets en little-endian, à ne pas modifier.
+func (f *File) Raw(name string) (dtype string, shape []int, data []byte, ok bool) {
+	e, ok := f.entries[name]
+	if !ok {
+		return "", nil, nil, false
+	}
+	_, raw, _ := e.bytes(f.data)
+	return e.DType, e.Shape, raw, true
+}
+
+// bytes retourne la taille d'un élément et les octets du tenseur, après
+// avoir vérifié qu'ils correspondent à la forme.
+func (e entry) bytes(data []byte) (int, []byte, error) {
+	n := 1
+	for _, d := range e.Shape {
+		if d < 0 {
+			return 0, nil, fmt.Errorf("forme %v invalide", e.Shape)
+		}
+		n *= d
+	}
 	start, end := e.Offsets[0], e.Offsets[1]
 	if start < 0 || end < start || end > len(data) {
-		return t, fmt.Errorf("offsets [%d, %d) hors des données (%d octets)", start, end, len(data))
+		return 0, nil, fmt.Errorf("offsets [%d, %d) hors des données (%d octets)", start, end, len(data))
 	}
-	raw := data[start:end]
 	var size int
 	switch e.DType {
 	case "F32":
@@ -104,12 +181,22 @@ func decode(e entry, data []byte) (Tensor, error) {
 	case "BF16", "F16":
 		size = 2
 	default:
-		return t, fmt.Errorf("dtype %s non pris en charge", e.DType)
+		return 0, nil, fmt.Errorf("dtype %s non pris en charge", e.DType)
 	}
+	raw := data[start:end]
 	if len(raw) != n*size {
-		return t, fmt.Errorf("%d octets pour %d éléments %s", len(raw), n, e.DType)
+		return 0, nil, fmt.Errorf("%d octets pour %d éléments %s", len(raw), n, e.DType)
 	}
-	t.Data = make([]float32, n)
+	return size, raw, nil
+}
+
+func decode(e entry, data []byte) (Tensor, error) {
+	t := Tensor{Shape: e.Shape}
+	_, raw, err := e.bytes(data)
+	if err != nil {
+		return t, err
+	}
+	t.Data = make([]float32, t.Len())
 	switch e.DType {
 	case "F32":
 		for i := range t.Data {
