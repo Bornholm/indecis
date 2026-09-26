@@ -10,6 +10,7 @@ import (
 	"sort"
 
 	"github.com/bornholm/indecis/dataset"
+	"github.com/bornholm/indecis/internal/linalg"
 	"github.com/bornholm/indecis/internal/modernbert"
 	"github.com/bornholm/indecis/internal/safetensors"
 	"github.com/bornholm/indecis/tokenizer"
@@ -71,6 +72,11 @@ type Option func(*Model)
 // WithMaxLen fixe la longueur maximale en tokens ; les textes plus longs sont
 // tronqués. 256 par défaut.
 func WithMaxLen(n int) Option { return func(m *Model) { m.maxLen = n } }
+
+// WithThreads borne le nombre de cœurs utilisés par les calculs (0 : tous).
+// Le réglage vaut pour tout le processus. Pour servir des requêtes isolées,
+// 1 est souvent le plus rapide ; pour l'entraînement, tous les cœurs.
+func WithThreads(n int) Option { return func(*Model) { linalg.SetMaxWorkers(n) } }
 
 // WithPairs fait lire au modèle des paires (contexte, texte) : le prompt
 // système et le message, par exemple. Toutes les entrées sont alors encodées
@@ -357,7 +363,7 @@ func (m *Model) Save(dir string) error {
 }
 
 // Load lit un modèle écrit par Save.
-func Load(dir string) (*Model, error) {
+func Load(dir string, opts ...Option) (*Model, error) {
 	b, err := os.ReadFile(filepath.Join(dir, fileMeta))
 	if err != nil {
 		return nil, err
@@ -426,6 +432,9 @@ func Load(dir string) (*Model, error) {
 			t = 1
 		}
 		m.temps = append(m.temps, t)
+	}
+	for _, o := range opts {
+		o(m)
 	}
 	return m, nil
 }

@@ -48,27 +48,74 @@ func newModelBackend(m *indecis.Model, question string) (*modelBackend, error) {
 
 func (b *modelBackend) Info() detector.ModelInfo { return b.info }
 
+// Fenêtres des segments longs, en caractères : le modèle ne lit qu'environ
+// 256 tokens par entrée, une injection en fin de page lui échapperait.
+const (
+	windowRunes  = 800
+	overlapRunes = 150
+)
+
+// windows découpe un texte long en fenêtres qui se chevauchent, coupées sur
+// une espace quand c'est possible.
+func windows(text string) []string {
+	r := []rune(text)
+	if len(r) <= windowRunes {
+		return []string{text}
+	}
+	var out []string
+	for start := 0; start < len(r); {
+		end := min(start+windowRunes, len(r))
+		if end < len(r) {
+			for cut := end; cut > start+windowRunes/2; cut-- {
+				if r[cut] == ' ' || r[cut] == '\n' {
+					end = cut
+					break
+				}
+			}
+		}
+		out = append(out, string(r[start:end]))
+		if end == len(r) {
+			break
+		}
+		start = max(end-overlapRunes, start+1)
+	}
+	return out
+}
+
 func (b *modelBackend) Score(ctx context.Context, segments []detector.Segment) ([]detector.Score, error) {
-	inputs := make([]indecis.Input, len(segments))
+	var inputs []indecis.Input
+	owner := []int{}
 	for i, s := range segments {
-		inputs[i].Text = s.Text
-		// Un modèle sans paires ne sait pas lire le contexte.
-		if b.m.Paired() {
-			inputs[i].Context = s.Context
+		for _, w := range windows(s.Text) {
+			in := indecis.Input{Text: w}
+			// Un modèle sans paires ne sait pas lire le contexte.
+			if b.m.Paired() {
+				in.Context = s.Context
+			}
+			inputs = append(inputs, in)
+			owner = append(owner, i)
 		}
 	}
 	logits, err := b.m.LogitsInputs(ctx, inputs...)
 	if err != nil {
 		return nil, err
 	}
+	// Un segment vaut sa fenêtre la plus suspecte.
 	out := make([]detector.Score, len(segments))
-	for i, l := range logits {
-		out[i].Logit = l[b.question][0]
+	seen := make([]bool, len(segments))
+	for j, l := range logits {
+		i := owner[j]
+		z := l[b.question][0]
+		if seen[i] && z <= out[i].Logit {
+			continue
+		}
+		seen[i] = true
+		out[i].Logit = z
 		if b.category != "" {
-			z := l[b.category]
+			c := l[b.category]
 			best := 0
-			for k := range z {
-				if z[k] > z[best] {
+			for k := range c {
+				if c[k] > c[best] {
 					best = k
 				}
 			}

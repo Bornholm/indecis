@@ -3,7 +3,24 @@ package linalg
 import (
 	"runtime"
 	"sync"
+	"sync/atomic"
 )
+
+var maxWorkers atomic.Int64
+
+// SetMaxWorkers borne le nombre de goroutines de calcul (0 : GOMAXPROCS).
+// Pour une requête isolée sur un processeur de portable, un seul cœur
+// rapide bat souvent tous les cœurs réunis : la fréquence baisse quand
+// plusieurs cœurs calculent, et les cœurs économes sont plus lents.
+func SetMaxWorkers(n int) { maxWorkers.Store(int64(max(n, 0))) }
+
+// Workers retourne le nombre de goroutines de calcul autorisées.
+func Workers() int {
+	if n := int(maxWorkers.Load()); n > 0 {
+		return min(n, runtime.GOMAXPROCS(0))
+	}
+	return runtime.GOMAXPROCS(0)
+}
 
 // Parallel découpe [0, n) en tranches d'au moins grain éléments et appelle
 // fn sur chacune, en parallèle. Les tranches sont disjointes.
@@ -11,7 +28,7 @@ func Parallel(n, grain int, fn func(lo, hi int)) {
 	if n <= 0 {
 		return
 	}
-	workers := runtime.GOMAXPROCS(0)
+	workers := Workers()
 	if grain < 1 {
 		grain = 1
 	}

@@ -17,7 +17,6 @@
 package linalg
 
 import (
-	"runtime"
 	"sync"
 	"sync/atomic"
 )
@@ -28,9 +27,8 @@ const (
 	mc = 72  // lignes de A par tâche (multiple de mr)
 	nc = 256 // colonnes de C par tâche (arrondi à un multiple de nr)
 
-	// En dessous de ce nombre de multiplications-additions, le calcul reste
-	// sur la goroutine appelante : lancer des workers coûterait plus cher.
-	parallelThreshold = 1 << 18
+	// Multiplications-additions minimales par worker (~0,2 ms en AVX2).
+	macsPerWorker = 8 << 20
 )
 
 // MatMul calcule C = op(A)·op(B), ou C += op(A)·op(B) si accumulate.
@@ -59,7 +57,7 @@ func MatMul(c, a, b []float32, m, k, n int, transA, transB, accumulate bool) {
 		accumulate: accumulate,
 		nr:         nr(),
 	}
-	g.run(runtime.GOMAXPROCS(0))
+	g.run(Workers())
 }
 
 // MatMulSerial est MatMul sans parallélisme interne, pour les appels faits
@@ -103,15 +101,20 @@ type gemm struct {
 	next           atomic.Int64
 }
 
-func (g *gemm) run(maxWorkers int) {
+func (g *gemm) run(limit int) {
 	g.ncr = (nc + g.nr - 1) / g.nr * g.nr
 	g.tasksM = (g.m + mc - 1) / mc
-	// Peu de lignes (une phrase seule en inférence) : on découpe plus
-	// finement les colonnes pour occuper tous les cœurs.
-	if g.tasksM < maxWorkers && g.m*g.n*g.k >= parallelThreshold {
-		// Quatre tâches par cœur : sur un processeur hybride, les cœurs
+	// Autant de workers que le calcul en justifie : lancer et synchroniser
+	// une goroutine coûte plus que quelques millions de multiplications.
+	// Une phrase seule (28 tokens) tourne ainsi deux fois plus vite sur un
+	// cœur que répartie sur quatorze.
+	active := min(limit, max(1, g.m*g.n*g.k/macsPerWorker))
+	// Peu de lignes : on découpe plus finement les colonnes pour occuper
+	// les workers retenus.
+	if g.tasksM < active && active > 1 {
+		// Quatre tâches par worker : sur un processeur hybride, les cœurs
 		// lents (E, LP-E) n'en retiennent qu'une petite part.
-		want := (4*maxWorkers + g.tasksM - 1) / g.tasksM
+		want := (4*active + g.tasksM - 1) / g.tasksM
 		cols := (g.n + want - 1) / want
 		g.ncr = max(g.nr, (cols+g.nr-1)/g.nr*g.nr)
 	}
@@ -121,10 +124,7 @@ func (g *gemm) run(maxWorkers int) {
 	g.bpack = getBuf(panels * g.nr * min(kc, g.k))
 	defer putBuf(g.bpack)
 
-	workers := 1
-	if g.m*g.n*g.k >= parallelThreshold {
-		workers = min(maxWorkers, g.tasksM*g.tasksN)
-	}
+	workers := min(active, g.tasksM*g.tasksN)
 
 	for g.pc = 0; g.pc < g.k; g.pc += kc {
 		g.kb = min(kc, g.k-g.pc)

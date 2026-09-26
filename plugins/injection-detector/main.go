@@ -3,6 +3,7 @@ package main
 import (
 	"log/slog"
 	"os"
+	"strconv"
 
 	"github.com/xolo-gateway/xolo/pkg/pluginsdk"
 
@@ -32,7 +33,13 @@ func main() {
 }
 
 func loadBackend(dir, question string) (*modelBackend, error) {
-	m, err := indecis.Load(dir)
+	// Un cœur par requête : chaque requête isolée est plus rapide ainsi, et
+	// les requêtes concurrentes occupent les autres cœurs.
+	threads := 1
+	if v, err := strconv.Atoi(os.Getenv("INDECIS_THREADS")); err == nil && v >= 0 {
+		threads = v
+	}
+	m, err := indecis.Load(dir, indecis.WithThreads(threads))
 	if err != nil {
 		return nil, err
 	}
