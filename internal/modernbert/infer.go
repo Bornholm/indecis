@@ -57,11 +57,37 @@ func (m *Model) embRow(id int32, dst []float32) {
 	m.embTable.Row(id, dst)
 }
 
-// packedLayer contient les matrices d'une couche empaquetées pour le
-// produit matriciel.
-type packedLayer struct {
-	qkv, o, i, oMLP *linalg.PackedB
+// packedMat est une matrice de poids prête pour le produit : empaquetée en
+// float32, ou quantifiée en int8 (voir SetInt8).
+type packedMat struct {
+	f *linalg.PackedB
+	q *linalg.PackedB8
 }
+
+func packMat(w []float32, k, n int, int8 bool) packedMat {
+	if int8 {
+		return packedMat{q: linalg.PackB8(w, k, n, true)}
+	}
+	return packedMat{f: linalg.PackB(w, k, n, true)}
+}
+
+// mul calcule c = a·Wᵀ (ou c += si accumulate), a ayant m lignes.
+func (p packedMat) mul(c, a []float32, m int, accumulate bool) {
+	if p.q != nil {
+		linalg.MatMul8(c, a, p.q, m, accumulate)
+		return
+	}
+	linalg.MatMulPacked(c, a, p.f, m, accumulate)
+}
+
+// packedLayer contient les matrices d'une couche prêtes pour le produit.
+type packedLayer struct {
+	qkv, o, i, oMLP packedMat
+}
+
+// WeightSource relit une matrice de poids par son nom, dans le fichier du
+// modèle par exemple.
+type WeightSource func(name string) ([]float32, error)
 
 // Invalidate signale que les poids ont changé : les matrices empaquetées
 // pour l'inférence sont à refaire. L'entraînement l'appelle après chaque
@@ -76,11 +102,28 @@ func (m *Model) Invalidate() {
 // SetCompact fait garder les matrices des couches sous leur seule forme
 // empaquetée, dès la première inférence : elles ne sont plus en double. Les
 // fonctions qui lisent les poids (Params, Forward, Materialize) les
-// reconstruisent au besoin, et le mode compact prend fin.
-func (m *Model) SetCompact() {
+// reconstruisent au besoin, depuis source si elle est fournie, et le mode
+// compact prend fin. En int8, les matrices ne sont libérées que si source
+// est fournie : la quantification ne se défait pas.
+func (m *Model) SetCompact(source WeightSource) {
 	m.packMu.Lock()
 	m.compact = true
+	m.source = source
 	m.packMu.Unlock()
+}
+
+// SetInt8 fait calculer les produits par les couches en int8 (poids par
+// canal, activations par token). Sans noyau matériel (linalg.Int8Fast),
+// c'est exact mais lent.
+func (m *Model) SetInt8(on bool) {
+	m.packMu.Lock()
+	defer m.packMu.Unlock()
+	if m.int8 == on {
+		return
+	}
+	m.restoreLocked()
+	m.int8 = on
+	m.packed = nil
 }
 
 // restoreWeights reconstruit les matrices des couches si SetCompact les a
@@ -93,19 +136,32 @@ func (m *Model) restoreWeights() {
 
 func (m *Model) restoreLocked() {
 	m.compact = false
-	if m.packed == nil {
-		return
-	}
 	for l := range m.Layers {
-		L, p := &m.Layers[l], m.packed[l]
+		L := &m.Layers[l]
+		var p packedLayer
+		if m.packed != nil {
+			p = m.packed[l]
+		}
 		for _, x := range []struct {
 			w *Param
-			p *linalg.PackedB
+			p packedMat
 		}{{L.Wqkv, p.qkv}, {L.Wo, p.o}, {L.Wi, p.i}, {L.WoMLP, p.oMLP}} {
-			if x.w.W == nil {
-				x.w.W = make([]float32, x.w.Shape[0]*x.w.Shape[1])
-				x.p.Unpack(x.w.W, true)
+			if x.w.W != nil {
+				continue
 			}
+			if m.source != nil {
+				w, err := m.source(x.w.Name)
+				if err == nil && len(w) != x.w.Shape[0]*x.w.Shape[1] {
+					err = fmt.Errorf("%d valeurs", len(w))
+				}
+				if err != nil {
+					panic(fmt.Sprintf("modernbert: relecture de %s : %v", x.w.Name, err))
+				}
+				x.w.W = w
+				continue
+			}
+			x.w.W = make([]float32, x.w.Shape[0]*x.w.Shape[1])
+			x.p.f.Unpack(x.w.W, true)
 		}
 	}
 }
@@ -120,12 +176,12 @@ func (m *Model) packs() []packedLayer {
 	p := make([]packedLayer, len(m.Layers))
 	for l, L := range m.Layers {
 		p[l] = packedLayer{
-			qkv:  linalg.PackB(L.Wqkv.W, H, 3*H, true),
-			o:    linalg.PackB(L.Wo.W, H, H, true),
-			i:    linalg.PackB(L.Wi.W, H, 2*I, true),
-			oMLP: linalg.PackB(L.WoMLP.W, I, H, true),
+			qkv:  packMat(L.Wqkv.W, H, 3*H, m.int8),
+			o:    packMat(L.Wo.W, H, H, m.int8),
+			i:    packMat(L.Wi.W, H, 2*I, m.int8),
+			oMLP: packMat(L.WoMLP.W, I, H, m.int8),
 		}
-		if m.compact {
+		if m.compact && (m.source != nil || !m.int8) {
 			L.Wqkv.W, L.Wo.W, L.Wi.W, L.WoMLP.W = nil, nil, nil, nil
 		}
 	}
@@ -187,14 +243,14 @@ func (m *Model) Encode(b Batch) ([]float32, error) {
 			layerNormInfer(xn, x, L.AttnNorm.W, N, H, cfg.NormEps)
 			attnIn = xn
 		}
-		linalg.MatMulPacked(ws.qkv, attnIn, p.qkv, N, false)
+		p.qkv.mul(ws.qkv, attnIn, N, false)
 		m.attentionInfer(l, b, ws.qkv, ws.ctx)
-		linalg.MatMulPacked(x, ws.ctx, p.o, N, true) // x += attention
+		p.o.mul(x, ws.ctx, N, true) // x += attention
 
 		layerNormInfer(xn, x, L.MLPNorm.W, N, H, cfg.NormEps)
-		linalg.MatMulPacked(ws.z, xn, p.i, N, false)
+		p.i.mul(ws.z, xn, N, false)
 		gluInfer(ws.g, ws.z, N, I)
-		linalg.MatMulPacked(x, ws.g, p.oMLP, N, true) // x += MLP
+		p.oMLP.mul(x, ws.g, N, true) // x += MLP
 	}
 	layerNormInfer(xn, x, m.FinalNorm.W, N, H, cfg.NormEps)
 	return MeanPool(xn, b, H), nil

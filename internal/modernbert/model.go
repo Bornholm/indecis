@@ -102,7 +102,9 @@ type Model struct {
 	// refaire.
 	packMu  sync.Mutex
 	packed  []packedLayer
-	compact bool // voir SetCompact
+	compact bool         // voir SetCompact
+	source  WeightSource // voir SetCompact
+	int8    bool         // voir SetInt8
 }
 
 // Load lit config.json et model.safetensors dans dir.

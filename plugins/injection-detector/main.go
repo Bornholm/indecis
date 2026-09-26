@@ -39,7 +39,14 @@ func loadBackend(dir, question string) (*modelBackend, error) {
 	if v, err := strconv.Atoi(os.Getenv("INDECIS_THREADS")); err == nil && v >= 0 {
 		threads = v
 	}
-	m, err := indecis.Load(dir, indecis.WithThreads(threads))
+	opts := []indecis.Option{indecis.WithThreads(threads)}
+	// Couches en int8 quand le processeur a AVX-VNNI : deux fois plus
+	// rapide, décisions inchangées sur la référence. INDECIS_INT8=0 revient
+	// au float32.
+	if os.Getenv("INDECIS_INT8") != "0" {
+		opts = append(opts, indecis.WithInt8())
+	}
+	m, err := indecis.Load(dir, opts...)
 	if err != nil {
 		return nil, err
 	}

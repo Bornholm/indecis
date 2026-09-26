@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/bornholm/indecis"
+	"github.com/bornholm/indecis/dataset"
 )
 
 func main() {
@@ -27,6 +28,8 @@ func main() {
 	iters := flag.Int("n", 50, "requêtes par mesure")
 	cpuprof := flag.String("cpuprofile", "", "profil CPU des requêtes isolées")
 	memprof := flag.String("memprofile", "", "profil du tas après la première requête")
+	int8 := flag.Bool("int8", false, "couches en int8 (AVX-VNNI)")
+	eval := flag.String("eval", "", "jeux de référence (JSONL, séparés par des virgules) à évaluer")
 	flag.Parse()
 	if *dir == "" {
 		log.Fatal("-model est obligatoire")
@@ -34,7 +37,11 @@ func main() {
 
 	before := rss()
 	t0 := time.Now()
-	m, err := indecis.Load(*dir, indecis.WithThreads(*threads))
+	opts := []indecis.Option{indecis.WithThreads(*threads)}
+	if *int8 {
+		opts = append(opts, indecis.WithInt8())
+	}
+	m, err := indecis.Load(*dir, opts...)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -89,6 +96,25 @@ func main() {
 			ms(lat[len(lat)/2]), ms(lat[len(lat)*9/10]))
 	}
 	fmt.Printf("mémoire finale  RSS %s, pic %s\n", mib(rss()), mib(peak()))
+
+	if *eval != "" {
+		var ex []dataset.Example
+		for _, p := range strings.Split(*eval, ",") {
+			e, err := dataset.ReadFile(p)
+			if err != nil {
+				log.Fatal(err)
+			}
+			ex = append(ex, e...)
+		}
+		indecis.WithThreads(0)(m)
+		metrics, err := m.Evaluate(ctx, ex)
+		if err != nil {
+			log.Fatal(err)
+		}
+		for _, mt := range metrics {
+			fmt.Println(mt)
+		}
+	}
 }
 
 func ms(d time.Duration) float64 { return float64(d.Microseconds()) / 1000 }

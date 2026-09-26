@@ -82,6 +82,16 @@ func WithMaxLen(n int) Option { return func(m *Model) { m.maxLen = n } }
 // 1 est souvent le plus rapide ; pour l'entraînement, tous les cœurs.
 func WithThreads(n int) Option { return func(*Model) { linalg.SetMaxWorkers(n) } }
 
+// WithInt8 fait calculer les couches de l'encodeur en int8 (poids par
+// canal, activations par token) quand le processeur dispose d'AVX-VNNI ;
+// sans lui, l'option est sans effet. L'inférence est environ deux fois plus
+// rapide et les poids des couches quatre fois plus petits ; les décisions
+// du modèle prompt-injection sont inchangées sur sa référence. L'écart reste
+// à vérifier pour chaque modèle (Evaluate avec et sans l'option).
+func WithInt8() Option {
+	return func(m *Model) { m.enc.SetInt8(linalg.Int8Fast()) }
+}
+
 // WithPairs fait lire au modèle des paires (contexte, texte) : le prompt
 // système et le message, par exemple. Toutes les entrées sont alors encodées
 // en paire, contexte vide compris, pour que l'entraînement et l'inférence
@@ -458,7 +468,10 @@ func Load(dir string, opts ...Option) (*Model, error) {
 	}
 	// Un modèle chargé sert d'abord à l'inférence : ses matrices ne sont
 	// gardées qu'empaquetées (voir modernbert.SetCompact).
-	enc.SetCompact()
+	enc.SetCompact(func(name string) ([]float32, error) {
+		t, _, err := f.Tensor(name)
+		return t.Data, err
+	})
 	if table != nil {
 		enc.SetEmbeddingTable(table)
 	} else if rows, ok, _ := f.Tensor(exactRows); ok {

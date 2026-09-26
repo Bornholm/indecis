@@ -2,6 +2,7 @@ package modernbert
 
 import (
 	"fmt"
+	"math"
 	"testing"
 )
 
@@ -137,7 +138,7 @@ func TestCompact(t *testing.T) {
 	want := append([]float32(nil), m.Layers[2].Wi.W...)
 	before, _ := m.Encode(b)
 	m.Invalidate()
-	m.SetCompact()
+	m.SetCompact(nil)
 	got, _ := m.Encode(b)
 	if maxAbsDiff(got, before) != 0 {
 		t.Fatal("le mode compact change le résultat")
@@ -152,5 +153,35 @@ func TestCompact(t *testing.T) {
 	again, _ := m.Encode(b)
 	if maxAbsDiff(again, before) != 0 {
 		t.Fatal("résultat différent après reconstruction")
+	}
+}
+
+// En int8, la sortie reste proche de la référence float32.
+func TestEncodeInt8(t *testing.T) {
+	m, tok := loadBekko(t)
+	fx := readForwardFixtures(t)
+	var seqs [][]int32
+	for _, c := range fx.Cases {
+		seqs = append(seqs, tok.Encode(c.Text))
+	}
+	b := NewBatch(seqs, m.Cfg.PadID)
+	want, _ := m.Encode(b)
+	m.SetInt8(true)
+	defer m.SetInt8(false)
+	got, _ := m.Encode(b)
+	H := m.Cfg.Hidden
+	for i := range fx.Cases {
+		var dot, na, nb float64
+		for j := 0; j < H; j++ {
+			x, y := float64(got[i*H+j]), float64(want[i*H+j])
+			dot += x * y
+			na += x * x
+			nb += y * y
+		}
+		cos := dot / math.Sqrt(na*nb)
+		t.Logf("cas %d : cosinus int8/float32 %.6f", i, cos)
+		if cos < 0.99 { // 0,994 au pire sur les cas de référence
+			t.Errorf("cas %d : cosinus %.6f", i, cos)
+		}
 	}
 }

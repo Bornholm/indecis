@@ -62,3 +62,37 @@ func microKernel(kb int, ap, bp, tile []float32, nr int) {
 	}
 	microKernelGo(kb, ap, bp, tile, nr)
 }
+
+//go:noescape
+func microKernelVNNI(kq int, ap *uint8, bp *int8, tile *int32)
+
+// vnni indique si le micro-noyau int8 AVX-VNNI (forme VEX) est utilisable.
+// INDECIS_NOASM=1 le désactive aussi.
+var vnni = avx2 && detectVNNI()
+
+func detectVNNI() bool {
+	maxLeaf, _, _, _ := cpuid(0, 0)
+	if maxLeaf < 7 {
+		return false
+	}
+	eax71, _, _, _ := cpuid(7, 1)
+	return eax71&(1<<4) != 0 // AVX-VNNI
+}
+
+// Int8Fast indique si MatMul8 dispose d'un noyau matériel. Sans lui, le
+// noyau portable est exact mais bien plus lent que MatMul.
+func Int8Fast() bool { return vnni }
+
+func microKernel8(kq int, ap []uint8, bp []int8, tile *[mr8 * nr8]int32) {
+	if vnni {
+		if kq == 0 {
+			*tile = [mr8 * nr8]int32{}
+			return
+		}
+		_ = ap[kq*mr8*4-1]
+		_ = bp[kq*nr8*4-1]
+		microKernelVNNI(kq, &ap[0], &bp[0], &tile[0])
+		return
+	}
+	microKernel8Go(kq, ap, bp, tile)
+}
