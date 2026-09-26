@@ -41,13 +41,31 @@ Toutes les questions sont répondues par **une seule passe de l'encodeur**. Chaq
 | `tokenizer` | Tokenizer BPE de la famille Gemma, en parité exacte avec `tokenizers` de Hugging Face |
 | `calibrate` | Log-odds, correction du prior de production, fusion de preuves |
 | `internal/modernbert` | Encodeur ModernBERT : forward et backward écrits à la main |
-| `internal/linalg` | GEMM packé (SIMD portable ou scalaire), parallélisme déterministe |
+| `internal/linalg` | GEMM packé (SIMD portable, AVX2 en assembleur ou scalaire), GEMM int8 AVX-VNNI, parallélisme déterministe |
 | `internal/optim` | AdamW, et Adam creux pour la table d'embeddings |
-| `internal/safetensors` | Lecture et écriture du format safetensors |
+| `internal/safetensors` | Lecture (projetée en mémoire) et écriture du format safetensors |
 
 Le backbone par défaut est [bekko-embedding-v1-a8m](https://huggingface.co/hotchpotch/bekko-embedding-v1-a8m) : ModernBERT 4 couches × 384, 7,7M paramètres actifs, multilingue, licence MIT. [a25m](https://huggingface.co/hotchpotch/bekko-embedding-v1-a25m) a la même architecture avec 13 couches et fonctionne sans changement de code.
 
 Les embeddings représentent 93 % des paramètres. Leur gradient est **creux** (seules les lignes des tokens présents dans le lot), et leur optimiseur est un Adam « paresseux » comme `torch.optim.SparseAdam`, sans weight decay. Sans cela, le gradient dense et les moments d'AdamW coûteraient 1,6 Go.
+
+## Inférence : vitesse et mémoire
+
+L'inférence a son propre chemin (`modernbert.Encode`) : rien n'est gardé pour la rétropropagation, les tampons sont réutilisés d'une requête à l'autre, les poids sont empaquetés une fois pour le produit matriciel, et `erf` et `exp` sont calculés en float32 (erreur < 5e-7). `Load` projette `model.safetensors` en mémoire : la table d'embeddings (93 % des poids) reste dans le fichier en bf16 et seules les pages des tokens rencontrés sont lues. Le tokenizer est lu en flux et tient dans 12 Mo.
+
+`WithInt8()` fait calculer les couches en int8 quand le processeur dispose d'AVX-VNNI (Intel depuis Alder Lake, AMD depuis Zen 4) : poids quantifiés par canal, activations par token, sommes entières exactes. Le micro-noyau 6×16 utilise `VPDPBUSD` en forme VEX, que l'assembleur Go ne sait pas encoder : `internal/linalg/gen_vnni.py` l'écrit octet par octet. Sur les 636 exemples de référence, les décisions sont inchangées (exactitude 92,1 → 92,3 %, AUC 0,963) ; l'écart reste à vérifier pour chaque modèle avec `tools/infbench -int8 -eval`.
+
+Modèle prompt-injection P4, un cœur d'un Core Ultra 7 265U (`go run ./tools/infbench -model … -int8`) :
+
+| | Avant (forward d'entraînement) | Chemin d'inférence | + int8 |
+| --- | --- | --- | --- |
+| 15 tokens | 10,7 ms | 4,9 ms | 2,1 ms |
+| 89 tokens | 27,7 ms | 19,6 ms | 12,2 ms |
+| 256 tokens | 79,8 ms | 57,4 ms | 40,8 ms |
+| Mémoire propre, modèle prêt | 486 Mo | 53 Mo | 32 Mo |
+| Pic au chargement | 1 037 Mo | 222 Mo | 164 Mo |
+
+Pour une requête isolée, un seul cœur est le plus rapide (`WithThreads(1)`) : sur un processeur hybride, plusieurs cœurs baissent la fréquence et les cœurs économes ralentissent l'ensemble. Les lots profitent de tous les cœurs.
 
 ## Générer des données
 
@@ -211,4 +229,4 @@ make plugin
 INDECIS_MODEL_DIR=~/.cache/indecis/runs/prompt-injection ./bin/injection-detector  # lancé par Xolo
 ```
 
-Il lit le modèle indiqué par `INDECIS_MODEL_DIR`, et la question noul par `INDECIS_QUESTION` (`injection` par défaut). S'il n'y a pas de modèle, ou si le modèle échoue, le plugin transmet le risque amont tel quel et signale `model_ready: false`. Mesuré à travers la vraie poignée de main go-plugin : 20 à 60 ms par requête. Une injection cachée dans un résultat d'outil est bien détectée, avec `segment: tool`.
+Il lit le modèle indiqué par `INDECIS_MODEL_DIR`, et la question noul par `INDECIS_QUESTION` (`injection` par défaut). Il calcule en int8 quand le processeur le permet (`INDECIS_INT8=0` pour revenir au float32), sur un cœur par requête (`INDECIS_THREADS`), et se préchauffe au démarrage. S'il n'y a pas de modèle, ou si le modèle échoue, le plugin transmet le risque amont tel quel et signale `model_ready: false`. Mesuré à travers la vraie poignée de main go-plugin : 20 à 60 ms par requête. Une injection cachée dans un résultat d'outil est bien détectée, avec `segment: tool`.
