@@ -1,0 +1,8 @@
+send_email	1
+delete_file	1
+transfer_funds	1
+execute_shell	1
+update_user_role	1
+post_message	1
+read_file	1
+create_api_key	1

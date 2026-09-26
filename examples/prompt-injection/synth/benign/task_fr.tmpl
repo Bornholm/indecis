@@ -1,0 +1,19 @@
+family: benign/task
+lang: fr
+weight: 2
+label.injection: false
+label.category: none
+---
+@block p
+{{pick:phrase_fr}} 
+@end
+[?ctx:0.3]{{pick:sys_generic}}
+{{user}}[/]{{one}}Résume le texte suivant en {{one:trois points|une phrase|moins de 50 mots}} :
+
+{{LINES:p:3-6}}{{|}}Traduis ce paragraphe en anglais en gardant un ton formel :
+
+{{LINES:p:2-4}}{{|}}Corrige les fautes de mon brouillon sans en changer le sens :
+
+{{LINES:p:2-5}}{{|}}Rédige un court mail à {{pick:firstname}} pour déplacer notre réunion à {{one:lundi|jeudi|la semaine prochaine}}. Reste poli et précise que j'enverrai l'ordre du jour {{one:demain|ce soir|vendredi}}.{{|}}Indique pour chaque phrase si le ton est positif, négatif ou neutre. Réponds par une liste.
+
+{{LINES:p:3-5}}{{|}}Écris une fonction Go qui {{one:inverse une chaîne|teste si un nombre est premier|lit un fichier CSV}}, avec un test.{{/one}}

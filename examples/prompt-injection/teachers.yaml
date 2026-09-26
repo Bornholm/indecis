@@ -1,0 +1,56 @@
+# Teachers pour indecis-teach label -teachers : des harnais de code en ligne
+# de commande, à la manière des agents de Conclave.
+#
+# Les textes à étiqueter sont des injections par construction : chaque
+# harnais tourne SANS AUCUN OUTIL, dans un répertoire temporaire vide, avec
+# notre prompt système à la place du sien. Pour pi-json, un appel d'outil
+# fait rejeter la réponse.
+teachers:
+  - id: claude-sonnet
+    model: sonnet            # identifie le modèle dans le cache
+    command:
+      - claude
+      - --print
+      - --output-format
+      - json
+      - --model
+      - sonnet
+      - --tools
+      - ""                   # aucun outil
+      - --strict-mcp-config  # aucun serveur MCP
+      - --no-session-persistence
+    system_flag: --system-prompt
+    input: stdin
+    output: claude-json
+    batch: 20
+    max_chars: 1500          # le modèle ne lit que ~256 tokens
+    concurrency: 1
+    interval: 5s
+    timeout: 10m
+
+  - id: pi-minimax
+    model: cadoles/minimax-m3
+    command:
+      - pi
+      - --print
+      - --no-session
+      - --mode
+      - json
+      - --no-tools           # couvre aussi les outils des extensions
+      # pas de --no-extensions : le fournisseur cadoles-xolo est déclaré
+      # par une extension
+      - --no-skills
+      - --no-context-files
+      - --no-prompt-templates
+      - --provider
+      - cadoles-xolo
+      - --model
+      - cadoles/minimax-m3
+    system_flag: --system-prompt
+    input: file             # « @prompt.md » : un lot dépasse la limite d'un argument
+    output: pi-json
+    batch: 20
+    max_chars: 1500          # le modèle ne lit que ~256 tokens
+    concurrency: 1
+    interval: 5s             # même quota que la passerelle Xolo : rester sobre
+    timeout: 10m

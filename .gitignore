@@ -1,0 +1,4 @@
+bin/
+tools/oracle/.venv/
+tools/oracle/__pycache__/
+.env

@@ -1,0 +1,218 @@
+package indecis
+
+import (
+	"math"
+	"math/rand"
+)
+
+// head est la couche de sortie d'une question, posée sur le vecteur poolé.
+//
+//   - Noul : un logit z = w·x + b ;
+//   - Choice : K logits z = W·x + b ;
+//   - Score : K−1 logits ordinaux z_k = w_k·x + b_k, avec P(niveau > k) =
+//     σ(z_k) (décomposition de Frank et Hall). Chaque seuil a son propre
+//     vecteur : avec un vecteur partagé (CORAL), séparer un niveau
+//     intermédiaire exige d'écarter les biais, ce qu'Adam fait au rythme
+//     d'environ lr par pas. La cohérence entre seuils est rétablie à la
+//     lecture (voir answer).
+type head struct {
+	q    Question
+	w    []float32 // [rows, H]
+	b    []float32 // [outs]
+	gw   []float32
+	gb   []float32
+	rows int // lignes de w : 1, ou K pour Choice
+	outs int // nombre de logits
+}
+
+func newHead(q Question, hidden int, rng *rand.Rand) *head {
+	h := &head{q: q}
+	switch q.Kind {
+	case Noul:
+		h.rows, h.outs = 1, 1
+	case Choice:
+		h.rows, h.outs = len(q.Options), len(q.Options)
+	case Score:
+		h.rows, h.outs = len(q.Options)-1, len(q.Options)-1
+	}
+	h.w = make([]float32, h.rows*hidden)
+	h.b = make([]float32, h.outs)
+	for i := range h.w {
+		h.w[i] = float32(rng.NormFloat64() * 0.02)
+	}
+	return h
+}
+
+func (h *head) enableGrad() {
+	if h.gw == nil {
+		h.gw = make([]float32, len(h.w))
+		h.gb = make([]float32, len(h.b))
+	}
+}
+
+func (h *head) zeroGrad() {
+	clear(h.gw)
+	clear(h.gb)
+}
+
+// logits calcule les logits d'un vecteur poolé x.
+func (h *head) logits(x []float32) []float64 {
+	H := len(x)
+	z := make([]float64, h.outs)
+	for r := 0; r < h.rows; r++ {
+		var s float64
+		for i, v := range h.w[r*H : (r+1)*H] {
+			s += float64(v) * float64(x[i])
+		}
+		z[r] = s + float64(h.b[r])
+	}
+	return z
+}
+
+// lossGrad retourne la perte pour la cible t (voir Question.target), et le
+// gradient de la perte par rapport aux logits.
+func (h *head) lossGrad(z, t []float64) (float64, []float64) {
+	dz := make([]float64, len(z))
+	var loss float64
+	switch h.q.Kind {
+	case Noul:
+		// BCE avec logits : softplus(z) − y·z
+		loss = softplus(z[0]) - t[0]*z[0]
+		dz[0] = sigmoid(z[0]) - t[0]
+	case Choice:
+		p := softmax(z)
+		for i := range z {
+			if t[i] > 0 {
+				loss -= t[i] * math.Log(max(p[i], 1e-300))
+			}
+			dz[i] = p[i] - t[i]
+		}
+	case Score:
+		level := int(t[0])
+		for k := range z {
+			y := 0.0
+			if level > k {
+				y = 1
+			}
+			loss += softplus(z[k]) - y*z[k]
+			dz[k] = sigmoid(z[k]) - y
+		}
+	}
+	return loss, dz
+}
+
+// backward accumule les gradients des poids et retourne dL/dx, pour un
+// gradient dz sur les logits de l'entrée x.
+func (h *head) backward(x []float32, dz []float64, dx []float32) {
+	H := len(x)
+	for r := 0; r < h.rows; r++ {
+		d := dz[r]
+		h.gb[r] += float32(d)
+		w := h.w[r*H : (r+1)*H]
+		gw := h.gw[r*H : (r+1)*H]
+		for i := range x {
+			gw[i] += float32(d * float64(x[i]))
+			dx[i] += float32(d * float64(w[i]))
+		}
+	}
+}
+
+// answer transforme les logits, divisés par la température, en réponse.
+func (h *head) answer(z []float64, temperature float64) Answer {
+	if temperature <= 0 {
+		temperature = 1
+	}
+	zt := make([]float64, len(z))
+	for i, v := range z {
+		zt[i] = v / temperature
+	}
+	a := Answer{Question: h.q.Name, Kind: h.q.Kind}
+	switch h.q.Kind {
+	case Noul:
+		a.P = sigmoid(zt[0])
+		a.Confidence = max(a.P, 1-a.P)
+	case Choice:
+		p := softmax(zt)
+		a.Probs = make(map[string]float64, len(p))
+		best := 0
+		for i, v := range p {
+			a.Probs[h.q.Options[i]] = v
+			if v > p[best] {
+				best = i
+			}
+		}
+		a.Choice = h.q.Options[best]
+		a.Confidence = p[best]
+	case Score:
+		// P(niveau > k), rendu monotone : un modèle ordinal peut produire
+		// de légères inversions entre seuils.
+		gt := make([]float64, len(zt))
+		for k, v := range zt {
+			gt[k] = sigmoid(v)
+			if k > 0 {
+				gt[k] = min(gt[k], gt[k-1])
+			}
+		}
+		levels := len(h.q.Options)
+		dist := make([]float64, levels)
+		for k := 0; k < levels; k++ {
+			above := 1.0
+			if k > 0 {
+				above = gt[k-1]
+			}
+			below := 0.0
+			if k < len(gt) {
+				below = gt[k]
+			}
+			dist[k] = above - below
+		}
+		a.Probs = make(map[string]float64, levels)
+		best := 0
+		for k, v := range dist {
+			a.Probs[h.q.Options[k]] = v
+			a.Score += float64(k) * v
+			if v > dist[best] {
+				best = k
+			}
+		}
+		a.Choice = h.q.Options[best]
+		a.Confidence = dist[best]
+	}
+	return a
+}
+
+func sigmoid(z float64) float64 {
+	if z >= 0 {
+		return 1 / (1 + math.Exp(-z))
+	}
+	e := math.Exp(z)
+	return e / (1 + e)
+}
+
+// softplus(z) = log(1 + e^z), stable pour les grands |z|.
+func softplus(z float64) float64 {
+	if z > 30 {
+		return z
+	}
+	if z < -30 {
+		return math.Exp(z)
+	}
+	return math.Log1p(math.Exp(z))
+}
+
+func softmax(z []float64) []float64 {
+	mx := math.Inf(-1)
+	for _, v := range z {
+		mx = max(mx, v)
+	}
+	p := make([]float64, len(z))
+	var sum float64
+	for i, v := range z {
+		p[i] = math.Exp(v - mx)
+		sum += p[i]
+	}
+	for i := range p {
+		p[i] /= sum
+	}
+	return p
+}

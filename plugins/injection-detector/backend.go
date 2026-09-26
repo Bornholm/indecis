@@ -1,0 +1,79 @@
+package main
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/bornholm/indecis"
+
+	"github.com/bornholm/indecis/plugins/injection-detector/internal/detector"
+)
+
+// modelBackend adapte un modèle indecis à detector.Backend : la question
+// noul donne le logit, la première question choice, s'il y en a une, la
+// catégorie.
+type modelBackend struct {
+	m        *indecis.Model
+	question string
+	category string
+	options  []string
+	info     detector.ModelInfo
+}
+
+func newModelBackend(m *indecis.Model, question string) (*modelBackend, error) {
+	b := &modelBackend{m: m, question: question}
+	found := false
+	for _, q := range m.Schema() {
+		switch {
+		case q.Name == question && q.Kind == indecis.Noul:
+			found = true
+		case q.Kind == indecis.Choice && b.category == "":
+			b.category, b.options = q.Name, q.Options
+		}
+	}
+	if !found {
+		return nil, fmt.Errorf("injection-detector : le modèle n'a pas de question noul %q", question)
+	}
+	prior, ok := m.Info().TrainPrior[question]
+	if !ok {
+		prior = 0.5
+	}
+	b.info = detector.ModelInfo{
+		Version:     fmt.Sprintf("%s/%d", m.Info().Backbone, m.Info().Steps),
+		TrainPrior:  prior,
+		Temperature: m.Temperatures()[question],
+	}
+	return b, nil
+}
+
+func (b *modelBackend) Info() detector.ModelInfo { return b.info }
+
+func (b *modelBackend) Score(ctx context.Context, segments []detector.Segment) ([]detector.Score, error) {
+	inputs := make([]indecis.Input, len(segments))
+	for i, s := range segments {
+		inputs[i].Text = s.Text
+		// Un modèle sans paires ne sait pas lire le contexte.
+		if b.m.Paired() {
+			inputs[i].Context = s.Context
+		}
+	}
+	logits, err := b.m.LogitsInputs(ctx, inputs...)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]detector.Score, len(segments))
+	for i, l := range logits {
+		out[i].Logit = l[b.question][0]
+		if b.category != "" {
+			z := l[b.category]
+			best := 0
+			for k := range z {
+				if z[k] > z[best] {
+					best = k
+				}
+			}
+			out[i].Category = b.options[best]
+		}
+	}
+	return out, nil
+}

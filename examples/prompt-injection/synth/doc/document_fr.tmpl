@@ -1,0 +1,12 @@
+family: doc/document
+lang: fr
+weight: 2
+label.injection: false
+label.category: none
+---
+@block p
+{{pick:phrase_fr}} 
+@end
+{{one:Compte rendu de réunion|Note interne|Rapport trimestriel|Courriel}} – {{pick:company}}
+
+{{LINES:p:2-5}}{{include:attack/*|p=0.3}}
