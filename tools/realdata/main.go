@@ -53,6 +53,7 @@ func main() {
 	out := flag.String("out", "", "répertoire de sortie")
 	exclude := flag.String("exclude", "", "jeux d'évaluation à exclure, séparés par des virgules")
 	only := flag.String("only", "", "ne collecter que ces sorties (ex. spml,oasst2), séparées par des virgules")
+	salt := flag.String("salt", "", "change les pages tirées, pour un échantillon distinct du premier")
 	flag.Parse()
 	if *out == "" {
 		log.Fatal("-out est obligatoire")
@@ -146,7 +147,7 @@ func main() {
 		if *only != "" && !strings.Contains(","+*only+",", ","+s.out+",") {
 			continue
 		}
-		ex, dropped, err := collect(ctx, s, index)
+		ex, dropped, err := collect(ctx, s, index, *salt)
 		if err != nil {
 			log.Fatalf("%s/%s : %v", s.name, s.config, err)
 		}
@@ -159,7 +160,7 @@ func main() {
 	}
 }
 
-func collect(ctx context.Context, s source, index *ngramIndex) ([]dataset.Example, int, error) {
+func collect(ctx context.Context, s source, index *ngramIndex, salt string) ([]dataset.Example, int, error) {
 	pages := (s.total + 99) / 100
 	var offsets []int
 	if s.pages == 0 || s.pages >= pages {
@@ -168,7 +169,7 @@ func collect(ctx context.Context, s source, index *ngramIndex) ([]dataset.Exampl
 		}
 	} else {
 		h := fnv.New64a()
-		fmt.Fprint(h, s.name, s.config)
+		fmt.Fprint(h, s.name, s.config, salt)
 		for _, p := range rand.New(rand.NewSource(int64(h.Sum64()))).Perm(pages)[:s.pages] {
 			offsets = append(offsets, p*100)
 		}

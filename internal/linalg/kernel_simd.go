@@ -7,25 +7,25 @@ import "simd"
 // Accelerated indique si les noyaux SIMD sont compilés.
 const Accelerated = true
 
-// nr retourne la largeur d'une tuile : deux vecteurs. La longueur des
+// nrGo retourne la largeur d'une tuile : deux vecteurs. La longueur des
 // vecteurs n'est connue qu'à l'exécution (128 bits en émulation ou sur Neon,
 // 256 en AVX2, 512 en AVX-512), et ne change pas pendant l'exécution.
 //
 // Ce n'est pas une variable de package : la doc de simd signale que les
 // initialiseurs globaux dépendant du SIMD ne fonctionnent pas.
-func nr() int {
+func nrGo() int {
 	return 2 * simd.BroadcastFloat32s(0).Len()
 }
 
-// microKernel n'est jamais inliné : une fonction SIMD inlinée dans une
+// microKernelGo n'est jamais inliné : une fonction SIMD inlinée dans une
 // closure fait planter le compilateur (Go 1.27, GOEXPERIMENT=simd).
 //
-// microKernel calcule la tuile mr×nr = Σ_q ap[q]ᵀ·bp[q] et l'écrit dans tile
+// microKernelGo calcule la tuile mr×nr = Σ_q ap[q]ᵀ·bp[q] et l'écrit dans tile
 // (row-major, pas nr). 12 accumulateurs + 2 vecteurs de B + 1 broadcast :
 // 15 registres, ce que permettent les 16 registres ymm d'AVX2.
 //
 //go:noinline
-func microKernel(kb int, ap, bp, tile []float32, nr int) {
+func microKernelGo(kb int, ap, bp, tile []float32, nr int) {
 	V := nr / 2
 	var c00, c01, c10, c11, c20, c21, c30, c31, c40, c41, c50, c51 simd.Float32s
 	for q := 0; q < kb; q++ {
