@@ -200,3 +200,14 @@ func TestUserMarkSplitsContext(t *testing.T) {
 		t.Fatalf("got %+v, %v", h, err)
 	}
 }
+
+func TestInlineNewline(t *testing.T) {
+	c := corpus(t, map[string]string{"a.tmpl": "family: a\n---\nun{{one:\\n}}deux"})
+	ex, err := c.Generate(1, Options{Seed: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ex[0].Text != "un\ndeux" {
+		t.Fatalf("%q", ex[0].Text)
+	}
+}

@@ -139,7 +139,14 @@ func TestMatMulPacked_MatchesMatMul(t *testing.T) {
 			want := make([]float32, m*n)
 			MatMul(want, a, b, m, k, n, false, transB, false)
 			p := PackB(b, k, n, transB)
+			orig := append([]float32(nil), b...)
 			clear(b) // le paquet ne dépend plus de b
+			p.Unpack(b, transB)
+			for i := range b {
+				if b[i] != orig[i] {
+					t.Fatalf("%v transB=%v : Unpack [%d] %v, attendu %v", s, transB, i, b[i], orig[i])
+				}
+			}
 			got := make([]float32, m*n)
 			MatMulPacked(got, a, p, m, false)
 			for i := range got {

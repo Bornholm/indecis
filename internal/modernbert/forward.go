@@ -76,6 +76,7 @@ func (m *Model) Forward(b Batch) (*State, error) {
 			return nil, fmt.Errorf("modernbert: id %d hors vocabulaire", id)
 		}
 	}
+	m.restoreWeights()
 	s := &State{Batch: b, N: N}
 
 	s.emb = make([]float32, N*H)

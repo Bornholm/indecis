@@ -161,3 +161,15 @@ func TestEncodePairTruncation(t *testing.T) {
 		t.Fatal("début du contexte perdu")
 	}
 }
+
+// BenchmarkBPE mesure le BPE hors cache, sur des mots de plusieurs langues.
+func BenchmarkBPE(b *testing.B) {
+	tok := bekko(b)
+	words := strings.Fields("▁Ignore ▁instructions ▁précédentes ▁Systemanweisungen ▁facturation ▁unbelievably ▁configuración ▁프롬프트 ▁подсказку ▁antidisestablishmentarianism")
+	b.ResetTimer()
+	for range b.N {
+		for _, w := range words {
+			tok.bpe(w)
+		}
+	}
+}

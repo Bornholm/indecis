@@ -456,6 +456,9 @@ func Load(dir string, opts ...Option) (*Model, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Un modèle chargé sert d'abord à l'inférence : ses matrices ne sont
+	// gardées qu'empaquetées (voir modernbert.SetCompact).
+	enc.SetCompact()
 	if table != nil {
 		enc.SetEmbeddingTable(table)
 	} else if rows, ok, _ := f.Tensor(exactRows); ok {

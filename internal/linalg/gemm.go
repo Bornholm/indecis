@@ -294,6 +294,30 @@ func PackB(b []float32, k, n int, transB bool) *PackedB {
 	return p
 }
 
+// Unpack réécrit B, sous la forme donnée à PackB, à partir du paquet.
+func (p *PackedB) Unpack(b []float32, transB bool) {
+	k, n, nr := p.k, p.n, p.nr
+	if len(b) < k*n {
+		panic("linalg: Unpack: slice too short")
+	}
+	for bi, blk := range p.blocks {
+		pc := bi * kc
+		kb := min(kc, k-pc)
+		for j := 0; j < n; j++ {
+			panel := blk[(j/nr)*nr*kb:]
+			c := j % nr
+			for q := 0; q < kb; q++ {
+				v := panel[q*nr+c]
+				if transB {
+					b[j*k+pc+q] = v
+				} else {
+					b[(pc+q)*n+j] = v
+				}
+			}
+		}
+	}
+}
+
 // Size est le nombre de float32 occupés.
 func (p *PackedB) Size() int {
 	n := 0

@@ -35,9 +35,10 @@ const metaspace = "▁"
 
 // Tokenizer est sûr pour un usage concurrent.
 type Tokenizer struct {
-	vocab   map[string]int32
-	tokens  []string
-	merges  map[uint64]merge
+	vocab   *strTable        // chaînes du vocabulaire BPE, par id
+	names   map[int32]string // tokens ajoutés, s'ils diffèrent du vocabulaire
+	size    int              // nombre d'ids
+	merges  mergeTable
 	bytes   [256]int32 // id de <0xXX>, -1 si absent
 	unk     int32
 	bos     int32
@@ -152,28 +153,39 @@ func Parse(data []byte) (*Tokenizer, error) {
 	}
 
 	t := &Tokenizer{
-		vocab:  f.Model.Vocab,
-		merges: make(map[uint64]merge),
-		added:  make(map[byte][]addedToken),
-		cache:  make(map[string][]int32),
+		names: make(map[int32]string),
+		added: make(map[byte][]addedToken),
+		cache: make(map[string][]int32),
 	}
 	maxID := int32(-1)
-	for _, id := range t.vocab {
+	for _, id := range f.Model.Vocab {
+		if id < 0 {
+			return nil, fmt.Errorf("tokenizer: id %d négatif", id)
+		}
 		maxID = max(maxID, id)
 	}
 	for _, a := range f.AddedTokens {
 		maxID = max(maxID, a.ID)
 	}
-	t.tokens = make([]string, maxID+1)
-	for s, id := range t.vocab {
-		t.tokens[id] = s
+	byID := make([]string, maxID+1)
+	for s, id := range f.Model.Vocab {
+		if byID[id] != "" {
+			return nil, fmt.Errorf("tokenizer: id %d attribué deux fois", id)
+		}
+		byID[id] = s
 	}
+	t.vocab = newStrTable(byID)
+	t.size = len(byID)
+	vocab := f.Model.Vocab
+	f.Model.Vocab = nil
 
 	for _, a := range f.AddedTokens {
 		if a.Normalized || a.SingleWord || a.Content == "" {
 			return nil, fmt.Errorf("tokenizer: added token %q: normalized/single_word non pris en charge", a.Content)
 		}
-		t.tokens[a.ID] = a.Content
+		if byID[a.ID] != a.Content {
+			t.names[a.ID] = a.Content
+		}
 		first := a.Content[0]
 		t.added[first] = append(t.added[first], addedToken{content: a.Content, id: a.ID, lstrip: a.LStrip, rstrip: a.RStrip})
 	}
@@ -195,7 +207,7 @@ func Parse(data []byte) (*Tokenizer, error) {
 		t.pad = 0
 	}
 	for i := range t.bytes {
-		id, ok := t.vocab[fmt.Sprintf("<0x%02X>", i)]
+		id, ok := t.vocab.lookup(fmt.Sprintf("<0x%02X>", i))
 		if !ok {
 			id = -1
 		}
@@ -206,18 +218,17 @@ func Parse(data []byte) (*Tokenizer, error) {
 	if err != nil {
 		return nil, err
 	}
+	entries := make([]mergeEntry, 0, len(pairs))
 	for rank, p := range pairs {
-		a, okA := t.vocab[p[0]]
-		b, okB := t.vocab[p[1]]
-		id, okM := t.vocab[p[0]+p[1]]
+		a, okA := vocab[p[0]]
+		b, okB := vocab[p[1]]
+		id, okM := vocab[p[0]+p[1]]
 		if !okA || !okB || !okM {
 			return nil, fmt.Errorf("tokenizer: merge %q %q hors vocabulaire", p[0], p[1])
 		}
-		key := pairKey(a, b)
-		if _, dup := t.merges[key]; !dup {
-			t.merges[key] = merge{rank: int32(rank), id: id}
-		}
+		entries = append(entries, mergeEntry{key: pairKey(a, b), m: merge{rank: int32(rank), id: id}})
 	}
+	t.merges = newMergeTable(entries)
 	return t, nil
 }
 
@@ -273,7 +284,7 @@ func parseMerges(raw json.RawMessage) ([][2]string, error) {
 func pairKey(a, b int32) uint64 { return uint64(uint32(a))<<32 | uint64(uint32(b)) }
 
 func (t *Tokenizer) lookup(s string) (int32, bool) {
-	if id, ok := t.vocab[s]; ok {
+	if id, ok := t.vocab.lookup(s); ok {
 		return id, true
 	}
 	for _, list := range t.added {
@@ -287,14 +298,17 @@ func (t *Tokenizer) lookup(s string) (int32, bool) {
 }
 
 // VocabSize est le nombre d'ids possibles.
-func (t *Tokenizer) VocabSize() int { return len(t.tokens) }
+func (t *Tokenizer) VocabSize() int { return t.size }
 
 // Token retourne la chaîne d'un id.
 func (t *Tokenizer) Token(id int32) string {
-	if id < 0 || int(id) >= len(t.tokens) {
+	if id < 0 || int(id) >= t.size {
 		return ""
 	}
-	return t.tokens[id]
+	if s, ok := t.names[id]; ok {
+		return s
+	}
+	return t.vocab.str(id)
 }
 
 // PadID, BosID, EosID exposent les ids spéciaux.
@@ -455,7 +469,8 @@ func (t *Tokenizer) bpe(word string) []int32 {
 	syms := make([]symbol, 0, len(word))
 	lastUnk := false
 	for _, r := range word {
-		if id, ok := t.vocab[string(r)]; ok {
+		var rb [utf8.UTFMax]byte
+		if id, ok := t.vocab.lookupBytes(rb[:utf8.EncodeRune(rb[:], r)]); ok {
 			syms = append(syms, symbol{id: id})
 			lastUnk = false
 			continue
@@ -490,7 +505,7 @@ func (t *Tokenizer) bpe(word string) []int32 {
 
 	q := make(mergeQueue, 0, len(syms))
 	for i := 0; i+1 < len(syms); i++ {
-		if m, ok := t.merges[pairKey(syms[i].id, syms[i+1].id)]; ok {
+		if m, ok := t.merges.get(pairKey(syms[i].id, syms[i+1].id)); ok {
 			q = append(q, candidate{pos: i, rank: m.rank, id: m.id})
 		}
 	}
@@ -503,7 +518,7 @@ func (t *Tokenizer) bpe(word string) []int32 {
 		}
 		right := syms[cur.next]
 		// Entrée périmée : la paire a changé depuis son ajout.
-		if m, ok := t.merges[pairKey(cur.id, right.id)]; !ok || m.id != top.id {
+		if m, ok := t.merges.get(pairKey(cur.id, right.id)); !ok || m.id != top.id {
 			continue
 		}
 		cur.id = top.id
@@ -513,12 +528,12 @@ func (t *Tokenizer) bpe(word string) []int32 {
 			syms[right.next].prev = top.pos
 		}
 		if cur.prev >= 0 {
-			if m, ok := t.merges[pairKey(syms[cur.prev].id, cur.id)]; ok {
+			if m, ok := t.merges.get(pairKey(syms[cur.prev].id, cur.id)); ok {
 				heap.Push(&q, candidate{pos: cur.prev, rank: m.rank, id: m.id})
 			}
 		}
 		if cur.next >= 0 {
-			if m, ok := t.merges[pairKey(cur.id, syms[cur.next].id)]; ok {
+			if m, ok := t.merges.get(pairKey(cur.id, syms[cur.next].id)); ok {
 				heap.Push(&q, candidate{pos: top.pos, rank: m.rank, id: m.id})
 			}
 		}

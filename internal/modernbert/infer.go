@@ -26,6 +26,7 @@ func (m *Model) SetEmbeddingTable(t EmbeddingTable) {
 // Materialize recopie la table d'embeddings en float32 dans Emb.W, ce
 // qu'exige l'entraînement.
 func (m *Model) Materialize() {
+	m.restoreWeights()
 	if m.Emb.W != nil {
 		return
 	}
@@ -67,8 +68,46 @@ type packedLayer struct {
 // pas.
 func (m *Model) Invalidate() {
 	m.packMu.Lock()
+	defer m.packMu.Unlock()
+	m.restoreLocked()
 	m.packed = nil
+}
+
+// SetCompact fait garder les matrices des couches sous leur seule forme
+// empaquetée, dès la première inférence : elles ne sont plus en double. Les
+// fonctions qui lisent les poids (Params, Forward, Materialize) les
+// reconstruisent au besoin, et le mode compact prend fin.
+func (m *Model) SetCompact() {
+	m.packMu.Lock()
+	m.compact = true
 	m.packMu.Unlock()
+}
+
+// restoreWeights reconstruit les matrices des couches si SetCompact les a
+// libérées.
+func (m *Model) restoreWeights() {
+	m.packMu.Lock()
+	defer m.packMu.Unlock()
+	m.restoreLocked()
+}
+
+func (m *Model) restoreLocked() {
+	m.compact = false
+	if m.packed == nil {
+		return
+	}
+	for l := range m.Layers {
+		L, p := &m.Layers[l], m.packed[l]
+		for _, x := range []struct {
+			w *Param
+			p *linalg.PackedB
+		}{{L.Wqkv, p.qkv}, {L.Wo, p.o}, {L.Wi, p.i}, {L.WoMLP, p.oMLP}} {
+			if x.w.W == nil {
+				x.w.W = make([]float32, x.w.Shape[0]*x.w.Shape[1])
+				x.p.Unpack(x.w.W, true)
+			}
+		}
+	}
 }
 
 func (m *Model) packs() []packedLayer {
@@ -85,6 +124,9 @@ func (m *Model) packs() []packedLayer {
 			o:    linalg.PackB(L.Wo.W, H, H, true),
 			i:    linalg.PackB(L.Wi.W, H, 2*I, true),
 			oMLP: linalg.PackB(L.WoMLP.W, I, H, true),
+		}
+		if m.compact {
+			L.Wqkv.W, L.Wo.W, L.Wi.W, L.WoMLP.W = nil, nil, nil, nil
 		}
 	}
 	m.packed = p

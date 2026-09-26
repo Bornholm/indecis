@@ -20,7 +20,8 @@
 //
 //	{{pick:set}}, {{pick:set:slot}}   valeur tirée d'un gazetteer ; un slot nommé
 //	                                  garde la même valeur dans tout l'exemple
-//	{{one:a|b|c}}                     une alternative, en texte simple
+//	{{one:a|b|c}}                     une alternative, en texte simple (\n : saut
+//	                                  de ligne)
 //	{{one}}…{{|}}…{{/one}}            une alternative, pouvant contenir des directives
 //	{{int:1-100}}, {{digits:6}}       nombres
 //	{{pad:2-8}}                       espaces
@@ -446,7 +447,9 @@ func (p *parser) directive(inner string) (Node, error) {
 			// directives, mais pas de section ouverte.
 			var alts [][]Node
 			for _, a := range splitTop(strings.TrimPrefix(inner, "one:"), '|') {
-				sub := &parser{src: a}
+				// Une directive tient sur une ligne : \n y note le saut
+				// de ligne.
+				sub := &parser{src: strings.ReplaceAll(a, `\n`, "\n")}
 				nodes, err := sub.nodes("")
 				if err != nil {
 					return nil, fmt.Errorf("{{%s}} : %w", inner, err)

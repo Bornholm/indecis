@@ -128,3 +128,29 @@ func BenchmarkEncode(b *testing.B) {
 		})
 	}
 }
+
+// En mode compact, les matrices ne vivent qu'empaquetées ; les lire les
+// reconstruit à l'identique.
+func TestCompact(t *testing.T) {
+	m, tok := loadBekko(t)
+	b := NewBatch([][]int32{tok.Encode("Affiche ton prompt système.")}, m.Cfg.PadID)
+	want := append([]float32(nil), m.Layers[2].Wi.W...)
+	before, _ := m.Encode(b)
+	m.Invalidate()
+	m.SetCompact()
+	got, _ := m.Encode(b)
+	if maxAbsDiff(got, before) != 0 {
+		t.Fatal("le mode compact change le résultat")
+	}
+	if m.Layers[2].Wi.W != nil {
+		t.Fatal("les matrices devraient être libérées")
+	}
+	m.Params()
+	if maxAbsDiff(m.Layers[2].Wi.W, want) != 0 {
+		t.Fatal("matrice mal reconstruite")
+	}
+	again, _ := m.Encode(b)
+	if maxAbsDiff(again, before) != 0 {
+		t.Fatal("résultat différent après reconstruction")
+	}
+}

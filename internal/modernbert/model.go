@@ -100,8 +100,9 @@ type Model struct {
 	embTable EmbeddingTable
 	// packed contient les poids empaquetés pour Encode, nil s'ils sont à
 	// refaire.
-	packMu sync.Mutex
-	packed []packedLayer
+	packMu  sync.Mutex
+	packed  []packedLayer
+	compact bool // voir SetCompact
 }
 
 // Load lit config.json et model.safetensors dans dir.
@@ -183,6 +184,7 @@ func FromTensors(cfg Config, tensors map[string]safetensors.Tensor) (*Model, err
 
 // Params liste tous les paramètres, dans un ordre stable.
 func (m *Model) Params() []*Param {
+	m.restoreWeights()
 	ps := []*Param{m.Emb, m.EmbNorm}
 	for _, L := range m.Layers {
 		if L.AttnNorm != nil {

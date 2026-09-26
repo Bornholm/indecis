@@ -1,0 +1,133 @@
+package tokenizer
+
+import (
+	"hash/maphash"
+	"slices"
+)
+
+// Le vocabulaire compte 256 000 chaînes et autant de fusions. En
+// map[string]int32 et map[uint64]merge, il occupait 34 Mo de tas ; les
+// tables ci-dessous en occupent 8.
+
+var tableSeed = maphash.MakeSeed()
+
+// strTable associe des chaînes à des ids : les chaînes sont concaténées dans
+// un seul bloc, et une table à adressage ouvert retrouve l'id d'une chaîne.
+type strTable struct {
+	blob  string
+	off   []uint32 // chaîne de l'id i : blob[off[i]:off[i+1]]
+	slots []int32  // id + 1, 0 si libre
+	mask  uint64
+}
+
+// newStrTable indexe byID (id → chaîne) ; les chaînes vides sont des ids
+// absents, que lookup ne retrouve pas.
+func newStrTable(byID []string) *strTable {
+	t := &strTable{off: make([]uint32, len(byID)+1)}
+	size := 0
+	for _, s := range byID {
+		size += len(s)
+	}
+	blob := make([]byte, 0, size)
+	for i, s := range byID {
+		blob = append(blob, s...)
+		t.off[i+1] = uint32(len(blob))
+	}
+	t.blob = string(blob)
+	n := 1
+	for n < 2*len(byID) {
+		n <<= 1
+	}
+	t.slots = make([]int32, n)
+	t.mask = uint64(n - 1)
+	for id, s := range byID {
+		if s == "" {
+			continue
+		}
+		for h := maphash.String(tableSeed, s) & t.mask; ; h = (h + 1) & t.mask {
+			if t.slots[h] == 0 {
+				t.slots[h] = int32(id) + 1
+				break
+			}
+		}
+	}
+	return t
+}
+
+func (t *strTable) str(id int32) string {
+	return t.blob[t.off[id]:t.off[id+1]]
+}
+
+func (t *strTable) lookup(s string) (int32, bool) {
+	if s == "" {
+		return 0, false
+	}
+	for h := maphash.String(tableSeed, s) & t.mask; ; h = (h + 1) & t.mask {
+		v := t.slots[h]
+		if v == 0 {
+			return 0, false
+		}
+		if t.str(v-1) == s {
+			return v - 1, true
+		}
+	}
+}
+
+// lookupBytes est lookup sans convertir b en chaîne.
+func (t *strTable) lookupBytes(b []byte) (int32, bool) {
+	if len(b) == 0 {
+		return 0, false
+	}
+	for h := maphash.Bytes(tableSeed, b) & t.mask; ; h = (h + 1) & t.mask {
+		v := t.slots[h]
+		if v == 0 {
+			return 0, false
+		}
+		if t.str(v-1) == string(b) {
+			return v - 1, true
+		}
+	}
+}
+
+// mergeTable retrouve la fusion d'une paire d'ids par recherche dichotomique
+// dans les paires triées.
+type mergeTable struct {
+	keys []uint64
+	vals []merge
+}
+
+type mergeEntry struct {
+	key uint64
+	m   merge
+}
+
+// newMergeTable garde, pour une paire présente plusieurs fois, la fusion de
+// plus petit rang.
+func newMergeTable(entries []mergeEntry) mergeTable {
+	slices.SortStableFunc(entries, func(a, b mergeEntry) int {
+		if a.key != b.key {
+			if a.key < b.key {
+				return -1
+			}
+			return 1
+		}
+		return int(a.m.rank - b.m.rank)
+	})
+	t := mergeTable{keys: make([]uint64, 0, len(entries)), vals: make([]merge, 0, len(entries))}
+	for i, e := range entries {
+		if i > 0 && entries[i-1].key == e.key {
+			continue
+		}
+		t.keys = append(t.keys, e.key)
+		t.vals = append(t.vals, e.m)
+	}
+	return t
+}
+
+func (t mergeTable) get(key uint64) (merge, bool) {
+	i, ok := slices.BinarySearch(t.keys, key)
+	if !ok {
+		return merge{}, false
+	}
+	return t.vals[i], true
+}
