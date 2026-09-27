@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"math/rand"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -78,6 +79,41 @@ func choiceBatches(tickets []dataset.Example, size, options int, rng *rand.Rand)
 	return out
 }
 
+// listBatches regroupe les courriels étiquetés selon les listes
+// d'entraînement : pour chaque liste, des lots de courriels dont les options
+// sont toutes les catégories de la liste.
+func listBatches(emails []dataset.Example, size int, rng *rand.Rand) []indecis.ChoiceBatch {
+	var out []indecis.ChoiceBatch
+	for _, t := range training {
+		index := map[string]int{}
+		for i, o := range t.Options {
+			index[o.Name] = i
+		}
+		type item struct {
+			text string
+			pos  int
+		}
+		var items []item
+		for _, e := range emails {
+			if v, ok := e.Labels[t.Name]; ok {
+				if j, ok := index[topLabel(v)]; ok {
+					items = append(items, item{e.Text, j})
+				}
+			}
+		}
+		rng.Shuffle(len(items), func(i, j int) { items[i], items[j] = items[j], items[i] })
+		for s := 0; s+size <= len(items); s += size {
+			b := indecis.ChoiceBatch{Candidates: t.Options}
+			for _, it := range items[s : s+size] {
+				b.Texts = append(b.Texts, it.text)
+				b.Correct = append(b.Correct, []int{it.pos})
+			}
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
 func trainEmbed(ctx context.Context, dir, backbone, out string, n, epochs int) error {
 	tickets, _, _, err := load(dir)
 	if err != nil {
@@ -94,6 +130,12 @@ func trainEmbed(ctx context.Context, dir, backbone, out string, n, epochs int) e
 	pool = pool[:min(n, len(pool))]
 	batches := choiceBatches(pool, 16, 24, rng)
 	log.Printf("%d tickets → %d lots de 16", len(pool), len(batches))
+	if emails, err := dataset.ReadFile(filepath.Join(dir, "enron_train.jsonl")); err == nil {
+		eb := listBatches(emails, 16, rng)
+		log.Printf("%d courriels Enron étiquetés → %d lots sur %d listes", len(emails), len(eb), len(training))
+		batches = append(batches, eb...)
+		rng.Shuffle(len(batches), func(i, j int) { batches[i], batches[j] = batches[j], batches[i] })
+	}
 
 	m, err := indecis.New(backbone, indecis.Schema{indecis.NewNoul(question, "")}, 1)
 	if err != nil {
@@ -127,16 +169,25 @@ func evaluateEmbed(ctx context.Context, dir, model, backbone string) error {
 	if err != nil {
 		return err
 	}
-	tuned, err := indecis.Load(model, indecis.WithInt8())
-	if err != nil {
-		return err
-	}
-	for _, s := range evalSets(tickets, imnim, enron) {
-		if err := report(ctx, "backbone", nearest(base), s); err != nil {
+	models := []struct {
+		label string
+		m     *indecis.Model
+	}{{"backbone", base}}
+	if model != "-" { // "-" : backbone seul
+		tuned, err := indecis.Load(model, indecis.WithInt8())
+		if err != nil {
 			return err
 		}
-		if err := report(ctx, "affiné", nearest(tuned), s); err != nil {
-			return err
+		models = append(models, struct {
+			label string
+			m     *indecis.Model
+		}{"affiné", tuned})
+	}
+	for _, s := range evalSets(tickets, imnim, enron) {
+		for _, x := range models {
+			if err := report(ctx, x.label, nearest(x.m), s); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

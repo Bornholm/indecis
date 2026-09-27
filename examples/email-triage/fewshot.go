@@ -48,15 +48,22 @@ func evaluateFewShot(ctx context.Context, dir, model, backbone string, k int) er
 	if err != nil {
 		return err
 	}
-	tuned, err := indecis.Load(model, indecis.WithInt8())
-	if err != nil {
-		return err
-	}
-	for _, s := range evalSets(tickets, imnim, enron) {
-		for _, x := range []struct {
+	models := []struct {
+		label string
+		m     *indecis.Model
+	}{{"backbone", base}}
+	if model != "-" { // "-" : backbone seul
+		tuned, err := indecis.Load(model, indecis.WithInt8())
+		if err != nil {
+			return err
+		}
+		models = append(models, struct {
 			label string
 			m     *indecis.Model
-		}{{"backbone", base}, {"affiné", tuned}} {
+		}{"affiné", tuned})
+	}
+	for _, s := range evalSets(tickets, imnim, enron) {
+		for _, x := range models {
 			if err := fewShot(ctx, x.label, x.m, s, k); err != nil {
 				return err
 			}
