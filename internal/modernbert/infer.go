@@ -254,8 +254,9 @@ func (m *Model) EncodeSeqs(seqs [][]int32) ([]float32, error) {
 	ws.xn = grow(ws.xn, N*H)
 	ws.qkv = grow(ws.qkv, N*3*H)
 	ws.ctx = grow(ws.ctx, N*H)
-	ws.z = grow(ws.z, N*2*I)
-	ws.g = grow(ws.g, N*I)
+	chunk := min(N, mlpChunk)
+	ws.z = grow(ws.z, chunk*2*I)
+	ws.g = grow(ws.g, chunk*I)
 	x, xn := ws.x, ws.xn
 
 	r := 0
@@ -279,9 +280,15 @@ func (m *Model) EncodeSeqs(seqs [][]int32) ([]float32, error) {
 		p.o.mul(x, ws.ctx, N, true, w) // x += attention
 
 		layerNormInfer(xn, x, L.MLPNorm.W, N, H, cfg.NormEps, w)
-		p.i.mul(ws.z, xn, N, false, w)
-		gluInfer(ws.g, ws.z, N, I, w)
-		p.oMLP.mul(x, ws.g, N, true, w) // x += MLP
+		// Le MLP travaille par tranches de lignes : ses tampons (2·I + I
+		// valeurs par ligne, plus que tout le reste) ne dépendent pas de la
+		// longueur du texte.
+		for r0 := 0; r0 < N; r0 += chunk {
+			rows := min(chunk, N-r0)
+			p.i.mul(ws.z, xn[r0*H:(r0+rows)*H], rows, false, w)
+			gluInfer(ws.g, ws.z, rows, I, w)
+			p.oMLP.mul(x[r0*H:(r0+rows)*H], ws.g, rows, true, w) // x += MLP
+		}
 	}
 	layerNormInfer(xn, x, m.FinalNorm.W, N, H, cfg.NormEps, w)
 
@@ -380,6 +387,9 @@ func gluInfer(g, z []float32, n, inter int, workers int) {
 const (
 	qBlock = 64
 	kBlock = 128
+
+	// mlpChunk est le nombre de lignes que le MLP traite à la fois.
+	mlpChunk = 256
 
 	// parallelRows est le nombre de positions (toutes séquences du lot
 	// confondues) à partir duquel Encode répartit son calcul sur plusieurs
