@@ -47,6 +47,9 @@ type Info struct {
 	// (voir calibrate.PriorShift).
 	TrainPrior map[string]float64 `json:"train_prior,omitempty"`
 	Steps      int                `json:"steps,omitempty"`
+	// EmbedScale multiplie les cosinus dans ChooseNearest (0 : la valeur
+	// par défaut).
+	EmbedScale float64 `json:"embed_scale,omitempty"`
 }
 
 // Model est un modèle de décision : un encodeur et une tête par question.

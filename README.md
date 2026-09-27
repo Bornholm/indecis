@@ -199,6 +199,20 @@ Le corpus de gabarits est appris parfaitement (100 % sur sa part tenue à l'éca
 
 Débit d'entraînement : ~1 000 tokens/s, soit ~31 min par époque pour 20 000 exemples de 96 tokens.
 
+## Catégories choisies à l'inférence
+
+Une question `choice` a des options fixes, apprises à l'entraînement. Pour classer parmi une liste qui change d'un appel à l'autre, `ChooseNearest` compare le plongement du texte à celui de chaque option (`Candidate` : un nom, une description facultative). Le coût ne dépend pas du nombre d'options : elles se calculent une fois. `FitEmbeddings` affine l'encodeur avec l'objectif de l'inférence (préférer la bonne option parmi celles d'un lot). `ChooseAmong` fait la même chose avec un modèle en paires, une passe par option.
+
+`examples/email-triage` est une preuve de concept sur des courriels : tickets de support (Tobi-Bueck/customer-support-tickets, CC-BY-NC), imnim/multiclass-email-classification (MIT) et courriels d'Enron étiquetés par les teachers selon une liste classique en français. Exactitude sur des catégories jamais vues à l'entraînement :
+
+| Jeu de test | Nom seul, bekko | Nom seul, affiné | Nom + 5 exemples, affiné |
+| --- | --- | --- | --- |
+| imnim, 10 catégories | 69,2 % | 71,2 % | 92,5 % |
+| Tickets, files jamais vues (52 options) | 31,8 % | 42,0 % | 71,4 % |
+| Enron, 13 catégories en français | 27,9 % | 27,7 % | 42,3 % |
+
+Le modèle en paires, lui, a appris quels noms de catégories étaient souvent justes à l'entraînement, et rejette les noms inconnus (moins de 5 % sur imnim) : pour des catégories libres, les plongements l'emportent.
+
 ## Fournisseur de décision pour genai
 
 Le module `decision` expose un modèle indecis comme `llm.DecisionClient` de [genai](https://github.com/bornholm/genai) (branche `feat/decision-client`). Le même code sert alors Jev ou un modèle local :
