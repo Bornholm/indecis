@@ -48,6 +48,7 @@ func main() {
 	int8 := flag.Bool("int8", true, "couches en int8 si le processeur a AVX-VNNI")
 	cache := flag.Int("embed-cache", 4096, "plongements d'options gardés en cache (questions ouvertes)")
 	maxConcurrent := flag.Int("max-concurrent", runtime.GOMAXPROCS(0), "décisions calculées en même temps, les autres attendent (0 : pas de borne)")
+	maxLen := flag.Int("max-len", 0, "tokens lus au plus par texte (0 : la valeur du modèle, 256 en général) ; coût quadratique au-delà de 1024")
 	memLimit := flag.Int("memory-limit", 0, "limite souple de mémoire du tas, en Mio (0 : aucune) ; le ramasse-miettes travaille davantage à l'approche")
 	flag.Parse()
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
@@ -58,6 +59,9 @@ func main() {
 	opts := []indecis.Option{indecis.WithThreads(*threads), indecis.WithEmbedCache(*cache)}
 	if *int8 {
 		opts = append(opts, indecis.WithInt8())
+	}
+	if *maxLen > 0 {
+		opts = append(opts, indecis.WithMaxLen(*maxLen))
 	}
 	if *memLimit > 0 {
 		debug.SetMemoryLimit(int64(*memLimit) << 20)
