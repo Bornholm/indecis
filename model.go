@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 
 	"github.com/bornholm/indecis/dataset"
 	"github.com/bornholm/indecis/internal/linalg"
@@ -388,6 +389,16 @@ const (
 	embScale    = "indecis.embeddings.scale"
 )
 
+// lazyMatrix reconnaît les matrices des couches, lues à la demande.
+func lazyMatrix(name string) bool {
+	for _, suffix := range []string{".attn.Wqkv.weight", ".attn.Wo.weight", ".mlp.Wi.weight", ".mlp.Wo.weight"} {
+		if strings.HasSuffix(name, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
 // quantizeRows quantifie w (rows × h) en int8 par ligne : q = arrondi(w /
 // s), s = max |w| / 127. Les entiers sont rendus en float32 pour
 // safetensors.Write.
@@ -592,6 +603,13 @@ func Load(dir string, opts ...Option) (*Model, error) {
 			tensors[name] = safetensors.Tensor{Shape: shape}
 			continue
 		}
+		if lazyMatrix(name) {
+			// Les matrices des couches sont lues à la préparation de
+			// l'inférence, une à la fois (voir SetCompact ci-dessous).
+			_, shape, _, _ := f.Raw(name)
+			tensors[name] = safetensors.Tensor{Shape: shape}
+			continue
+		}
 		t, _, err := f.Tensor(name)
 		if err != nil {
 			return nil, err
@@ -606,7 +624,11 @@ func Load(dir string, opts ...Option) (*Model, error) {
 	// Un modèle chargé sert d'abord à l'inférence : ses matrices ne sont
 	// gardées qu'empaquetées (voir modernbert.SetCompact).
 	enc.SetCompact(func(name string) ([]float32, error) {
-		t, _, err := f.Tensor(name)
+		t, ok, err := f.Tensor(name)
+		if err == nil && !ok {
+			err = fmt.Errorf("tenseur %s absent", name)
+		}
+		f.Evict(name)
 		return t.Data, err
 	})
 	if table != nil {

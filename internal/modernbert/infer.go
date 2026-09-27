@@ -121,9 +121,14 @@ func (m *Model) SetInt8(on bool) {
 	if m.int8 == on {
 		return
 	}
-	compact := m.compact
-	m.restoreLocked()
-	m.compact = compact // changer de format n'est pas lire les poids
+	// Les matrices seront réempaquetées depuis Param.W ou, absentes, depuis
+	// la source. Sans source, des matrices libérées ne se retrouvent que
+	// dans les paquets actuels : il faut les restaurer d'abord.
+	if m.packed != nil && m.source == nil {
+		compact := m.compact
+		m.restoreLocked()
+		m.compact = compact // changer de format n'est pas lire les poids
+	}
 	m.int8 = on
 	m.packed = nil
 }
@@ -152,20 +157,28 @@ func (m *Model) restoreLocked() {
 				continue
 			}
 			if m.source != nil {
-				w, err := m.source(x.w.Name)
-				if err == nil && len(w) != x.w.Shape[0]*x.w.Shape[1] {
-					err = fmt.Errorf("%d valeurs", len(w))
-				}
-				if err != nil {
-					panic(fmt.Sprintf("modernbert: relecture de %s : %v", x.w.Name, err))
-				}
-				x.w.W = w
+				x.w.W = m.readSource(x.w)
 				continue
 			}
 			x.w.W = make([]float32, x.w.Shape[0]*x.w.Shape[1])
 			x.p.f.Unpack(x.w.W, true)
 		}
 	}
+}
+
+// readSource relit une matrice dans la source de SetCompact.
+func (m *Model) readSource(w *Param) []float32 {
+	if m.source == nil {
+		panic(fmt.Sprintf("modernbert: %s absente et aucune source pour la relire", w.Name))
+	}
+	data, err := m.source(w.Name)
+	if err == nil && len(data) != w.Shape[0]*w.Shape[1] {
+		err = fmt.Errorf("%d valeurs", len(data))
+	}
+	if err != nil {
+		panic(fmt.Sprintf("modernbert: relecture de %s : %v", w.Name, err))
+	}
+	return data
 }
 
 func (m *Model) packs() []packedLayer {
@@ -176,15 +189,29 @@ func (m *Model) packs() []packedLayer {
 	}
 	H, I := m.Cfg.Hidden, m.Cfg.Intermediate
 	p := make([]packedLayer, len(m.Layers))
+	drop := m.compact && (m.source != nil || !m.int8)
+	// Une matrice absente (chargement paresseux, voir SetCompact) est lue
+	// dans la source au moment d'être empaquetée : il n'y en a jamais plus
+	// d'une en float32 à la fois.
+	pack := func(w *Param, k, n int) packedMat {
+		data := w.W
+		if data == nil {
+			data = m.readSource(w)
+		}
+		pm := packMat(data, k, n, m.int8)
+		if drop {
+			w.W = nil
+		} else {
+			w.W = data
+		}
+		return pm
+	}
 	for l, L := range m.Layers {
 		p[l] = packedLayer{
-			qkv:  packMat(L.Wqkv.W, H, 3*H, m.int8),
-			o:    packMat(L.Wo.W, H, H, m.int8),
-			i:    packMat(L.Wi.W, H, 2*I, m.int8),
-			oMLP: packMat(L.WoMLP.W, I, H, m.int8),
-		}
-		if m.compact && (m.source != nil || !m.int8) {
-			L.Wqkv.W, L.Wo.W, L.Wi.W, L.WoMLP.W = nil, nil, nil, nil
+			qkv:  pack(L.Wqkv, H, 3*H),
+			o:    pack(L.Wo, H, H),
+			i:    pack(L.Wi, H, 2*I),
+			oMLP: pack(L.WoMLP, I, H),
 		}
 	}
 	m.packed = p
