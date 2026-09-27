@@ -227,8 +227,22 @@ func (m *Model) LogitsInputs(ctx context.Context, inputs ...Input) ([]map[string
 }
 
 // logits retourne, pour chaque texte, les logits bruts de chaque question.
-// Les textes sont regroupés par longueur pour limiter le padding.
 func (m *Model) logits(ctx context.Context, inputs []Input, batchSize int) ([][][]float64, error) {
+	ids, err := m.tokenizeAll(inputs)
+	if err != nil {
+		return nil, err
+	}
+	out := make([][][]float64, len(inputs))
+	err = m.forEachPooled(ctx, ids, batchSize, func(i int, x []float32) {
+		out[i] = make([][]float64, len(m.heads))
+		for qi, h := range m.heads {
+			out[i][qi] = h.logits(x)
+		}
+	})
+	return out, err
+}
+
+func (m *Model) tokenizeAll(inputs []Input) ([][]int32, error) {
 	ids := make([][]int32, len(inputs))
 	for i, in := range inputs {
 		var err error
@@ -236,18 +250,23 @@ func (m *Model) logits(ctx context.Context, inputs []Input, batchSize int) ([][]
 			return nil, err
 		}
 	}
-	texts := inputs
-	order := make([]int, len(texts))
+	return ids, nil
+}
+
+// forEachPooled encode des séquences de tokens et passe à fn le plongement
+// moyen de chacune (tampon réutilisé : fn le copie s'il le garde). Les
+// séquences sont regroupées par longueur pour limiter le padding.
+func (m *Model) forEachPooled(ctx context.Context, ids [][]int32, batchSize int, fn func(i int, x []float32)) error {
+	order := make([]int, len(ids))
 	for i := range order {
 		order[i] = i
 	}
 	sort.SliceStable(order, func(a, b int) bool { return len(ids[order[a]]) < len(ids[order[b]]) })
 
-	out := make([][][]float64, len(texts))
 	H := m.enc.Cfg.Hidden
 	for start := 0; start < len(order); start += batchSize {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return err
 		}
 		idx := order[start:min(start+batchSize, len(order))]
 		seqs := make([][]int32, len(idx))
@@ -256,17 +275,13 @@ func (m *Model) logits(ctx context.Context, inputs []Input, batchSize int) ([][]
 		}
 		pooled, err := m.enc.Encode(modernbert.NewBatch(seqs, m.enc.Cfg.PadID))
 		if err != nil {
-			return nil, err
+			return err
 		}
 		for j, i := range idx {
-			x := pooled[j*H : (j+1)*H]
-			out[i] = make([][]float64, len(m.heads))
-			for qi, h := range m.heads {
-				out[i][qi] = h.logits(x)
-			}
+			fn(i, pooled[j*H:(j+1)*H])
 		}
 	}
-	return out, nil
+	return nil
 }
 
 // Fichiers d'un modèle sauvegardé.
