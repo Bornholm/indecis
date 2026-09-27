@@ -47,7 +47,8 @@ func main() {
 	threads := flag.Int("threads", 0, "cœurs au plus par requête (0 : tous) ; un texte de moins de 1024 tokens en utilise toujours un seul")
 	int8 := flag.Bool("int8", true, "couches en int8 si le processeur a AVX-VNNI")
 	cache := flag.Int("embed-cache", 4096, "plongements d'options gardés en cache (questions ouvertes)")
-	maxConcurrent := flag.Int("max-concurrent", runtime.GOMAXPROCS(0), "décisions calculées en même temps, les autres attendent (0 : pas de borne)")
+	maxConcurrent := flag.Int("max-concurrent", runtime.GOMAXPROCS(0), "décisions en cours au plus, les autres attendent (0 : pas de borne)")
+	batching := flag.Bool("batching", false, "regrouper les calculs des requêtes simultanées (gain de quelques % sur des requêtes courtes, plus de mémoire ; monter aussi -max-concurrent)")
 	maxLen := flag.Int("max-len", 0, "tokens lus au plus par texte (0 : la valeur du modèle, 256 en général) ; coût quadratique au-delà de 1024")
 	memLimit := flag.Int("memory-limit", 0, "limite souple de mémoire du tas, en Mio (0 : aucune) ; le ramasse-miettes travaille davantage à l'approche")
 	flag.Parse()
@@ -62,6 +63,9 @@ func main() {
 	}
 	if *maxLen > 0 {
 		opts = append(opts, indecis.WithMaxLen(*maxLen))
+	}
+	if *batching {
+		opts = append(opts, indecis.WithBatching(0, 0))
 	}
 	if *memLimit > 0 {
 		debug.SetMemoryLimit(int64(*memLimit) << 20)

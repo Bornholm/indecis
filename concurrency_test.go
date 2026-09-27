@@ -10,18 +10,31 @@ import (
 // Des requêtes simultanées sur un même modèle donnent les mêmes réponses
 // qu'une à une : à lancer avec -race.
 func TestConcurrentInference(t *testing.T) {
+	for _, batching := range []bool{false, true} {
+		t.Run(fmt.Sprint("batching=", batching), func(t *testing.T) { concurrentInference(t, batching) })
+	}
+}
+
+func concurrentInference(t *testing.T, batching bool) {
 	ctx := context.Background()
-	m, err := New(bekkoDir(t), Schema{NewNoul("match", ""), NewChoice("c", "", "a", "b")}, 1, WithInt8(), WithEmbedCache(16))
+	ref, err := New(bekkoDir(t), Schema{NewNoul("match", ""), NewChoice("c", "", "a", "b")}, 1, WithInt8(), WithEmbedCache(16))
 	if err != nil {
 		t.Fatal(err)
+	}
+	m := ref
+	if batching {
+		m, err = New(bekkoDir(t), Schema{NewNoul("match", ""), NewChoice("c", "", "a", "b")}, 1, WithInt8(), WithEmbedCache(16), WithBatching(3, 256))
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	texts := make([]string, 24)
 	for i := range texts {
 		texts[i] = fmt.Sprintf("Courriel numéro %d : la facture %d est impayée depuis %d jours.", i, 1000+i, i%30)
 	}
 	cands := []Candidate{{Name: "facturation", Examples: []string{"Relance de paiement"}}, {Name: "informatique"}}
-	want, _ := m.Decide(ctx, texts...)
-	wantOpen, _ := m.ChooseNearest(ctx, cands, texts...)
+	want, _ := ref.Decide(ctx, texts...)
+	wantOpen, _ := ref.ChooseNearest(ctx, cands, texts...)
 	var wg sync.WaitGroup
 	errs := make(chan error, 64)
 	for g := 0; g < 8; g++ {

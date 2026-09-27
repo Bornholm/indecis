@@ -10,6 +10,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 
 	"github.com/bornholm/indecis/dataset"
@@ -73,8 +74,9 @@ type Model struct {
 	maxLen        int
 	paired        bool
 	info          Info
-	embedCache    *lru // voir WithEmbedCache
-	embedInt8     bool // voir WithInt8Embeddings
+	embedCache    *lru     // voir WithEmbedCache
+	embedInt8     bool     // voir WithInt8Embeddings
+	batcher       *batcher // voir WithBatching
 }
 
 // Input est un texte à juger et son contexte éventuel.
@@ -116,6 +118,30 @@ func WithEmbedCache(n int) Option {
 		if n > 0 {
 			m.embedCache = newLRU(n)
 		}
+	}
+}
+
+// WithBatching regroupe les calculs de requêtes simultanées : workers
+// goroutines (0 : une par cœur) prennent chacune la première requête en
+// attente et toutes celles déjà en file, jusqu'à maxRows positions (0 :
+// 512), et les calculent en un seul passage. Sans charge, une requête part
+// aussitôt, sans attente ; sous charge, les lots grossissent d'eux-mêmes
+// et les produits matriciels, plus grands, sont plus efficaces. Les
+// séquences d'un lot sont mises bout à bout sans padding.
+//
+// Sur CPU, le gain est faible : chaque requête occupe déjà un cœur, et des
+// requêtes de 100 à 256 tokens font des produits matriciels assez grands.
+// Mesuré sur le serveur de décision (32 clients) : quelques % de débit sur
+// des requêtes d'une phrase, rien au-delà, pour plus de mémoire.
+func WithBatching(workers, maxRows int) Option {
+	return func(m *Model) {
+		if workers <= 0 {
+			workers = runtime.GOMAXPROCS(0)
+		}
+		if maxRows <= 0 {
+			maxRows = 512
+		}
+		m.batcher = newBatcher(m, workers, maxRows)
 	}
 }
 
@@ -314,7 +340,7 @@ func (m *Model) forEachPooled(ctx context.Context, ids [][]int32, batchSize int,
 		for j, i := range idx {
 			seqs[j] = ids[i]
 		}
-		pooled, err := m.enc.Encode(modernbert.NewBatch(seqs, m.enc.Cfg.PadID))
+		pooled, err := m.encodeSeqs(ctx, seqs)
 		if err != nil {
 			return err
 		}
@@ -323,6 +349,15 @@ func (m *Model) forEachPooled(ctx context.Context, ids [][]int32, batchSize int,
 		}
 	}
 	return nil
+}
+
+// encodeSeqs calcule les plongements moyens de séquences, directement ou par
+// le regroupement de WithBatching.
+func (m *Model) encodeSeqs(ctx context.Context, seqs [][]int32) ([]float32, error) {
+	if m.batcher != nil {
+		return m.batcher.encode(ctx, seqs)
+	}
+	return m.enc.EncodeSeqs(seqs)
 }
 
 // Fichiers d'un modèle sauvegardé.

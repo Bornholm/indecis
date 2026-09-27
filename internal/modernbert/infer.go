@@ -194,7 +194,7 @@ func (m *Model) packs() []packedLayer {
 // workspace regroupe les tampons d'un passage d'inférence, réutilisés d'une
 // requête à l'autre.
 type workspace struct {
-	x, xn, qkv, ctx, tmp, z, g []float32
+	x, xn, qkv, ctx, z, g []float32
 }
 
 var workspaces sync.Pool
@@ -206,16 +206,38 @@ var workspaces sync.Pool
 // fois pour toutes et des erf et exp en float32. L'écart avec Forward reste
 // de l'ordre de 1e-6.
 func (m *Model) Encode(b Batch) ([]float32, error) {
-	cfg := m.Cfg
-	H, I := cfg.Hidden, cfg.Intermediate
-	N := b.B() * b.T
-	if len(b.IDs) != N {
+	if len(b.IDs) != b.B()*b.T {
 		return nil, fmt.Errorf("modernbert: lot incohérent")
 	}
-	for _, id := range b.IDs {
-		if id < 0 || int(id) >= cfg.Vocab {
-			return nil, fmt.Errorf("modernbert: id %d hors vocabulaire", id)
+	seqs := make([][]int32, b.B())
+	for i, n := range b.Lens {
+		seqs[i] = b.IDs[i*b.T : i*b.T+n]
+	}
+	return m.EncodeSeqs(seqs)
+}
+
+// EncodeSeqs est Encode sur des séquences de longueurs quelconques, mises
+// bout à bout sans padding : les calculs par ligne (projections, MLP,
+// normalisations) portent sur la somme des longueurs, pas sur le nombre
+// de séquences fois la plus longue, et l'attention se calcule séquence par
+// séquence. Réunir des séquences de longueurs différentes ne coûte donc
+// rien de plus que de les calculer séparément.
+func (m *Model) EncodeSeqs(seqs [][]int32) ([]float32, error) {
+	cfg := m.Cfg
+	H, I := cfg.Hidden, cfg.Intermediate
+	offs := make([]int, len(seqs)+1)
+	for i, sq := range seqs {
+		for _, id := range sq {
+			if id < 0 || int(id) >= cfg.Vocab {
+				return nil, fmt.Errorf("modernbert: id %d hors vocabulaire", id)
+			}
 		}
+		offs[i+1] = offs[i] + len(sq)
+	}
+	N := offs[len(seqs)]
+	out := make([]float32, len(seqs)*H)
+	if N == 0 {
+		return out, nil
 	}
 	packs := m.packs()
 	w := 1
@@ -232,13 +254,16 @@ func (m *Model) Encode(b Batch) ([]float32, error) {
 	ws.xn = grow(ws.xn, N*H)
 	ws.qkv = grow(ws.qkv, N*3*H)
 	ws.ctx = grow(ws.ctx, N*H)
-	ws.tmp = grow(ws.tmp, N*H)
 	ws.z = grow(ws.z, N*2*I)
 	ws.g = grow(ws.g, N*I)
 	x, xn := ws.x, ws.xn
 
-	for r, id := range b.IDs {
-		m.embRow(id, xn[r*H:(r+1)*H])
+	r := 0
+	for _, sq := range seqs {
+		for _, id := range sq {
+			m.embRow(id, xn[r*H:(r+1)*H])
+			r++
+		}
 	}
 	layerNormInfer(x, xn, m.EmbNorm.W, N, H, cfg.NormEps, w)
 
@@ -250,7 +275,7 @@ func (m *Model) Encode(b Batch) ([]float32, error) {
 			attnIn = xn
 		}
 		p.qkv.mul(ws.qkv, attnIn, N, false, w)
-		m.attentionInfer(l, b, ws.qkv, ws.ctx, w)
+		m.attentionInfer(l, offs, ws.qkv, ws.ctx, w)
 		p.o.mul(x, ws.ctx, N, true, w) // x += attention
 
 		layerNormInfer(xn, x, L.MLPNorm.W, N, H, cfg.NormEps, w)
@@ -259,16 +284,37 @@ func (m *Model) Encode(b Batch) ([]float32, error) {
 		p.oMLP.mul(x, ws.g, N, true, w) // x += MLP
 	}
 	layerNormInfer(xn, x, m.FinalNorm.W, N, H, cfg.NormEps, w)
-	return MeanPool(xn, b, H), nil
+
+	// Moyenne des états de chaque séquence, spéciaux compris.
+	for i := range seqs {
+		n := offs[i+1] - offs[i]
+		if n == 0 {
+			continue
+		}
+		acc := make([]float64, H)
+		for t := offs[i]; t < offs[i+1]; t++ {
+			for k, v := range xn[t*H : (t+1)*H] {
+				acc[k] += float64(v)
+			}
+		}
+		for k := range acc {
+			out[i*H+k] = float32(acc[k] / float64(n))
+		}
+	}
+	return out, nil
 }
 
 // attentionInfer est attentionForward sans rien conserver : q, k, v de
 // chaque (séquence, tête) vivent dans des tampons de la tâche, et
 // l'attention se calcule par blocs (attendBlocks), en mémoire linéaire.
-func (m *Model) attentionInfer(l int, b Batch, qkv, ctx []float32, workers int) {
+func (m *Model) attentionInfer(l int, offs []int, qkv, ctx []float32, workers int) {
 	cfg := m.Cfg
 	H, nh, D := cfg.Hidden, cfg.Heads, cfg.HeadDim()
-	T := b.T
+	B := len(offs) - 1
+	T := 0
+	for i := 0; i < B; i++ {
+		T = max(T, offs[i+1]-offs[i])
+	}
 	half := D / 2
 	rope := m.ropeFor(m.theta(l), T)
 	scale := float32(1 / math.Sqrt(float64(D)))
@@ -276,18 +322,18 @@ func (m *Model) attentionInfer(l int, b Batch, qkv, ctx []float32, workers int) 
 	if !cfg.IsGlobal(l) {
 		window = cfg.Window()
 	}
-	linalg.ParallelN(workers, b.B()*nh, 1, func(lo, hi int) {
+	linalg.ParallelN(workers, B*nh, 1, func(lo, hi int) {
 		buf := make([]float32, 4*T*D)
 		q, k, v, o := buf[:T*D], buf[T*D:2*T*D], buf[2*T*D:3*T*D], buf[3*T*D:4*T*D]
 		blk := newBlockBuffers()
 		for task := lo; task < hi; task++ {
 			bi, h := task/nh, task%nh
-			n := b.Lens[bi]
+			off, n := offs[bi], offs[bi+1]-offs[bi]
 			if n == 0 {
 				continue
 			}
 			for t := 0; t < n; t++ {
-				row := qkv[(bi*T+t)*3*H:]
+				row := qkv[(off+t)*3*H:]
 				cos := rope.cos[t*half : (t+1)*half]
 				sin := rope.sin[t*half : (t+1)*half]
 				qt, kt := q[t*D:(t+1)*D], k[t*D:(t+1)*D]
@@ -299,15 +345,10 @@ func (m *Model) attentionInfer(l int, b Batch, qkv, ctx []float32, workers int) 
 			}
 			attendBlocks(o, q, k, v, n, D, window, scale, blk)
 			for t := 0; t < n; t++ {
-				copy(ctx[(bi*T+t)*H+h*D:(bi*T+t)*H+(h+1)*D], o[t*D:(t+1)*D])
+				copy(ctx[(off+t)*H+h*D:(off+t)*H+(h+1)*D], o[t*D:(t+1)*D])
 			}
 		}
 	})
-	// Les positions de padding ne sont lues par personne, mais le produit
-	// par Wo les additionne au flux résiduel : on les garde à zéro.
-	for bi, n := range b.Lens {
-		clear(ctx[(bi*T+n)*H : (bi+1)*T*H])
-	}
 }
 
 // layerNormInfer est layerNorm sans cache pour le backward.
