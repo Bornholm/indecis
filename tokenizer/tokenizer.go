@@ -23,6 +23,7 @@ import (
 	"bufio"
 	"bytes"
 	"container/heap"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"os"
@@ -73,6 +74,37 @@ func Load(path string) (*Tokenizer, error) {
 	}
 	defer f.Close()
 	return read(bufio.NewReaderSize(f, 1<<16))
+}
+
+var (
+	sharedMu sync.Mutex
+	shared   = map[[sha256.Size]byte]*Tokenizer{}
+)
+
+// LoadShared est Load, mais deux fichiers de même contenu donnent le même
+// Tokenizer : plusieurs modèles issus du même backbone n'en gardent qu'un
+// en mémoire (~12 Mo chacun). Un Tokenizer est immuable et sûr en accès
+// concurrent, son cache de mots compris.
+func LoadShared(path string) (*Tokenizer, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	h := sha256.New()
+	t, err := read(bufio.NewReaderSize(io.TeeReader(f, h), 1<<16))
+	if err != nil {
+		return nil, err
+	}
+	var key [sha256.Size]byte
+	h.Sum(key[:0])
+	sharedMu.Lock()
+	defer sharedMu.Unlock()
+	if prev, ok := shared[key]; ok {
+		return prev, nil
+	}
+	shared[key] = t
+	return t, nil
 }
 
 // Parse lit le contenu d'un tokenizer.json.

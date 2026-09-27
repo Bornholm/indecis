@@ -84,3 +84,21 @@ func hasByteTokens(t *Tokenizer, ids []int32) bool {
 	}
 	return false
 }
+
+func TestLoadShared(t *testing.T) {
+	path := filepath.Join(bekkoDir(t), "tokenizer.json")
+	copyPath := filepath.Join(t.TempDir(), "tokenizer.json")
+	b, _ := os.ReadFile(path)
+	os.WriteFile(copyPath, b, 0o644)
+	a, err := LoadShared(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := LoadShared(copyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a != c {
+		t.Fatal("deux fichiers identiques devraient donner le même tokenizer")
+	}
+}

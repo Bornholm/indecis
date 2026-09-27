@@ -214,7 +214,7 @@ func New(backboneDir string, schema Schema, seed int64, opts ...Option) (*Model,
 		return nil, err
 	}
 	tokPath := filepath.Join(backboneDir, "tokenizer.json")
-	tok, err := tokenizer.Load(tokPath)
+	tok, err := tokenizer.LoadShared(tokPath)
 	if err != nil {
 		return nil, err
 	}
@@ -629,7 +629,7 @@ func Load(dir string, opts ...Option) (*Model, error) {
 		}
 	}
 	tokPath := filepath.Join(dir, fileTokenizer)
-	tok, err := tokenizer.Load(tokPath)
+	tok, err := tokenizer.LoadShared(tokPath)
 	if err != nil {
 		return nil, err
 	}
