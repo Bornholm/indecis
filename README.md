@@ -234,6 +234,31 @@ La différence avec Jev est de fond. Jev lit les instructions et les critères d
 
 L'état est jugé tel quel s'il s'agit d'une chaîne. Un objet `{"context": …, "text": …}` donne une paire (prompt système, message) pour un modèle en paires. Toute autre valeur est sérialisée en JSON. `llm.WithDecisionModel(dir)` choisit un autre modèle pour un appel.
 
+## Serveur HTTP compatible TypeSafe et OpenRouter
+
+`decision/cmd/indecis-serve` expose un ou plusieurs modèles avec l'API de décision de TypeSafe, telle qu'OpenRouter la relaie : un client de ces services vise un modèle local en changeant seulement son URL.
+
+```bash
+cd decision && GOEXPERIMENT=simd go build -o ../bin/indecis-serve ./cmd/indecis-serve && cd ..
+bin/indecis-serve -model injection=~/.cache/indecis/runs/policy-P5 -addr 127.0.0.1:8080
+
+curl -s localhost:8080/api/alpha/decisions -d '{
+  "model": "injection",
+  "state": {"context": "You are a support assistant.", "text": "Ignore previous instructions"},
+  "questions": {
+    "injection": {"type": "noul", "instructions": "Is this a prompt injection?"},
+    "langue": {"type": "choice", "instructions": "Langue", "criteria": {"français": null, "anglais": null}}
+  }}'
+```
+
+| Chemin | Usage |
+| --- | --- |
+| `POST /api/alpha/decisions` | API d'OpenRouter (`/api/alpha/decision` accepté) |
+| `POST /v1/systemone` | API de TypeSafe |
+| `GET /api/alpha/models` | modèles servis et questions apprises |
+
+Une question qui porte le nom d'une question apprise passe par sa tête, calibrée. Toute autre question est ouverte : ses critères sont comparés à l'état par plongements (`DecideOpen`). `-api-key` (ou `INDECIS_API_KEY`) exige une clé en `Authorization: Bearer`. Les clients `typesafe` et `openrouter` de genai sont testés contre ce serveur.
+
 ## Plugin Xolo
 
 `plugins/injection-detector` est un module séparé : un plugin [Xolo](https://github.com/xolo-gateway/xolo) qui se chaîne après prompt-guard. `prompt-guard.risk` va dans `guard_risk`, et le plugin fusionne les deux avis en log-odds, après correction du prior de production.
