@@ -7,7 +7,7 @@ XOLO_PLUGINS_DIR ?= ../xolo/bin/plugins
 BEKKO_DIR ?= $(HOME)/.cache/indecis/models/bekko-embedding-v1-a8m
 ORACLE := tools/oracle/.venv/bin/python
 
-.PHONY: test test-scalar bench plugin install-plugin oracle fixtures clean
+.PHONY: test test-scalar bench plugin install-plugin serve oracle fixtures clean
 
 test:
 	go test ./...
@@ -27,6 +27,10 @@ plugin:
 
 install-plugin: plugin
 	install -m 0755 bin/injection-detector $(XOLO_PLUGINS_DIR)/injection-detector
+
+# Serveur HTTP compatible avec l'API de décision TypeSafe / OpenRouter.
+serve:
+	cd decision && go build -o ../bin/indecis-serve ./cmd/indecis-serve
 
 # Environnement Python de l'oracle de parité (tests uniquement).
 oracle:

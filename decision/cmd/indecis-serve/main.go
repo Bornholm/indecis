@@ -10,6 +10,10 @@
 //	  "questions": {"injection": {"type": "noul", "instructions": "?"}}
 //	}'
 //
+// -model accepte aussi un backbone brut (config.json, model.safetensors,
+// tokenizer.json, sans indecis.json), bekko par exemple : il ne répond
+// alors qu'aux questions ouvertes, sans entraînement.
+//
 // Clients : genai (provider openrouter avec GENAI_…_BASE_URL=http://…/api/v1,
 // ou typesafe avec http://…/v1), SDK TypeSafe, curl.
 package main
@@ -56,7 +60,7 @@ func main() {
 		if !ok {
 			name, dir = filepath.Base(spec), spec
 		}
-		m, err := indecis.Load(dir, opts...)
+		m, err := load(dir, opts)
 		if err != nil {
 			log.Error("chargement", "model", dir, "error", err)
 			os.Exit(1)
@@ -72,4 +76,15 @@ func main() {
 		log.Error("serveur", "error", err)
 		os.Exit(1)
 	}
+}
+
+// load lit un modèle indecis, ou prépare un backbone brut pour les seules
+// questions ouvertes.
+func load(dir string, opts []indecis.Option) (*indecis.Model, error) {
+	if _, err := os.Stat(filepath.Join(dir, "indecis.json")); err == nil {
+		return indecis.Load(dir, opts...)
+	}
+	// La question apprise est un simple point d'ancrage : sa tête n'est pas
+	// entraînée, elle ne doit pas être interrogée (voir le tutoriel).
+	return indecis.New(dir, indecis.Schema{indecis.NewNoul("match", "")}, 1, opts...)
 }

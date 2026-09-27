@@ -265,6 +265,8 @@ Une option peut porter des exemples : sa description devient un objet `{"descrip
   "Informatique": {"examples": ["L'imprimante est en panne", "Impossible de me connecter à la messagerie"]}}}
 ```
 
+Pas à pas, du téléchargement du modèle aux appels avec curl : [docs/tutoriel-classement-courriels.md](docs/tutoriel-classement-courriels.md).
+
 Une question qui porte le nom d'une question apprise passe par sa tête, calibrée. Toute autre question est ouverte : ses critères sont comparés à l'état par plongements (`DecideOpen`). `-api-key` (ou `INDECIS_API_KEY`) exige une clé en `Authorization: Bearer`. Les clients `typesafe` et `openrouter` de genai sont testés contre ce serveur.
 
 ## Plugin Xolo
