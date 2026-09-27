@@ -86,8 +86,9 @@ type Option func(*Model)
 func WithMaxLen(n int) Option { return func(m *Model) { m.maxLen = n } }
 
 // WithThreads borne le nombre de cœurs utilisés par les calculs (0 : tous).
-// Le réglage vaut pour tout le processus. Pour servir des requêtes isolées,
-// 1 est souvent le plus rapide ; pour l'entraînement, tous les cœurs.
+// Le réglage vaut pour tout le processus. En inférence, un lot de moins de
+// 1024 positions se calcule de toute façon sur un seul cœur, le plus rapide
+// pour une phrase ; les longs textes et les gros lots se répartissent.
 func WithThreads(n int) Option { return func(*Model) { linalg.SetMaxWorkers(n) } }
 
 // WithInt8 fait calculer les couches de l'encodeur en int8 (poids par

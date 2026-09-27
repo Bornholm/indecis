@@ -44,7 +44,7 @@ func main() {
 	flag.Var(&models, "model", "modèle à servir : répertoire, ou nom=répertoire (répétable ; le premier est le modèle par défaut)")
 	addr := flag.String("addr", "127.0.0.1:8080", "adresse d'écoute")
 	apiKey := flag.String("api-key", os.Getenv("INDECIS_API_KEY"), "clé exigée en Authorization: Bearer (vide : aucune)")
-	threads := flag.Int("threads", 1, "cœurs par requête (0 : tous)")
+	threads := flag.Int("threads", 0, "cœurs au plus par requête (0 : tous) ; un texte de moins de 1024 tokens en utilise toujours un seul")
 	int8 := flag.Bool("int8", true, "couches en int8 si le processeur a AVX-VNNI")
 	cache := flag.Int("embed-cache", 4096, "plongements d'options gardés en cache (questions ouvertes)")
 	maxConcurrent := flag.Int("max-concurrent", runtime.GOMAXPROCS(0), "décisions calculées en même temps, les autres attendent (0 : pas de borne)")

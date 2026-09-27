@@ -3,6 +3,7 @@ package modernbert
 import (
 	"fmt"
 	"math"
+	"math/rand"
 	"testing"
 )
 
@@ -207,5 +208,40 @@ func TestCompactInt8(t *testing.T) {
 	m.Encode(b)
 	if m.Layers[0].Wqkv.W != nil {
 		t.Fatal("les matrices devraient être libérées en int8 compact")
+	}
+}
+
+// Sur des séquences longues et de longueurs mêlées, l'attention par blocs
+// (fenêtre locale comprise) redonne l'attention complète de Forward.
+func TestEncodeLongMatchesForward(t *testing.T) {
+	m, _ := loadBekko(t)
+	H := m.Cfg.Hidden
+	r := rand.New(rand.NewSource(7))
+	var seqs [][]int32
+	for _, n := range []int{300, 1000, 2100} {
+		s := make([]int32, n)
+		s[0] = 2 // <bos>
+		for i := 1; i < n; i++ {
+			s[i] = int32(1000 + r.Intn(200000))
+		}
+		seqs = append(seqs, s)
+	}
+	b := NewBatch(seqs, m.Cfg.PadID)
+	st, err := m.Forward(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := MeanPool(st.Hidden, b, H)
+	st = nil
+	got, err := m.Encode(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range seqs {
+		d := maxAbsDiff(got[i*H:(i+1)*H], want[i*H:(i+1)*H])
+		t.Logf("%d tokens : |Encode − Forward|max = %.2g", len(seqs[i]), d)
+		if d > 2e-5 {
+			t.Errorf("%d tokens : |Δ|max = %g", len(seqs[i]), d)
+		}
 	}
 }

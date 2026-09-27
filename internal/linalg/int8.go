@@ -78,6 +78,11 @@ func (p *PackedB8) Size() int { return len(p.data) + 8*p.n }
 // MatMul8 calcule C = A·op(B) (ou C += si accumulate), A étant m×k, avec la
 // quantification int8 décrite plus haut.
 func MatMul8(c, a []float32, b *PackedB8, m int, accumulate bool) {
+	MatMul8N(c, a, b, m, accumulate, Workers())
+}
+
+// MatMul8N est MatMul8 avec au plus limit workers.
+func MatMul8N(c, a []float32, b *PackedB8, m int, accumulate bool, limit int) {
 	k, n := b.k, b.n
 	if m == 0 || n == 0 {
 		return
@@ -122,12 +127,12 @@ func MatMul8(c, a []float32, b *PackedB8, m int, accumulate bool) {
 		}
 	}
 	// Même règle que MatMul : un worker par tranche de calcul suffisante.
-	active := min(Workers(), max(1, m*n*k/(4*macsPerWorker)))
+	active := min(max(1, min(limit, Workers())), max(1, m*n*k/(4*macsPerWorker)))
 	if active == 1 {
 		work(0, colPanels)
 		return
 	}
-	Parallel(colPanels, max(1, colPanels/(4*active)), work)
+	ParallelN(active, colPanels, max(1, colPanels/(4*active)), work)
 }
 
 // quantizeA quantifie chaque ligne de A et l'empaquette par panneaux de 6

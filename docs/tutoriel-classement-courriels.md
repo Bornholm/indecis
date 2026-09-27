@@ -85,7 +85,10 @@ Options utiles :
 | `-model nom=répertoire` | modèle servi, répétable ; le premier sert par défaut |
 | `-addr` | adresse d'écoute, `127.0.0.1:8080` par défaut |
 | `-api-key` | exige `Authorization: Bearer <clé>` (ou la variable `INDECIS_API_KEY`) |
-| `-threads` | cœurs par requête ; 1 par défaut, le plus rapide pour une requête isolée |
+| `-threads` | cœurs au plus par requête, tous par défaut ; un texte de moins de 1 024 tokens n'en utilise qu'un |
+| `-max-len` | tokens lus au plus par texte, 256 par défaut (voir « Limites ») |
+| `-max-concurrent` | décisions calculées en même temps, le nombre de cœurs par défaut ; les autres attendent |
+| `-memory-limit` | limite souple de mémoire, en Mio |
 | `-int8=false` | revient au calcul en float32 |
 | `-embed-cache` | nombre de textes dont le plongement reste en mémoire, 4 096 par défaut |
 
@@ -268,7 +271,7 @@ Les erreurs arrivent au format `{"error": {"message": "…", "code": …}}`.
 ## Limites à connaître
 
 - **Les probabilités ne sont pas calibrées.** Un 0,997 ne veut pas dire 99,7 % de chances d'avoir raison. Pour repérer un courriel qui ne relève d'aucune catégorie, fixez un seuil de `confidence` sur quelques dizaines d'exemples, ou ajoutez une catégorie « Autre » décrite par des exemples.
-- **Le modèle lit 256 tokens au plus.** Au-delà, le texte est tronqué.
+- **Le modèle lit 256 tokens par défaut.** Au-delà, le texte est tronqué. `-max-len 2048` lit davantage : sur a8m, un texte de 2 048 tokens prend environ 0,35 s et 30 Mo, 4 096 tokens environ 1,1 s. Les modèles ont été affinés sur 256 tokens : mesurez la qualité avant d'allonger.
 - **Les chiffres de l'étape 2 viennent d'une preuve de concept** : un seul entraînement, des tests sans relecture humaine. Mesurez sur vos propres courriels avant de vous fier au classement.
 
 ## Aller plus loin

@@ -25,10 +25,16 @@ func Workers() int {
 // Parallel découpe [0, n) en tranches d'au moins grain éléments et appelle
 // fn sur chacune, en parallèle. Les tranches sont disjointes.
 func Parallel(n, grain int, fn func(lo, hi int)) {
+	ParallelN(Workers(), n, grain, fn)
+}
+
+// ParallelN est Parallel avec au plus limit goroutines (bornées aussi par
+// Workers).
+func ParallelN(limit, n, grain int, fn func(lo, hi int)) {
 	if n <= 0 {
 		return
 	}
-	workers := Workers()
+	workers := max(1, min(limit, Workers()))
 	if grain < 1 {
 		grain = 1
 	}

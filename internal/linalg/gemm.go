@@ -330,6 +330,11 @@ func (p *PackedB) Size() int {
 // MatMulPacked est MatMul avec un B empaqueté par PackB : C = A·op(B), A
 // étant m×k.
 func MatMulPacked(c, a []float32, b *PackedB, m int, accumulate bool) {
+	MatMulPackedN(c, a, b, m, accumulate, Workers())
+}
+
+// MatMulPackedN est MatMulPacked avec au plus limit workers.
+func MatMulPackedN(c, a []float32, b *PackedB, m int, accumulate bool, limit int) {
 	k, n := b.k, b.n
 	if m == 0 || n == 0 || k == 0 {
 		if !accumulate && k == 0 {
@@ -350,7 +355,7 @@ func MatMulPacked(c, a []float32, b *PackedB, m int, accumulate bool) {
 		nr:         b.nr,
 		pre:        b,
 	}
-	g.run(Workers())
+	g.run(max(1, min(limit, Workers())))
 }
 
 var bufPool sync.Pool

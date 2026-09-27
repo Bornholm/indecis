@@ -72,12 +72,12 @@ func packMat(w []float32, k, n int, int8 bool) packedMat {
 }
 
 // mul calcule c = a·Wᵀ (ou c += si accumulate), a ayant m lignes.
-func (p packedMat) mul(c, a []float32, m int, accumulate bool) {
+func (p packedMat) mul(c, a []float32, m int, accumulate bool, workers int) {
 	if p.q != nil {
-		linalg.MatMul8(c, a, p.q, m, accumulate)
+		linalg.MatMul8N(c, a, p.q, m, accumulate, workers)
 		return
 	}
-	linalg.MatMulPacked(c, a, p.f, m, accumulate)
+	linalg.MatMulPackedN(c, a, p.f, m, accumulate, workers)
 }
 
 // packedLayer contient les matrices d'une couche prêtes pour le produit.
@@ -218,6 +218,10 @@ func (m *Model) Encode(b Batch) ([]float32, error) {
 		}
 	}
 	packs := m.packs()
+	w := 1
+	if N >= parallelRows {
+		w = linalg.Workers()
+	}
 
 	ws, _ := workspaces.Get().(*workspace)
 	if ws == nil {
@@ -236,31 +240,32 @@ func (m *Model) Encode(b Batch) ([]float32, error) {
 	for r, id := range b.IDs {
 		m.embRow(id, xn[r*H:(r+1)*H])
 	}
-	layerNormInfer(x, xn, m.EmbNorm.W, N, H, cfg.NormEps)
+	layerNormInfer(x, xn, m.EmbNorm.W, N, H, cfg.NormEps, w)
 
 	for l, L := range m.Layers {
 		p := packs[l]
 		attnIn := x
 		if L.AttnNorm != nil {
-			layerNormInfer(xn, x, L.AttnNorm.W, N, H, cfg.NormEps)
+			layerNormInfer(xn, x, L.AttnNorm.W, N, H, cfg.NormEps, w)
 			attnIn = xn
 		}
-		p.qkv.mul(ws.qkv, attnIn, N, false)
-		m.attentionInfer(l, b, ws.qkv, ws.ctx)
-		p.o.mul(x, ws.ctx, N, true) // x += attention
+		p.qkv.mul(ws.qkv, attnIn, N, false, w)
+		m.attentionInfer(l, b, ws.qkv, ws.ctx, w)
+		p.o.mul(x, ws.ctx, N, true, w) // x += attention
 
-		layerNormInfer(xn, x, L.MLPNorm.W, N, H, cfg.NormEps)
-		p.i.mul(ws.z, xn, N, false)
-		gluInfer(ws.g, ws.z, N, I)
-		p.oMLP.mul(x, ws.g, N, true) // x += MLP
+		layerNormInfer(xn, x, L.MLPNorm.W, N, H, cfg.NormEps, w)
+		p.i.mul(ws.z, xn, N, false, w)
+		gluInfer(ws.g, ws.z, N, I, w)
+		p.oMLP.mul(x, ws.g, N, true, w) // x += MLP
 	}
-	layerNormInfer(xn, x, m.FinalNorm.W, N, H, cfg.NormEps)
+	layerNormInfer(xn, x, m.FinalNorm.W, N, H, cfg.NormEps, w)
 	return MeanPool(xn, b, H), nil
 }
 
-// attentionInfer est attentionForward sans rien conserver : q, k, v et les
-// scores de chaque (séquence, tête) vivent dans des tampons de la tâche.
-func (m *Model) attentionInfer(l int, b Batch, qkv, ctx []float32) {
+// attentionInfer est attentionForward sans rien conserver : q, k, v de
+// chaque (séquence, tête) vivent dans des tampons de la tâche, et
+// l'attention se calcule par blocs (attendBlocks), en mémoire linéaire.
+func (m *Model) attentionInfer(l int, b Batch, qkv, ctx []float32, workers int) {
 	cfg := m.Cfg
 	H, nh, D := cfg.Hidden, cfg.Heads, cfg.HeadDim()
 	T := b.T
@@ -271,10 +276,10 @@ func (m *Model) attentionInfer(l int, b Batch, qkv, ctx []float32) {
 	if !cfg.IsGlobal(l) {
 		window = cfg.Window()
 	}
-	linalg.Parallel(b.B()*nh, 1, func(lo, hi int) {
-		buf := make([]float32, 4*T*D+T*T)
+	linalg.ParallelN(workers, b.B()*nh, 1, func(lo, hi int) {
+		buf := make([]float32, 4*T*D)
 		q, k, v, o := buf[:T*D], buf[T*D:2*T*D], buf[2*T*D:3*T*D], buf[3*T*D:4*T*D]
-		s := buf[4*T*D:]
+		blk := newBlockBuffers()
 		for task := lo; task < hi; task++ {
 			bi, h := task/nh, task%nh
 			n := b.Lens[bi]
@@ -292,33 +297,7 @@ func (m *Model) attentionInfer(l int, b Batch, qkv, ctx []float32) {
 				applyRope(qt, cos, sin)
 				applyRope(kt, cos, sin)
 			}
-			p := s[:n*n]
-			linalg.MatMulSerial(p, q, k, n, D, n, false, true, false)
-			for i := 0; i < n; i++ {
-				row := p[i*n : (i+1)*n]
-				j0, j1 := 0, n
-				if window >= 0 {
-					j0, j1 = max(0, i-window), min(n, i+window+1)
-				}
-				mx := float32(math.Inf(-1))
-				for j := j0; j < j1; j++ {
-					row[j] *= scale
-					mx = max(mx, row[j])
-				}
-				var sum float32
-				for j := j0; j < j1; j++ {
-					e := exp32(row[j] - mx)
-					row[j] = e
-					sum += e
-				}
-				inv := 1 / sum
-				clear(row[:j0])
-				clear(row[j1:])
-				for j := j0; j < j1; j++ {
-					row[j] *= inv
-				}
-			}
-			linalg.MatMulSerial(o, p, v, n, n, D, false, false, false)
+			attendBlocks(o, q, k, v, n, D, window, scale, blk)
 			for t := 0; t < n; t++ {
 				copy(ctx[(bi*T+t)*H+h*D:(bi*T+t)*H+(h+1)*D], o[t*D:(t+1)*D])
 			}
@@ -332,8 +311,8 @@ func (m *Model) attentionInfer(l int, b Batch, qkv, ctx []float32) {
 }
 
 // layerNormInfer est layerNorm sans cache pour le backward.
-func layerNormInfer(out, x, gamma []float32, n, h int, eps float64) {
-	linalg.Parallel(n, rowGrain, func(lo, hi int) {
+func layerNormInfer(out, x, gamma []float32, n, h int, eps float64, workers int) {
+	linalg.ParallelN(workers, n, rowGrain, func(lo, hi int) {
 		for r := lo; r < hi; r++ {
 			row := x[r*h : (r+1)*h]
 			var mean float64
@@ -358,8 +337,8 @@ func layerNormInfer(out, x, gamma []float32, n, h int, eps float64) {
 }
 
 // gluInfer est gluForward avec la GELU en float32.
-func gluInfer(g, z []float32, n, inter int) {
-	linalg.Parallel(n, rowGrain, func(lo, hi int) {
+func gluInfer(g, z []float32, n, inter int, workers int) {
+	linalg.ParallelN(workers, n, rowGrain, func(lo, hi int) {
 		for r := lo; r < hi; r++ {
 			a := z[r*2*inter : r*2*inter+inter]
 			b := z[r*2*inter+inter : (r+1)*2*inter]
@@ -369,4 +348,106 @@ func gluInfer(g, z []float32, n, inter int) {
 			}
 		}
 	})
+}
+
+// Attention par blocs, à la manière de FlashAttention : les requêtes sont
+// traitées par blocs de qBlock positions, les clés par blocs de kBlock, et
+// le softmax est mis à jour au fil des blocs de clés (maximum et somme
+// courants par ligne). La matrice complète des scores n'existe jamais : la
+// mémoire est linéaire en la longueur. Dans une couche locale, seuls les
+// blocs de clés qui touchent la fenêtre sont parcourus : le calcul devient
+// linéaire lui aussi. Le résultat est celui du softmax complet, à
+// l'arrondi près.
+const (
+	qBlock = 64
+	kBlock = 128
+
+	// parallelRows est le nombre de positions (toutes séquences du lot
+	// confondues) à partir duquel Encode répartit son calcul sur plusieurs
+	// cœurs. En deçà, lancer des goroutines coûte plus que le calcul, et un
+	// processeur hybride les envoie sur ses cœurs lents : une phrase se
+	// calcule deux fois plus vite sur un seul cœur.
+	parallelRows = 1024
+)
+
+type blockBuffers struct {
+	s       []float32 // scores d'un bloc, [qBlock, kBlock]
+	mx, sum []float32 // maximum et somme courants par ligne
+}
+
+func newBlockBuffers() *blockBuffers {
+	return &blockBuffers{
+		s:   make([]float32, qBlock*kBlock),
+		mx:  make([]float32, qBlock),
+		sum: make([]float32, qBlock),
+	}
+}
+
+// attendBlocks écrit dans o (n×D) l'attention de q sur k, v (n×D chacun).
+// window < 0 : attention globale ; sinon, |i − j| ≤ window.
+func attendBlocks(o, q, k, v []float32, n, D, window int, scale float32, b *blockBuffers) {
+	negInf := float32(math.Inf(-1))
+	for i0 := 0; i0 < n; i0 += qBlock {
+		i1 := min(n, i0+qBlock)
+		rows := i1 - i0
+		ob := o[i0*D : i1*D]
+		clear(ob)
+		mx, sum := b.mx[:rows], b.sum[:rows]
+		for r := range mx {
+			mx[r], sum[r] = negInf, 0
+		}
+		j0, j1 := 0, n
+		if window >= 0 {
+			j0, j1 = max(0, i0-window), min(n, i1-1+window+1)
+		}
+		for jb := j0; jb < j1; jb += kBlock {
+			je := min(j1, jb+kBlock)
+			cols := je - jb
+			sc := b.s[:rows*cols]
+			linalg.MatMulSerial(sc, q[i0*D:i1*D], k[jb*D:je*D], rows, D, cols, false, true, false)
+			for r := 0; r < rows; r++ {
+				i := i0 + r
+				row := sc[r*cols : (r+1)*cols]
+				bm := negInf
+				for c := range row {
+					j := jb + c
+					if window >= 0 && (i-j > window || j-i > window) {
+						row[c] = negInf
+						continue
+					}
+					row[c] *= scale
+					bm = max(bm, row[c])
+				}
+				if bm == negInf {
+					clear(row) // aucune clé de ce bloc dans la fenêtre
+					continue
+				}
+				m := max(mx[r], bm)
+				if corr := exp32(mx[r] - m); corr != 1 {
+					sum[r] *= corr
+					orow := ob[r*D : (r+1)*D]
+					for d := range orow {
+						orow[d] *= corr
+					}
+				}
+				mx[r] = m
+				var bs float32
+				for c, x := range row {
+					e := exp32(x - m)
+					row[c] = e
+					bs += e
+				}
+				sum[r] += bs
+			}
+			// o += P·V du bloc.
+			linalg.MatMulSerial(ob, sc, v[jb*D:je*D], rows, cols, D, false, false, true)
+		}
+		for r := 0; r < rows; r++ {
+			inv := 1 / sum[r]
+			orow := ob[r*D : (r+1)*D]
+			for d := range orow {
+				orow[d] *= inv
+			}
+		}
+	}
 }
