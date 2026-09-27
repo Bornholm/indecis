@@ -451,3 +451,29 @@ func attendBlocks(o, q, k, v []float32, n, D, window int, scale float32, b *bloc
 		}
 	}
 }
+
+// RemapVocabulary réduit la table d'embeddings à un nouveau vocabulaire :
+// newID[ancien] est le nouvel id d'un token gardé, -1 pour un token retiré.
+// Les ids gardés doivent former [0, size).
+func (m *Model) RemapVocabulary(newID []int32, size int) error {
+	if len(newID) != m.Cfg.Vocab {
+		return fmt.Errorf("modernbert: correspondance de %d ids pour un vocabulaire de %d", len(newID), m.Cfg.Vocab)
+	}
+	if pad := newID[m.Cfg.PadID]; pad < 0 {
+		return fmt.Errorf("modernbert: le token de padding est retiré")
+	}
+	H := m.Cfg.Hidden
+	w := make([]float32, size*H)
+	for old, id := range newID {
+		if id >= 0 {
+			if int(id) >= size {
+				return fmt.Errorf("modernbert: id %d hors du nouveau vocabulaire", id)
+			}
+			m.embRow(int32(old), w[int(id)*H:(int(id)+1)*H])
+		}
+	}
+	m.Cfg.PadID = newID[m.Cfg.PadID]
+	m.Cfg.Vocab = size
+	m.Emb.W, m.Emb.Shape, m.embTable = w, []int{size, H}, nil
+	return nil
+}

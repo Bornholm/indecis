@@ -64,6 +64,9 @@ type Model struct {
 	// tokenizerPath est le tokenizer.json d'origine, recopié par Save. Le
 	// garder en mémoire coûterait 34 Mo pour un usage rare.
 	tokenizerPath string
+	// tokenizerJSON remplace tokenizerPath quand le tokenizer a été modifié
+	// (PruneVocabulary).
+	tokenizerJSON []byte
 	heads         []*head
 	temps         []float64
 	maxLen        int
@@ -132,6 +135,12 @@ func (m *Model) tokenize(context, text string) ([]int32, error) {
 		return nil, fmt.Errorf("indecis: contexte fourni à un modèle construit sans WithPairs")
 	}
 	return m.tok.EncodeMax(text, m.maxLen), nil
+}
+
+// TokenIDs retourne les ids des tokens que le modèle lit pour une entrée,
+// troncature comprise.
+func (m *Model) TokenIDs(in Input) ([]int32, error) {
+	return m.tokenize(in.Context, in.Text)
 }
 
 // Tokens retourne le nombre de tokens qu'une entrée occupe, troncature
@@ -396,9 +405,9 @@ func (m *Model) Save(dir string) error {
 	if err := writeBytes(filepath.Join(dir, fileConfig), cfgJSON); err != nil {
 		return err
 	}
-	tokRaw, err := os.ReadFile(m.tokenizerPath)
+	tokRaw, err := m.tokenizerSource()
 	if err != nil {
-		return fmt.Errorf("indecis: tokenizer d'origine : %w", err)
+		return err
 	}
 	if err := writeBytes(filepath.Join(dir, fileTokenizer), tokRaw); err != nil {
 		return err
@@ -555,4 +564,15 @@ func Load(dir string, opts ...Option) (*Model, error) {
 		o(m)
 	}
 	return m, nil
+}
+
+func (m *Model) tokenizerSource() ([]byte, error) {
+	if m.tokenizerJSON != nil {
+		return m.tokenizerJSON, nil
+	}
+	b, err := os.ReadFile(m.tokenizerPath)
+	if err != nil {
+		return nil, fmt.Errorf("indecis: tokenizer d'origine : %w", err)
+	}
+	return b, nil
 }

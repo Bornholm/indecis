@@ -336,6 +336,13 @@ func (t *Tokenizer) EncodePair(context, text string, maxLen int) []int32 {
 
 // appendText découpe text autour des tokens ajoutés et tokenise les segments.
 func (t *Tokenizer) appendText(ids []int32, text string) []int32 {
+	t.walk(text, func(id int32) { ids = append(ids, id) }, func(w string) { ids = t.appendWord(ids, w) })
+	return ids
+}
+
+// walk découpe text : added reçoit chaque token ajouté repéré dans le texte
+// brut, word chaque morceau à passer au BPE, dans l'ordre.
+func (t *Tokenizer) walk(text string, added func(int32), word func(string)) {
 	start := 0 // début du segment courant
 	i := 0
 	for i < len(text) {
@@ -363,11 +370,11 @@ func (t *Tokenizer) appendText(ids []int32, text string) []int32 {
 				mEnd += size
 			}
 		}
-		ids = t.appendSegment(ids, text[start:mStart])
-		ids = append(ids, a.id)
+		t.walkSegment(text[start:mStart], word)
+		added(a.id)
 		start, i = mEnd, mEnd
 	}
-	return t.appendSegment(ids, text[start:])
+	t.walkSegment(text[start:], word)
 }
 
 // matchAdded retourne le plus long token ajouté qui commence en text[i].
@@ -380,10 +387,10 @@ func (t *Tokenizer) matchAdded(text string, i int) (addedToken, bool) {
 	return addedToken{}, false
 }
 
-// appendSegment normalise, pré-tokenise et passe chaque morceau au BPE.
-func (t *Tokenizer) appendSegment(ids []int32, seg string) []int32 {
+// walkSegment normalise, pré-tokenise et passe chaque morceau à word.
+func (t *Tokenizer) walkSegment(seg string, word func(string)) {
 	if seg == "" {
-		return ids
+		return
 	}
 	s := strings.ReplaceAll(seg, " ", metaspace)
 	if !strings.HasPrefix(s, metaspace) {
@@ -393,7 +400,7 @@ func (t *Tokenizer) appendSegment(ids []int32, seg string) []int32 {
 	for len(s) > 0 {
 		next := strings.Index(s[len(metaspace):], metaspace)
 		if next < 0 {
-			ids = t.appendWord(ids, s)
+			word(s)
 			break
 		}
 		cut := next + len(metaspace)
@@ -402,10 +409,17 @@ func (t *Tokenizer) appendSegment(ids []int32, seg string) []int32 {
 			// pas le cas ici puisqu'un ▁ a été ajouté en tête.
 			cut = strings.Index(s, metaspace)
 		}
-		ids = t.appendWord(ids, s[:cut])
+		word(s[:cut])
 		s = s[cut:]
 	}
-	return ids
+}
+
+// Trace appelle visit pour chaque token que le découpage de text produit
+// ou traverse : tokens ajoutés, symboles de départ du BPE (caractères,
+// octets) et chaque fusion intermédiaire. Un vocabulaire qui garde tous
+// ces tokens découpe text exactement comme celui-ci (voir Prune).
+func (t *Tokenizer) Trace(text string, visit func(id int32)) {
+	t.walk(text, visit, func(w string) { t.bpeVisit(w, visit) })
 }
 
 func (t *Tokenizer) appendWord(ids []int32, word string) []int32 {
@@ -433,7 +447,11 @@ type symbol struct {
 
 // bpe applique les fusions à un mot, dans l'ordre de la bibliothèque de
 // référence : rang croissant, puis position croissante.
-func (t *Tokenizer) bpe(word string) []int32 {
+func (t *Tokenizer) bpe(word string) []int32 { return t.bpeVisit(word, nil) }
+
+// bpeVisit est bpe, en signalant à visit (s'il est fourni) chaque symbole
+// de départ et chaque fusion appliquée.
+func (t *Tokenizer) bpeVisit(word string, visit func(int32)) []int32 {
 	syms := make([]symbol, 0, len(word))
 	lastUnk := false
 	for _, r := range word {
@@ -466,6 +484,9 @@ func (t *Tokenizer) bpe(word string) []int32 {
 	}
 	for i := range syms {
 		syms[i].prev, syms[i].next = i-1, i+1
+		if visit != nil {
+			visit(syms[i].id)
+		}
 	}
 	if n := len(syms); n > 0 {
 		syms[n-1].next = -1
@@ -490,6 +511,9 @@ func (t *Tokenizer) bpe(word string) []int32 {
 			continue
 		}
 		cur.id = top.id
+		if visit != nil {
+			visit(top.id)
+		}
 		syms[cur.next].merged = true
 		cur.next = right.next
 		if right.next >= 0 {
