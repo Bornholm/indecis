@@ -428,39 +428,48 @@ const (
 
 type blockBuffers struct {
 	s       []float32 // scores d'un bloc, [qBlock, kBlock]
-	mx, sum []float32 // maximum et somme courants par ligne
+	mx, sum []float32 // maximum et somme courants par ligne, [n]
 }
 
 func newBlockBuffers() *blockBuffers {
-	return &blockBuffers{
-		s:   make([]float32, qBlock*kBlock),
-		mx:  make([]float32, qBlock),
-		sum: make([]float32, qBlock),
-	}
+	return &blockBuffers{s: make([]float32, qBlock*kBlock)}
 }
 
 // attendBlocks écrit dans o (n×D) l'attention de q sur k, v (n×D chacun).
-// window < 0 : attention globale ; sinon, |i − j| ≤ window.
+// window < 0 : attention globale ; sinon, |i − j| ≤ window. q est modifié
+// (multiplié par scale).
+//
+// Les blocs de clés sont à l'extérieur : chaque bloc de K et de V est
+// empaqueté une fois pour le produit matriciel, puis sert à tous les blocs
+// de requêtes qui le voient. Le maximum et la somme du softmax sont tenus
+// pour toutes les lignes.
 func attendBlocks(o, q, k, v []float32, n, D, window int, scale float32, b *blockBuffers) {
 	negInf := float32(math.Inf(-1))
-	for i0 := 0; i0 < n; i0 += qBlock {
-		i1 := min(n, i0+qBlock)
-		rows := i1 - i0
-		ob := o[i0*D : i1*D]
-		clear(ob)
-		mx, sum := b.mx[:rows], b.sum[:rows]
-		for r := range mx {
-			mx[r], sum[r] = negInf, 0
-		}
-		j0, j1 := 0, n
+	linalg.Scale(q[:n*D], scale) // scores déjà mis à l'échelle
+	clear(o[:n*D])
+	if cap(b.mx) < n {
+		b.mx, b.sum = make([]float32, n), make([]float32, n)
+	}
+	mx, sum := b.mx[:n], b.sum[:n]
+	for i := range mx {
+		mx[i], sum[i] = negInf, 0
+	}
+	for jb := 0; jb < n; jb += kBlock {
+		je := min(n, jb+kBlock)
+		cols := je - jb
+		pk := linalg.PackB(k[jb*D:je*D], D, cols, true)  // Kᵀ du bloc : D×cols
+		pv := linalg.PackB(v[jb*D:je*D], cols, D, false) // V du bloc : cols×D
+		// Requêtes qui voient au moins une clé du bloc.
+		q0, q1 := 0, n
 		if window >= 0 {
-			j0, j1 = max(0, i0-window), min(n, i1-1+window+1)
+			q0, q1 = max(0, jb-window), min(n, je+window)
 		}
-		for jb := j0; jb < j1; jb += kBlock {
-			je := min(j1, jb+kBlock)
-			cols := je - jb
+		q0 = q0 / qBlock * qBlock
+		for i0 := q0; i0 < q1; i0 += qBlock {
+			i1 := min(n, i0+qBlock)
+			rows := i1 - i0
 			sc := b.s[:rows*cols]
-			linalg.MatMulSerial(sc, q[i0*D:i1*D], k[jb*D:je*D], rows, D, cols, false, true, false)
+			linalg.MatMulPackedN(sc, q[i0*D:i1*D], pk, rows, false, 1)
 			for r := 0; r < rows; r++ {
 				i := i0 + r
 				row := sc[r*cols : (r+1)*cols]
@@ -474,24 +483,22 @@ func attendBlocks(o, q, k, v []float32, n, D, window int, scale float32, b *bloc
 					continue
 				}
 				valid := row[cs:ce]
-				linalg.Scale(valid, scale)
-				bm := linalg.MaxOf(valid)
-				m := max(mx[r], bm)
-				if corr := exp32(mx[r] - m); corr != 1 {
-					sum[r] *= corr
-					linalg.Scale(ob[r*D:(r+1)*D], corr)
+				m := max(mx[i], linalg.MaxOf(valid))
+				if corr := exp32(mx[i] - m); corr != 1 {
+					sum[i] *= corr
+					linalg.Scale(o[i*D:(i+1)*D], corr)
 				}
-				mx[r] = m
-				sum[r] += linalg.ExpShift(valid, m)
+				mx[i] = m
+				sum[i] += linalg.ExpShift(valid, m)
 				clear(row[:cs])
 				clear(row[ce:])
 			}
 			// o += P·V du bloc.
-			linalg.MatMulSerial(ob, sc, v[jb*D:je*D], rows, cols, D, false, false, true)
+			linalg.MatMulPackedN(o[i0*D:i1*D], sc, pv, rows, true, 1)
 		}
-		for r := 0; r < rows; r++ {
-			linalg.Scale(ob[r*D:(r+1)*D], 1/sum[r])
-		}
+	}
+	for i := 0; i < n; i++ {
+		linalg.Scale(o[i*D:(i+1)*D], 1/sum[i])
 	}
 }
 
