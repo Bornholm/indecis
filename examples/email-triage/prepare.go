@@ -124,3 +124,30 @@ func dedupe(ex []dataset.Example) []dataset.Example {
 	}
 	return out
 }
+
+// moreEnron collecte d'autres courriels Enron pour l'entraînement, sans
+// recouvrement avec ceux déjà collectés (dont la référence).
+func moreEnron(ctx context.Context, dir string, pages int, seed string) error {
+	known := map[string]bool{}
+	if old, err := dataset.ReadFile(filepath.Join(dir, "enron.jsonl")); err == nil {
+		for _, e := range old {
+			known[e.Text] = true
+		}
+	}
+	var out []dataset.Example
+	err := rows(ctx, "corbt/enron-emails", "train", 517401, pages, seed, func(r map[string]any) {
+		body := strings.TrimSpace(quoted.Split(str(r, "body"), 2)[0])
+		if len(body) < 80 || len(body) > 3000 {
+			return
+		}
+		text := emailText(str(r, "subject"), body)
+		if !known[text] {
+			known[text] = true
+			out = append(out, dataset.Example{Text: text, Meta: map[string]string{"source": "enron"}})
+		}
+	})
+	if err != nil {
+		return err
+	}
+	return write(dir, "enron_train_unlabeled", out)
+}

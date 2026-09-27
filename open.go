@@ -18,10 +18,14 @@ import (
 // ChooseAmong compare les réponses. CandidatePairs produit les exemples
 // d'entraînement correspondants.
 
-// Candidate est une option décrite en langue naturelle.
+// Candidate est une option décrite en langue naturelle. Examples sont des
+// textes qui relèvent de l'option : ChooseNearest s'en sert pour situer
+// l'option (quelques exemples valent souvent mieux qu'une longue
+// description) ; ChooseAmong les ignore.
 type Candidate struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Examples    []string `json:"examples,omitempty"`
 }
 
 // CandidateContext met une option sous la forme que le modèle lit en

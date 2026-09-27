@@ -20,3 +20,80 @@ var classic = []indecis.Candidate{
 	{Name: "Personnel", Description: "Échange privé, non professionnel : famille, amis, loisirs."},
 	{Name: "Spam et hameçonnage", Description: "Message non sollicité, publicité abusive ou tentative de fraude."},
 }
+
+// taxonomy est une liste de catégories d'entraînement. Les listes varient
+// par le point de vue (action attendue, domaine, relation, genre, ton), la
+// langue et le niveau de détail : le modèle doit apprendre à lire une liste,
+// pas à en retenir une. Aucune ne reprend la liste classique, réservée au
+// test.
+type taxonomy struct {
+	Name     string // nom de question : [a-z][a-z0-9_]*
+	Question string
+	Options  []indecis.Candidate
+}
+
+var training = []taxonomy{
+	{"action", "What does the recipient need to do with this email?", []indecis.Candidate{
+		{Name: "Reply needed", Description: "The sender expects an answer from the recipient."},
+		{Name: "Approval requested", Description: "The recipient must approve, sign off or authorize something."},
+		{Name: "Task assigned", Description: "The recipient is asked to do a piece of work."},
+		{Name: "Scheduling", Description: "Find a time, accept or move a meeting or a call."},
+		{Name: "FYI only", Description: "Information shared, no action expected."},
+	}},
+	{"domaine", "À quel domaine d'activité le courriel se rattache-t-il ?", []indecis.Candidate{
+		{Name: "Marchés et négoce", Description: "Achat et vente d'énergie, prix, positions, contrats de marché."},
+		{Name: "Régulation", Description: "Autorités de régulation, lois, audiences, conformité."},
+		{Name: "Finance et comptabilité", Description: "Budgets, comptes, trésorerie, résultats financiers."},
+		{Name: "Informatique", Description: "Systèmes, logiciels, accès, matériel."},
+		{Name: "Ressources humaines", Description: "Personnel, recrutement, évaluations, avantages."},
+		{Name: "Communication interne", Description: "Annonces de l'entreprise, organisation, événements internes."},
+		{Name: "Relations clients", Description: "Échanges avec des clients ou des prospects."},
+		{Name: "Vie privée", Description: "Sujets personnels sans lien avec le travail."},
+	}},
+	{"relation", "Who is the sender relative to the recipient?", []indecis.Candidate{
+		{Name: "Colleague"}, {Name: "Manager or executive"}, {Name: "External partner"},
+		{Name: "Customer"}, {Name: "Vendor or supplier"}, {Name: "Automated system"}, {Name: "Friend or family"},
+	}},
+	{"genre", "What kind of message is it?", []indecis.Candidate{
+		{Name: "Question"}, {Name: "Announcement"}, {Name: "Report or data"}, {Name: "Request for help"},
+		{Name: "Social invitation"}, {Name: "Thanks or congratulations"}, {Name: "Complaint"}, {Name: "Newsletter or digest"},
+	}},
+	{"sujet", "Quel est le sujet principal ?", []indecis.Candidate{
+		{Name: "Contrats"}, {Name: "Réunions"}, {Name: "Déplacements"}, {Name: "Budget"},
+		{Name: "Recrutement"}, {Name: "Sport et loisirs"}, {Name: "Politique et actualité"}, {Name: "Technologie"},
+		{Name: "Gaz et électricité"},
+	}},
+	{"urgence", "Quelle urgence pour le destinataire ?", []indecis.Candidate{
+		{Name: "Urgent", Description: "À traiter aujourd'hui."},
+		{Name: "Cette semaine", Description: "À traiter dans les prochains jours."},
+		{Name: "Sans échéance", Description: "Aucun délai particulier."},
+	}},
+	{"tone", "What is the tone of the email?", []indecis.Candidate{
+		{Name: "Friendly"}, {Name: "Neutral and factual"}, {Name: "Formal"}, {Name: "Frustrated or negative"}, {Name: "Humorous"},
+	}},
+	{"archive", "Dans quel dossier ranger ce courriel ?", []indecis.Candidate{
+		{Name: "Clients"}, {Name: "Fournisseurs"}, {Name: "Interne"}, {Name: "Administratif"},
+		{Name: "Personnel"}, {Name: "Lettres d'information"}, {Name: "À supprimer", Description: "Sans intérêt, publicité, message automatique périmé."},
+	}},
+}
+
+// teacherSchema écrit le schéma et les consignes des teachers pour les
+// listes d'entraînement.
+func teacherSchema() (indecis.Schema, string) {
+	var s indecis.Schema
+	g := "# Classement de courriels selon plusieurs listes\n\nPour chaque liste, choisis UNE catégorie : celle qui décrit le mieux le courriel, du point de vue de la personne qui le reçoit. Les courriels viennent d'Enron, une entreprise d'énergie (2000-2002).\n"
+	for _, t := range training {
+		var names []string
+		g += "\n## " + t.Name + " — " + t.Question + "\n\n"
+		for _, o := range t.Options {
+			names = append(names, o.Name)
+			if o.Description != "" {
+				g += "- " + o.Name + " : " + o.Description + "\n"
+			} else {
+				g += "- " + o.Name + "\n"
+			}
+		}
+		s = append(s, indecis.NewChoice(t.Name, t.Question, names...))
+	}
+	return s, g
+}

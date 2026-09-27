@@ -76,3 +76,31 @@ func TestFitEmbeddingsLearns(t *testing.T) {
 		t.Fatalf("associations arbitraires non apprises : %v, %v", a[0].Probs, a[1].Probs)
 	}
 }
+
+// Des exemples déplacent le prototype d'une option : une option au nom
+// arbitraire devient la bonne réponse grâce à ses exemples.
+func TestChooseNearestExamples(t *testing.T) {
+	ctx := context.Background()
+	m, err := New(bekkoDir(t), Schema{NewNoul("match", "")}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cands := []Candidate{
+		{Name: "K1", Examples: []string{"Votre facture de mars est disponible", "Relance : paiement en retard"}},
+		{Name: "K2", Examples: []string{"Le serveur de fichiers est en panne", "Impossible de me connecter au VPN"}},
+	}
+	set, err := m.PrepareCandidates(ctx, cands)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := m.ChooseIn(ctx, set, "Pouvez-vous m'envoyer la facture corrigée ?", "Mon ordinateur ne démarre plus")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a[0].Choice != "K1" || a[1].Choice != "K2" {
+		t.Fatalf("exemples ignorés : %v / %v", a[0].Probs, a[1].Probs)
+	}
+	if a[0].Score <= 0 || a[0].Score > 1 {
+		t.Fatalf("cosinus %v", a[0].Score)
+	}
+}

@@ -10,6 +10,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -46,6 +47,10 @@ func main() {
 	switch cmd {
 	case "prepare":
 		err = prepare(ctx, *data, *ticketPages, *enronPages)
+	case "teacher-schema":
+		err = writeTeacherSchema(*data)
+	case "more-enron":
+		err = moreEnron(ctx, *data, *enronPages, "train")
 	case "train":
 		err = train(ctx, *data, *backbone, *out, *n, *epochs)
 	case "train-embed":
@@ -96,4 +101,16 @@ func baseline(ctx context.Context, dir, backbone string, temperature float64) er
 		}
 	}
 	return nil
+}
+
+func writeTeacherSchema(dir string) error {
+	s, g := teacherSchema()
+	b, err := json.MarshalIndent(s, "", " ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "train_schema.json"), b, 0o644); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, "train_guidelines.md"), []byte(g), 0o644)
 }

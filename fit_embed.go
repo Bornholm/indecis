@@ -221,28 +221,85 @@ func (m *Model) embedScale() float64 {
 	return DefaultEmbedScale
 }
 
-// ChooseNearest choisit, pour chaque texte, l'option dont le plongement est
-// le plus proche. Answer.Probs est le softmax des cosinus mis à l'échelle
-// (Info.EmbedScale, DefaultEmbedScale par défaut) ; Answer.Score porte le
-// cosinus de l'option retenue, qui reste bas quand aucune option ne décrit
-// le texte.
-func (m *Model) ChooseNearest(ctx context.Context, candidates []Candidate, texts ...string) ([]Answer, error) {
+// CandidateSet est une liste d'options préparée pour ChooseIn : le
+// plongement de chaque option est calculé une fois. Il reste valable tant
+// que le modèle n'est pas réentraîné.
+type CandidateSet struct {
+	candidates []Candidate
+	protos     [][]float32
+}
+
+// Candidates retourne les options de la liste.
+func (s *CandidateSet) Candidates() []Candidate { return s.candidates }
+
+// PrepareCandidates calcule le prototype de chaque option : la moyenne,
+// normalisée, du plongement de son nom et de sa description et de ceux de
+// ses exemples.
+func (m *Model) PrepareCandidates(ctx context.Context, candidates []Candidate) (*CandidateSet, error) {
 	if len(candidates) == 0 {
 		return nil, fmt.Errorf("indecis: aucune option")
 	}
 	seen := map[string]bool{}
-	ctxs := make([]string, len(candidates))
+	var texts []string
+	owner := []int{}
 	for i, c := range candidates {
 		if c.Name == "" || seen[c.Name] {
 			return nil, fmt.Errorf("indecis: option %q vide ou en double", c.Name)
 		}
 		seen[c.Name] = true
-		ctxs[i] = CandidateContext(c)
+		texts = append(texts, CandidateContext(c))
+		owner = append(owner, i)
+		for _, e := range c.Examples {
+			texts = append(texts, e)
+			owner = append(owner, i)
+		}
 	}
-	ce, err := m.Embed(ctx, ctxs...)
+	vecs, err := m.Embed(ctx, texts...)
 	if err != nil {
 		return nil, err
 	}
+	H := m.enc.Cfg.Hidden
+	sums := make([][]float64, len(candidates))
+	for i := range sums {
+		sums[i] = make([]float64, H)
+	}
+	for k, v := range vecs {
+		for d, x := range v {
+			sums[owner[k]][d] += float64(x)
+		}
+	}
+	set := &CandidateSet{candidates: append([]Candidate(nil), candidates...), protos: make([][]float32, len(candidates))}
+	for i, s := range sums {
+		var n float64
+		for _, x := range s {
+			n += x * x
+		}
+		inv := 1 / math.Sqrt(max(n, 1e-24))
+		p := make([]float32, H)
+		for d, x := range s {
+			p[d] = float32(x * inv)
+		}
+		set.protos[i] = p
+	}
+	return set, nil
+}
+
+// ChooseNearest choisit, pour chaque texte, l'option dont le prototype est
+// le plus proche (voir PrepareCandidates et ChooseIn).
+func (m *Model) ChooseNearest(ctx context.Context, candidates []Candidate, texts ...string) ([]Answer, error) {
+	set, err := m.PrepareCandidates(ctx, candidates)
+	if err != nil {
+		return nil, err
+	}
+	return m.ChooseIn(ctx, set, texts...)
+}
+
+// ChooseIn classe chaque texte parmi les options d'une liste préparée.
+// Answer.Probs est le softmax des cosinus mis à l'échelle (Info.EmbedScale,
+// DefaultEmbedScale par défaut). Answer.Score est le cosinus de l'option
+// retenue : un seuil sur ce cosinus, réglé sur des exemples, sépare les
+// textes qu'aucune option ne décrit.
+func (m *Model) ChooseIn(ctx context.Context, set *CandidateSet, texts ...string) ([]Answer, error) {
 	te, err := m.Embed(ctx, texts...)
 	if err != nil {
 		return nil, err
@@ -250,9 +307,9 @@ func (m *Model) ChooseNearest(ctx context.Context, candidates []Candidate, texts
 	scale := m.embedScale()
 	out := make([]Answer, len(texts))
 	for i, t := range te {
-		cos := make([]float64, len(candidates))
-		z := make([]float64, len(candidates))
-		for j, c := range ce {
+		cos := make([]float64, len(set.protos))
+		z := make([]float64, len(set.protos))
+		for j, c := range set.protos {
 			var dot float64
 			for k := range t {
 				dot += float64(t[k]) * float64(c[k])
@@ -263,12 +320,12 @@ func (m *Model) ChooseNearest(ctx context.Context, candidates []Candidate, texts
 		a := Answer{Kind: Choice, Probs: make(map[string]float64, len(p))}
 		best := 0
 		for j, v := range p {
-			a.Probs[candidates[j].Name] = v
+			a.Probs[set.candidates[j].Name] = v
 			if v > p[best] {
 				best = j
 			}
 		}
-		a.Choice, a.Confidence, a.Score = candidates[best].Name, p[best], cos[best]
+		a.Choice, a.Confidence, a.Score = set.candidates[best].Name, p[best], cos[best]
 		out[i] = a
 	}
 	return out, nil
