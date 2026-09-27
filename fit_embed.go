@@ -370,7 +370,7 @@ func (m *Model) ChooseNearest(ctx context.Context, candidates []Candidate, texts
 // retenue : un seuil sur ce cosinus, réglé sur des exemples, sépare les
 // textes qu'aucune option ne décrit.
 func (m *Model) ChooseIn(ctx context.Context, set *CandidateSet, texts ...string) ([]Answer, error) {
-	te, err := m.Embed(ctx, texts...)
+	te, err := m.embed(ctx, texts, false)
 	if err != nil {
 		return nil, err
 	}

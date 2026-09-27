@@ -101,9 +101,10 @@ func WithInt8() Option {
 }
 
 // WithEmbedCache garde en mémoire les plongements des n derniers textes
-// distincts passés à Embed (et donc à ChooseIn, ChooseNearest) : un texte
-// revu, une option réutilisée, ne sont pas réencodés. Le cache est vidé à
-// chaque entraînement.
+// distincts passés à Embed, et des options préparées par PrepareCandidates
+// (donc ChooseNearest, DecideOpen) : une option réutilisée n'est pas
+// réencodée. Les textes jugés par ChooseIn ne sont pas gardés. Le cache est
+// vidé à chaque entraînement.
 func WithEmbedCache(n int) Option {
 	return func(m *Model) {
 		if n > 0 {

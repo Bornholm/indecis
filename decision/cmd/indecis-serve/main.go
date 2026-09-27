@@ -26,6 +26,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"strings"
 
@@ -45,7 +46,9 @@ func main() {
 	apiKey := flag.String("api-key", os.Getenv("INDECIS_API_KEY"), "clé exigée en Authorization: Bearer (vide : aucune)")
 	threads := flag.Int("threads", 1, "cœurs par requête (0 : tous)")
 	int8 := flag.Bool("int8", true, "couches en int8 si le processeur a AVX-VNNI")
-	cache := flag.Int("embed-cache", 4096, "plongements gardés en cache (questions ouvertes)")
+	cache := flag.Int("embed-cache", 4096, "plongements d'options gardés en cache (questions ouvertes)")
+	maxConcurrent := flag.Int("max-concurrent", runtime.GOMAXPROCS(0), "décisions calculées en même temps, les autres attendent (0 : pas de borne)")
+	memLimit := flag.Int("memory-limit", 0, "limite souple de mémoire du tas, en Mio (0 : aucune) ; le ramasse-miettes travaille davantage à l'approche")
 	flag.Parse()
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	if len(models) == 0 {
@@ -56,7 +59,10 @@ func main() {
 	if *int8 {
 		opts = append(opts, indecis.WithInt8())
 	}
-	s := &decision.Server{Models: map[string]*decision.Client{}, APIKey: *apiKey, Logger: log}
+	if *memLimit > 0 {
+		debug.SetMemoryLimit(int64(*memLimit) << 20)
+	}
+	s := &decision.Server{Models: map[string]*decision.Client{}, APIKey: *apiKey, Logger: log, MaxConcurrent: *maxConcurrent}
 	for _, spec := range models {
 		name, dir, ok := strings.Cut(spec, "=")
 		if !ok {

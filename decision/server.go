@@ -31,7 +31,13 @@ type Server struct {
 	Default string
 	// APIKey, si non vide, est exigée en « Authorization: Bearer … ».
 	APIKey string
-	Logger *slog.Logger
+	// MaxConcurrent borne les décisions calculées en même temps (0 : pas
+	// de borne) ; les autres attendent leur tour. Chaque décision en cours
+	// tient ses propres tampons (≈ 10 Mo pour 256 tokens) : la borne fixe
+	// aussi la mémoire de pointe.
+	MaxConcurrent int
+	slots         chan struct{}
+	Logger        *slog.Logger
 }
 
 // maxRequestSize borne le corps d'une requête.
@@ -39,6 +45,9 @@ const maxRequestSize = 4 << 20
 
 // Handler retourne le routeur HTTP du serveur.
 func (s *Server) Handler() http.Handler {
+	if s.MaxConcurrent > 0 && s.slots == nil {
+		s.slots = make(chan struct{}, s.MaxConcurrent)
+	}
 	mux := http.NewServeMux()
 	for _, p := range []string{"/api/alpha/decisions", "/api/alpha/decision", "/v1/systemone"} {
 		mux.HandleFunc("POST "+p, s.decide)
@@ -110,6 +119,15 @@ func (s *Server) decide(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
 		return
+	}
+	if s.slots != nil {
+		select {
+		case s.slots <- struct{}{}:
+			defer func() { <-s.slots }()
+		case <-r.Context().Done():
+			writeError(w, http.StatusServiceUnavailable, "requête abandonnée en attente d'un créneau")
+			return
+		}
 	}
 	name, client := s.client(req.Model)
 	if client == nil {

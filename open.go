@@ -121,6 +121,13 @@ func (m *Model) ChooseAmong(ctx context.Context, question string, candidates []C
 // modèle en paires : sur le backbone non affiné, c'est l'embedding de phrase
 // du modèle d'origine.
 func (m *Model) Embed(ctx context.Context, texts ...string) ([][]float32, error) {
+	return m.embed(ctx, texts, true)
+}
+
+// embed calcule les plongements ; cache dit si le cache (WithEmbedCache)
+// les garde. Les options d'une liste reviennent d'un appel à l'autre, les
+// textes jugés presque jamais : ChooseIn ne cache pas ces derniers.
+func (m *Model) embed(ctx context.Context, texts []string, cache bool) ([][]float32, error) {
 	out := make([][]float32, len(texts))
 	var todo []int
 	var ids [][]int32
@@ -143,7 +150,9 @@ func (m *Model) Embed(ctx context.Context, texts ...string) ([][]float32, error)
 			v[j] = e * inv
 		}
 		out[todo[k]] = v
-		m.embedCache.put(texts[todo[k]], v)
+		if cache {
+			m.embedCache.put(texts[todo[k]], v)
+		}
 	})
 	return out, err
 }
