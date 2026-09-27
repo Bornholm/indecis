@@ -207,3 +207,27 @@ func TestOpenQuestions(t *testing.T) {
 		t.Fatalf("score ouvert : %#v", a["priority"])
 	}
 }
+
+// Des exemples dans les critères situent des options aux noms arbitraires.
+func TestOpenQuestionExamples(t *testing.T) {
+	c, err := New(toyModel(t, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := llm.Questions{"dossier": llm.ChoiceQuestion{Instructions: "Dossier", Criteria: map[string]any{
+		"K1": map[string]any{"examples": []string{"Votre facture de mars est disponible", "Relance : paiement en retard"}},
+		"K2": map[string]any{"description": "", "examples": []any{"Le serveur de fichiers est en panne", "Impossible de me connecter au VPN"}},
+	}}}
+	for text, want := range map[string]string{"Pouvez-vous m'envoyer la facture corrigée ?": "K1", "Mon ordinateur ne démarre plus": "K2"} {
+		res, err := c.Decision(context.Background(), text, q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if a, _ := llm.AnswerOf[llm.ChoiceAnswer](res, "dossier"); a.Choice() != want {
+			t.Errorf("%q : %s (%v), attendu %s", text, a.Choice(), a.Probabilities(), want)
+		}
+	}
+	if got := criterion("x", map[string]any{"description": "d", "note": "n"}); got.Description == "d" {
+		t.Error("les autres champs de l'objet doivent rester dans la description")
+	}
+}

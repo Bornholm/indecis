@@ -257,6 +257,14 @@ curl -s localhost:8080/api/alpha/decisions -d '{
 | `POST /v1/systemone` | API de TypeSafe |
 | `GET /api/alpha/models` | modèles servis et questions apprises |
 
+Une option peut porter des exemples : sa description devient un objet `{"description": "…", "examples": ["…", "…"]}`. L'API TypeSafe admet déjà une description en chaîne, objet ou tableau ; le champ `examples` est une convention d'indecis, qu'un autre fournisseur lit comme une simple description. Les exemples situent l'option par leurs plongements : c'est le plus grand gain mesuré sur les catégories libres (voir plus haut).
+
+```json
+"dossier": {"type": "choice", "instructions": "Dossier de rangement", "criteria": {
+  "Comptabilité": {"description": "Factures et paiements", "examples": ["Relance : facture impayée", "Votre facture n° 4521"]},
+  "Informatique": {"examples": ["L'imprimante est en panne", "Impossible de me connecter à la messagerie"]}}}
+```
+
 Une question qui porte le nom d'une question apprise passe par sa tête, calibrée. Toute autre question est ouverte : ses critères sont comparés à l'état par plongements (`DecideOpen`). `-api-key` (ou `INDECIS_API_KEY`) exige une clé en `Authorization: Bearer`. Les clients `typesafe` et `openrouter` de genai sont testés contre ce serveur.
 
 ## Plugin Xolo

@@ -80,7 +80,10 @@ func TestServerErrors(t *testing.T) {
 		json.NewDecoder(res.Body).Decode(&e)
 		return res.StatusCode, e.Error.Message
 	}
-	ok := `{"state":"x","questions":{"a":{"type":"noul","instructions":"?"}}}`
+	ok := `{"state":"Mon ordinateur ne démarre plus","questions":{"a":{"type":"noul","instructions":"?"},` +
+		`"d":{"type":"choice","instructions":"Dossier","criteria":{` +
+		`"K1":{"examples":["Votre facture de mars est disponible","Relance : paiement en retard"]},` +
+		`"K2":{"examples":["Le serveur de fichiers est en panne","Impossible de me connecter au VPN"]}}}}}`
 	cases := []struct {
 		path, key, body string
 		status          int

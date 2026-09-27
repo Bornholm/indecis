@@ -271,20 +271,25 @@ func toAnswer(q llm.Question, sq indecis.Question, a indecis.Answer) llm.Answer 
 // toOpen traduit une question genai en question ouverte : les critères
 // deviennent des options décrites. Une question oui/non sans critères
 // oppose l'affirmation et la négation de ses instructions.
+//
+// Une description de critère peut être un objet {"description": …,
+// "examples": […]}, forme que l'API TypeSafe admet (une description est
+// une chaîne, un objet ou un tableau) : les exemples situent alors
+// l'option (voir indecis.Candidate.Examples). C'est une convention
+// d'indecis ; un autre fournisseur lit l'objet comme une description.
 func toOpen(id string, q llm.Question) indecis.OpenQuestion {
 	switch v := q.(type) {
 	case llm.NoulQuestion:
 		instr := describe(v.Instructions)
-		yes, no := "Oui : "+instr, "Non, pas du tout : "+instr
+		yes := indecis.Candidate{Name: "true", Description: "Oui : " + instr}
+		no := indecis.Candidate{Name: "false", Description: "Non, pas du tout : " + instr}
 		if v.True != nil {
-			yes = describe(v.True)
+			yes = criterion("true", v.True)
 		}
 		if v.False != nil {
-			no = describe(v.False)
+			no = criterion("false", v.False)
 		}
-		return indecis.OpenQuestion{Name: id, Kind: indecis.Noul, Options: []indecis.Candidate{
-			{Name: "true", Description: yes}, {Name: "false", Description: no},
-		}}
+		return indecis.OpenQuestion{Name: id, Kind: indecis.Noul, Options: []indecis.Candidate{yes, no}}
 	case llm.ChoiceQuestion:
 		names := make([]string, 0, len(v.Criteria))
 		for o := range v.Criteria {
@@ -293,21 +298,67 @@ func toOpen(id string, q llm.Question) indecis.OpenQuestion {
 		sort.Strings(names)
 		oq := indecis.OpenQuestion{Name: id, Kind: indecis.Choice, Instructions: describe(v.Instructions)}
 		for _, n := range names {
-			c := indecis.Candidate{Name: n}
-			if d := v.Criteria[n]; d != nil {
-				c.Description = describe(d)
-			}
-			oq.Options = append(oq.Options, c)
+			oq.Options = append(oq.Options, criterion(n, v.Criteria[n]))
 		}
 		return oq
 	case llm.ScoreQuestion:
 		oq := indecis.OpenQuestion{Name: id, Kind: indecis.Score, Instructions: describe(v.Instructions)}
 		for i, c := range v.Criteria {
-			oq.Options = append(oq.Options, indecis.Candidate{Name: strconv.Itoa(i), Description: describe(c)})
+			oq.Options = append(oq.Options, criterion(strconv.Itoa(i), c))
 		}
 		return oq
 	}
 	return indecis.OpenQuestion{Name: id}
+}
+
+// criterion lit la description d'un critère : une chaîne, nil, ou un
+// objet dont « examples » (liste de textes) donne des exemples et
+// « description » la description ; les autres champs d'un objet restent
+// dans la description.
+func criterion(name string, v any) indecis.Candidate {
+	c := indecis.Candidate{Name: name}
+	obj, ok := v.(map[string]any)
+	if !ok {
+		if v != nil {
+			c.Description = describe(v)
+		}
+		return c
+	}
+	rest := map[string]any{}
+	for k, x := range obj {
+		switch k {
+		case "examples":
+			c.Examples = append(c.Examples, texts(x)...)
+		case "description":
+			c.Description = describe(x)
+		default:
+			rest[k] = x
+		}
+	}
+	if len(rest) > 0 {
+		c.Description = strings.TrimSpace(c.Description + "\n" + describe(rest))
+	}
+	return c
+}
+
+// texts accepte une liste de textes, qu'elle vienne de Go ([]string) ou
+// d'un JSON décodé ([]any).
+func texts(v any) []string {
+	switch x := v.(type) {
+	case []string:
+		return x
+	case []any:
+		var out []string
+		for _, e := range x {
+			if s, ok := e.(string); ok && s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	case string:
+		return []string{x}
+	}
+	return nil
 }
 
 func toOpenAnswer(q llm.Question, a indecis.Answer) llm.Answer {
