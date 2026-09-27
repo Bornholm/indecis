@@ -203,15 +203,15 @@ Débit d'entraînement : ~1 000 tokens/s, soit ~31 min par époque pour 20 000 e
 
 Une question `choice` a des options fixes, apprises à l'entraînement. Pour classer parmi une liste qui change d'un appel à l'autre, `ChooseNearest` compare le plongement du texte à celui de chaque option (`Candidate` : un nom, une description facultative). Le coût ne dépend pas du nombre d'options : elles se calculent une fois. `FitEmbeddings` affine l'encodeur avec l'objectif de l'inférence (préférer la bonne option parmi celles d'un lot). `ChooseAmong` fait la même chose avec un modèle en paires, une passe par option.
 
-`examples/email-triage` est une preuve de concept sur des courriels : tickets de support (Tobi-Bueck/customer-support-tickets, CC-BY-NC), imnim/multiclass-email-classification (MIT) et courriels d'Enron étiquetés par les teachers selon une liste classique en français. Exactitude sur des catégories jamais vues à l'entraînement :
+`examples/email-triage` est une preuve de concept sur des courriels : tickets de support (Tobi-Bueck/customer-support-tickets, CC-BY-NC), imnim/multiclass-email-classification (MIT) et courriels d'Enron. 2 000 courriels Enron sont étiquetés par les teachers selon 8 listes variées (français et anglais) pour l'entraînement ; 430 autres, selon une liste classique de 13 catégories en français, servent de test. Exactitude sur des listes jamais vues à l'entraînement, backbone affiné sur tickets et Enron :
 
-| Jeu de test | Nom seul, bekko | Nom seul, affiné | Nom + 5 exemples, affiné |
-| --- | --- | --- | --- |
-| imnim, 10 catégories | 69,2 % | 71,2 % | 92,5 % |
-| Tickets, files jamais vues (52 options) | 31,8 % | 42,0 % | 71,4 % |
-| Enron, 13 catégories en français | 27,9 % | 27,7 % | 42,3 % |
+| Jeu de test | a8m, nom seul | a8m, nom + 5 exemples | a25m, nom seul | a25m, nom + 5 exemples |
+| --- | --- | --- | --- | --- |
+| Enron, liste classique (13) | 43,3 % | 47,8 % | 52,8 % | 58,0 % |
+| imnim (10) | 77,4 % | 93,8 % | 76,8 % | 96,8 % |
+| Tickets, files jamais vues (52) | 46,8 % | 72,0 % | 50,6 % | 77,0 % |
 
-Le modèle en paires, lui, a appris quels noms de catégories étaient souvent justes à l'entraînement, et rejette les noms inconnus (moins de 5 % sur imnim) : pour des catégories libres, les plongements l'emportent.
+Sans affinage, a8m fait 27,9 % sur Enron et 69,2 % sur imnim avec le nom seul. a8m classe un courriel en 13 à 17 ms, a25m en 40 à 55 ms. Le modèle en paires (`ChooseAmong`) a appris quels noms de catégories étaient souvent justes à l'entraînement et rejette les noms inconnus (moins de 5 % sur imnim) : pour des catégories libres, les plongements l'emportent.
 
 ## Fournisseur de décision pour genai
 
