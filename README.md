@@ -61,17 +61,21 @@ Autour du produit matriciel, la quantification des activations, la remise à l'�
 
 `WithInt8()` fait calculer les couches en int8 quand le processeur dispose d'AVX-VNNI (Intel depuis Alder Lake, AMD depuis Zen 4) : poids quantifiés par canal, activations par token, sommes entières exactes. Le micro-noyau 6×16 utilise `VPDPBUSD` en forme VEX, que l'assembleur Go ne sait pas encoder : `internal/linalg/gen_vnni.py` l'écrit octet par octet. Sur les 636 exemples de référence, les décisions sont inchangées (exactitude 92,1 → 92,3 %, AUC 0,963) ; l'écart reste à vérifier pour chaque modèle avec `tools/infbench -int8 -eval`.
 
-Modèle prompt-injection P4, un cœur d'un Core Ultra 7 265U (`go run ./tools/infbench -model … -int8`) :
+Modèle prompt-injection P5, un cœur d'un Core Ultra 7 265U (`go run ./tools/infbench -model … -int8`) :
 
-| | Avant (forward d'entraînement) | Chemin d'inférence | + int8 |
-| --- | --- | --- | --- |
-| 15 tokens | 10,7 ms | 4,9 ms | 2,1 ms |
-| 89 tokens | 27,7 ms | 19,6 ms | 12,2 ms |
-| 256 tokens | 79,8 ms | 57,4 ms | 40,8 ms |
-| Mémoire propre, modèle prêt | 486 Mo | 53 Mo | 32 Mo |
-| Pic au chargement | 1 037 Mo | 222 Mo | 164 Mo |
+| | Forward d'entraînement | Chemin d'inférence, float32 | int8 + SIMD portable | int8, modèle compacté |
+| --- | --- | --- | --- | --- |
+| 15 tokens | 10,7 ms | 4,9 ms | 1,5 ms | 1,5 ms |
+| 256 tokens | 79,8 ms | 57,4 ms | 23 ms | 23 ms |
+| Mémoire propre, modèle prêt | 486 Mo | 53 Mo | 30 Mo | 18 Mo |
+| Pic de mémoire | 1 037 Mo | 222 Mo | 82 Mo | 51 Mo |
+| Fichier | 289 Mo | 289 Mo | 289 Mo | 58,5 Mo |
 
-Pour une requête isolée, un seul cœur est le plus rapide (`WithThreads(1)`) : sur un processeur hybride, plusieurs cœurs baissent la fréquence et les cœurs économes ralentissent l'ensemble. Les lots profitent de tous les cœurs.
+Le modèle compacté est élagué sur ses données d'entraînement et garde sa table d'embeddings en int8 (`tools/compact`) ; sur la référence, son AUC passe de 0,972 à 0,970.
+
+Les textes longs sont lus par attention par blocs (softmax en ligne) : mémoire linéaire, couches locales en temps linéaire. a8m, int8 : 1 024 tokens en 82 ms et 4 096 tokens en 0,65 s sur tous les cœurs (`-max-len`).
+
+En deçà de 1 024 positions, un calcul se fait sur un seul cœur, le plus rapide pour une phrase : sur un processeur hybride, répartir un petit calcul l'envoie sur les cœurs économes. Au-delà, il se répartit sur les cœurs autorisés (`WithThreads`).
 
 ## Générer des données
 
