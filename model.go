@@ -496,6 +496,7 @@ func Load(dir string, opts ...Option) (*Model, error) {
 			return nil, err
 		}
 		tensors[name] = t
+		f.Evict(name) // la copie décodée suffit
 	}
 	enc, err := modernbert.FromTensors(cfg, tensors)
 	if err != nil {

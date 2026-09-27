@@ -19,12 +19,14 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 
 	"github.com/bornholm/indecis"
@@ -65,11 +67,20 @@ func main() {
 			log.Error("chargement", "model", dir, "error", err)
 			os.Exit(1)
 		}
+		// Un appel à vide prépare les poids pour l'inférence (en int8, les
+		// matrices float32 sont alors libérées), puis la mémoire temporaire
+		// du chargement est rendue au système avant le modèle suivant : le
+		// pic de démarrage ne dépend plus du nombre de modèles.
+		if _, err := m.Embed(context.Background(), "warm-up"); err != nil {
+			log.Error("préchauffage", "model", dir, "error", err)
+			os.Exit(1)
+		}
+		debug.FreeOSMemory()
 		s.Models[name] = decision.FromModel(name, m)
 		if s.Default == "" {
 			s.Default = name
 		}
-		log.Info("modèle chargé", "name", name, "dir", dir, "paired", m.Paired())
+		log.Info("modèle chargé", "name", name, "dir", dir, "paired", m.Paired(), "mémoire", memory())
 	}
 	log.Info("à l'écoute", "addr", *addr, "endpoints", "POST /api/alpha/decisions, POST /v1/systemone, GET /api/alpha/models")
 	if err := http.ListenAndServe(*addr, s.Handler()); err != nil {
@@ -87,4 +98,21 @@ func load(dir string, opts []indecis.Option) (*indecis.Model, error) {
 	// La question apprise est un simple point d'ancrage : sa tête n'est pas
 	// entraînée, elle ne doit pas être interrogée (voir le tutoriel).
 	return indecis.New(dir, indecis.Schema{indecis.NewNoul("match", "")}, 1, opts...)
+}
+
+// memory résume la mémoire du processus (Linux), pour les journaux.
+func memory() string {
+	b, err := os.ReadFile("/proc/self/status")
+	if err != nil {
+		return "?"
+	}
+	var parts []string
+	for _, l := range strings.Split(string(b), "\n") {
+		for _, k := range []string{"RssAnon:", "RssFile:", "VmHWM:"} {
+			if strings.HasPrefix(l, k) {
+				parts = append(parts, strings.Join(strings.Fields(l), " "))
+			}
+		}
+	}
+	return strings.Join(parts, ", ")
 }

@@ -80,15 +80,35 @@ type File struct {
 	entries map[string]entry
 	meta    map[string]string
 	data    []byte
+	mapped  bool // data est une projection du fichier
 }
 
 // Open ouvre un fichier safetensors sans décoder ses tenseurs.
 func Open(path string) (*File, error) {
-	b, err := mapFile(path)
+	b, mapped, err := mapFile(path)
 	if err != nil {
 		return nil, err
 	}
-	return parseHeader(b)
+	f, err := parseHeader(b)
+	if err != nil {
+		return nil, err
+	}
+	f.mapped = mapped
+	return f, nil
+}
+
+// Evict libère les pages d'un tenseur déjà décodé (Tensor en a fait une
+// copie) : sans effet sur le contenu, qui sera relu dans le fichier si
+// besoin. N'agit que sur un fichier projeté en mémoire.
+func (f *File) Evict(name string) {
+	if !f.mapped {
+		return
+	}
+	if e, ok := f.entries[name]; ok {
+		if _, raw, err := e.bytes(f.data); err == nil {
+			evict(raw)
+		}
+	}
 }
 
 func parseHeader(b []byte) (*File, error) {
