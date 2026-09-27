@@ -108,6 +108,7 @@ func (m *Model) ChooseAmong(ctx context.Context, question string, candidates []C
 		}
 		a.Choice = candidates[best].Name
 		a.Confidence = p[best]
+		a.Margin = margin(p, best)
 		a.P = 1 / (1 + math.Exp(-zs[best]))
 		out[ti] = a
 	}
@@ -120,12 +121,18 @@ func (m *Model) ChooseAmong(ctx context.Context, question string, candidates []C
 // modèle en paires : sur le backbone non affiné, c'est l'embedding de phrase
 // du modèle d'origine.
 func (m *Model) Embed(ctx context.Context, texts ...string) ([][]float32, error) {
-	ids := make([][]int32, len(texts))
-	for i, t := range texts {
-		ids[i] = m.tok.EncodeMax(t, m.maxLen)
-	}
 	out := make([][]float32, len(texts))
-	err := m.forEachPooled(ctx, ids, 32, func(i int, x []float32) {
+	var todo []int
+	var ids [][]int32
+	for i, t := range texts {
+		if v, ok := m.embedCache.get(t); ok {
+			out[i] = v
+			continue
+		}
+		todo = append(todo, i)
+		ids = append(ids, m.tok.EncodeMax(t, m.maxLen))
+	}
+	err := m.forEachPooled(ctx, ids, 32, func(k int, x []float32) {
 		var n float64
 		for _, v := range x {
 			n += float64(v) * float64(v)
@@ -135,7 +142,8 @@ func (m *Model) Embed(ctx context.Context, texts ...string) ([][]float32, error)
 		for j, e := range x {
 			v[j] = e * inv
 		}
-		out[i] = v
+		out[todo[k]] = v
+		m.embedCache.put(texts[todo[k]], v)
 	})
 	return out, err
 }

@@ -136,3 +136,34 @@ func consensusLabel(ctx context.Context, cfgPath, in, out, disagreementsPath, sc
 	log.Printf("consensus : %d exemples gardés, %d désaccords à relire%s", len(kept), len(disputes), map[bool]string{true: " → " + disagreementsPath, false: ""}[disagreementsPath != ""])
 	return errors.Join(errs...)
 }
+
+// harnessTeacher construit le teacher id du fichier de configuration.
+func harnessTeacher(cfgPath, id string, cache *teacher.Cache, maxCalls int, cacheOnly bool) (*teacher.Teacher, error) {
+	b, err := os.ReadFile(cfgPath)
+	if err != nil {
+		return nil, err
+	}
+	var cfg teachersConfig
+	if err := yaml.Unmarshal(b, &cfg); err != nil {
+		return nil, fmt.Errorf("%s : %w", cfgPath, err)
+	}
+	for _, tc := range cfg.Teachers {
+		if tc.ID != id {
+			continue
+		}
+		return &teacher.Teacher{
+			Client: &teacher.Command{
+				Args: tc.Command, SystemFlag: tc.SystemFlag, Input: tc.Input, Output: tc.Output, Timeout: tc.Timeout,
+			},
+			Model:       tc.ID + "/" + tc.Model,
+			Cache:       cache,
+			MaxCalls:    maxCalls,
+			Concurrency: max(tc.Concurrency, 1),
+			Interval:    tc.Interval,
+			BatchSize:   max(tc.Batch, 1),
+			CacheOnly:   cacheOnly,
+			MaxChars:    tc.MaxChars,
+		}, nil
+	}
+	return nil, fmt.Errorf("%s : pas de teacher %q", cfgPath, id)
+}

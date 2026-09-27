@@ -1,0 +1,16 @@
+family: courriel/envoi_facture
+lang: fr
+label.service: Comptabilité
+label.intention: Transmission de document
+label.emetteur: Fournisseur
+label.delai: Aucun
+---
+[?objet:0.7]Objet : {{one:Votre facture {{pick:mois}}|Facture n° {{digits:6}}|Envoi de facture}}
+
+[/]{{one}}{{include:part/appel_soutenu}}
+{{one:Veuillez trouver ci-joint notre facture n° {{digits:6}} relative à la livraison du {{int:1-28}} {{pick:mois}}.|Vous trouverez en pièce jointe la facture correspondant à votre commande de {{pick:produit}}.|Comme convenu, je vous adresse la facture de la prestation réalisée le mois dernier.}} {{one:Le règlement est attendu à 30 jours.|Bonne réception.|Elle est également disponible sur votre espace client.}}
+
+{{include:part/fin_soutenu}}{{label:registre=Soutenu}}{{|}}{{include:part/appel_courant}}
+{{one:Veuillez trouver ci-joint notre facture n° {{digits:6}} relative à la livraison du {{int:1-28}} {{pick:mois}}.|Vous trouverez en pièce jointe la facture correspondant à votre commande de {{pick:produit}}.|Comme convenu, je vous adresse la facture de la prestation réalisée le mois dernier.}} {{one:Le règlement est attendu à 30 jours.|Bonne réception.|Elle est également disponible sur votre espace client.}}
+
+{{include:part/fin_courant}}{{label:registre=Courant}}{{/one}}

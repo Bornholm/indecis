@@ -29,6 +29,10 @@ type TrainOptions struct {
 	// Dropout s'applique au vecteur poolé, avant les têtes.
 	Dropout float64
 	Seed    int64
+	// Symmetric (FitEmbeddings) optimise aussi le sens option → textes :
+	// chaque option d'un lot doit préférer ses textes aux autres, comme la
+	// perte InfoNCE bidirectionnelle de CLM.
+	Symmetric bool
 	// Progress, s'il est fourni, est appelé après chaque pas.
 	Progress func(Progress)
 }
@@ -104,6 +108,7 @@ func (m *Model) Fit(ctx context.Context, examples []dataset.Example, opts TrainO
 	// chaque pas (Progress peut évaluer le modèle en cours de route).
 	m.enc.Materialize()
 	defer m.enc.Invalidate()
+	m.embedCache.clear() // les plongements vont changer
 	grads := m.enc.EnableGrad()
 	var encDense []optim.Dense
 	for _, p := range m.enc.Params() {

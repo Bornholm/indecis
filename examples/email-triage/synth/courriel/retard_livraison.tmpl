@@ -1,0 +1,19 @@
+family: courriel/retard_livraison
+lang: fr
+label.service: Relation client
+label.intention: Plainte
+label.emetteur: Client
+label.delai: Immédiat
+---
+[?objet:0.7]Objet : {{one:Commande non reçue|Retard de livraison inadmissible|Toujours rien reçu}}
+
+[/]{{one}}{{include:part/appel_soutenu}}
+{{one:J'ai commandé un {{pick:produit}} il y a {{int:2-6}} semaines et je n'ai toujours rien reçu.|Troisième relance pour ma commande n° {{digits:8}} : toujours pas livrée.|Le colis annoncé pour {{pick:jour}} n'est jamais arrivé.}} {{one:C'est inacceptable.|Je suis très mécontent de votre service.|Je demande le remboursement si la livraison n'a pas lieu cette semaine.}}
+
+{{include:part/fin_soutenu}}{{label:registre=Soutenu}}{{|}}{{include:part/appel_courant}}
+{{one:J'ai commandé un {{pick:produit}} il y a {{int:2-6}} semaines et je n'ai toujours rien reçu.|Troisième relance pour ma commande n° {{digits:8}} : toujours pas livrée.|Le colis annoncé pour {{pick:jour}} n'est jamais arrivé.}} {{one:C'est inacceptable.|Je suis très mécontent de votre service.|Je demande le remboursement si la livraison n'a pas lieu cette semaine.}}
+
+{{include:part/fin_courant}}{{label:registre=Courant}}{{|}}{{include:part/appel_familier}}
+{{one:J'ai commandé un {{pick:produit}} il y a {{int:2-6}} semaines et je n'ai toujours rien reçu.|Troisième relance pour ma commande n° {{digits:8}} : toujours pas livrée.|Le colis annoncé pour {{pick:jour}} n'est jamais arrivé.}} {{one:C'est inacceptable.|Je suis très mécontent de votre service.|Je demande le remboursement si la livraison n'a pas lieu cette semaine.}}
+
+{{include:part/fin_familier}}{{label:registre=Familier}}{{/one}}

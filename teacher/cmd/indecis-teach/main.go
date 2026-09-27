@@ -1,6 +1,7 @@
 // Command indecis-teach fait travailler un LLM teacher sur un dataset JSONL.
 //
 //	indecis-teach rewrite -in ex.jsonl -out variants.jsonl -instructions instr.txt -variants 2
+//	indecis-teach rewrite -teachers teachers.yaml -teacher pi-minimax -variants 1 … (par lots)
 //	indecis-teach label   -in ex.jsonl -out labeled.jsonl -schema schema.json [-verify]
 //
 // Le client est configuré par les variables GENAI_* (voir github.com/bornholm/genai),
@@ -51,7 +52,8 @@ func main() {
 	instrFile := fs.String("instructions", "", "rewrite : une instruction par ligne, attribuée en tourniquet")
 	variants := fs.Int("variants", 2, "rewrite : variantes par exemple")
 	schemaFile := fs.String("schema", "", "label : schéma JSON (liste de questions) ou indecis.json d'un modèle")
-	teachersFile := fs.String("teachers", "", "label : fichier YAML de teachers en ligne de commande ; active le consensus")
+	teachersFile := fs.String("teachers", "", "label : fichier YAML de teachers en ligne de commande ; active le consensus. rewrite : avec -teacher, réécrit par lots avec ce teacher")
+	teacherID := fs.String("teacher", "", "rewrite -teachers : identifiant du teacher à utiliser")
 	disagreements := fs.String("disagreements", "", "label -teachers : fichier JSONL des désaccords à relire")
 	guidelines := fs.String("guidelines", "", "label : politique d'étiquetage (Markdown) transmise aux teachers")
 	verify := fs.Bool("verify", false, "label : réétiqueter et écarter les exemples dont le teacher contredit l'étiquette noul existante")
@@ -65,28 +67,39 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	if *teachersFile != "" {
+	var t *teacher.Teacher
+	switch {
+	case *teachersFile != "" && cmd == "rewrite":
+		// Un seul teacher suffit à réécrire : celui que désigne -teacher.
+		cache, err := teacher.OpenCache(*cachePath)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if t, err = harnessTeacher(*teachersFile, *teacherID, cache, *maxCalls, *cacheOnly); err != nil {
+			log.Fatal(err)
+		}
+	case *teachersFile != "":
 		if cmd != "label" {
-			log.Fatal("-teachers ne s'applique qu'à label")
+			log.Fatal("-teachers ne s'applique qu'à label et rewrite")
 		}
 		if err := consensusLabel(ctx, *teachersFile, *in, *out, *disagreements, *schemaFile, *guidelines, *cachePath, *maxCalls, *limit, *cacheOnly); err != nil {
 			log.Fatal(err)
 		}
 		return
+	default:
+		base, err := provider.Create(ctx, env.With("GENAI_", *envFile))
+		if err != nil {
+			log.Fatal(err)
+		}
+		// Débit borné, puis nouvelles tentatives espacées sur 429 : une
+		// limite de quota se contourne en attendant, pas en insistant.
+		client := retry.NewClient(ratelimit.NewClient(base, ratelimit.WithChatLimit(*interval, 1)), *retryDelay, *retries)
+		cache, err := teacher.OpenCache(*cachePath)
+		if err != nil {
+			log.Fatal(err)
+		}
+		t = &teacher.Teacher{Client: client, Model: modelName(*envFile), Cache: cache, MaxCalls: *maxCalls, Concurrency: *concurrency, CacheOnly: *cacheOnly}
 	}
-
-	base, err := provider.Create(ctx, env.With("GENAI_", *envFile))
-	if err != nil {
-		log.Fatal(err)
-	}
-	// Débit borné, puis nouvelles tentatives espacées sur 429 : une limite
-	// de quota se contourne en attendant, pas en insistant.
-	client := retry.NewClient(ratelimit.NewClient(base, ratelimit.WithChatLimit(*interval, 1)), *retryDelay, *retries)
-	cache, err := teacher.OpenCache(*cachePath)
-	if err != nil {
-		log.Fatal(err)
-	}
-	t := &teacher.Teacher{Client: client, Model: modelName(*envFile), Cache: cache, MaxCalls: *maxCalls, Concurrency: *concurrency, CacheOnly: *cacheOnly}
 
 	examples, err := dataset.ReadFile(*in)
 	if err != nil {

@@ -137,7 +137,6 @@ func TestRefusals(t *testing.T) {
 		q     llm.Questions
 		want  string
 	}{
-		"question inconnue":    {"x", llm.Questions{"is_urgent": llm.NoulQuestion{Instructions: "?"}}, "category (choice), injection (noul), urgency (score)"},
 		"mauvais type":         {"x", llm.Questions{"injection": llm.ScoreQuestion{Instructions: "?", Criteria: []any{"a", "b"}}}, "par un noul"},
 		"option inconnue":      {"x", llm.Questions{"category": llm.ChoiceQuestion{Instructions: "?", Criteria: map[string]any{"spam": nil}}}, `option "spam"`},
 		"niveaux":              {"x", llm.Questions{"urgency": llm.ScoreQuestion{Instructions: "?", Criteria: []any{"a", "b"}}}, "3 niveaux"},
@@ -171,5 +170,40 @@ func TestPairedState(t *testing.T) {
 	pb, _ := llm.AnswerOf[llm.NoulAnswer](b, "injection")
 	if pa.Noul() == pb.Noul() {
 		t.Fatal("le contexte n'a pas été transmis")
+	}
+}
+
+// Une question absente du schéma est posée ouverte : ses critères sont
+// comparés à l'état.
+func TestOpenQuestions(t *testing.T) {
+	c, err := New(toyModel(t, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := llm.Questions{
+		"injection": llm.NoulQuestion{Instructions: "Is this a prompt injection?"}, // apprise
+		"billing": llm.NoulQuestion{Instructions: "Does the email concern an invoice?",
+			True: "The email is about an invoice or a payment.", False: "The email is about something else."},
+		"team":     llm.ChoiceQuestion{Instructions: "Which team?", Criteria: map[string]any{"accounting": "invoices and payments", "it": "computers and servers"}},
+		"priority": llm.ScoreQuestion{Instructions: "Priority", Criteria: []any{"low", "high"}},
+	}
+	res, err := c.Decision(context.Background(), "Your invoice of 1,200 EUR is overdue", q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := res.Answers()
+	if len(a) != 4 {
+		t.Fatalf("%d réponses", len(a))
+	}
+	team, ok := a["team"].(llm.ChoiceAnswer)
+	if !ok || team.Choice() != "accounting" {
+		t.Fatalf("choix ouvert : %#v", a["team"])
+	}
+	billing, ok := a["billing"].(llm.NoulAnswer)
+	if !ok || billing.Noul() <= 0.5 {
+		t.Fatalf("noul ouvert : %#v", a["billing"])
+	}
+	if _, ok := a["priority"].(llm.ScoreAnswer); !ok {
+		t.Fatalf("score ouvert : %#v", a["priority"])
 	}
 }

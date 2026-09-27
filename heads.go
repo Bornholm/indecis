@@ -143,6 +143,7 @@ func (h *head) answer(z []float64, temperature float64) Answer {
 		}
 		a.Choice = h.q.Options[best]
 		a.Confidence = p[best]
+		a.Margin = margin(p, best)
 	case Score:
 		// P(niveau > k), rendu monotone : un modèle ordinal peut produire
 		// de légères inversions entre seuils.
@@ -215,4 +216,18 @@ func softmax(z []float64) []float64 {
 		p[i] /= sum
 	}
 	return p
+}
+
+// margin retourne p[best] moins la moyenne des autres probabilités.
+func margin(p []float64, best int) float64 {
+	if len(p) < 2 {
+		return p[best]
+	}
+	var others float64
+	for i, v := range p {
+		if i != best {
+			others += v
+		}
+	}
+	return p[best] - others/float64(len(p)-1)
 }

@@ -302,3 +302,26 @@ func TestGuidelinesInPrompt(t *testing.T) {
 		t.Fatalf("politique absente : %q", sys)
 	}
 }
+
+func TestRewriteBatches(t *testing.T) {
+	fc := &fakeClient{respond: func(system, user string) string {
+		// id 1 manquant, id 2 identique à la source : tous deux écartés.
+		return `{"items":[{"id":2,"text":"trois"},{"id":0,"text":"un en français"}]}`
+	}}
+	tc := &Teacher{Client: fc, Model: "fake", BatchSize: 3}
+	in := []dataset.Example{
+		{Text: "one", Labels: map[string]any{"categorie": "a"}},
+		{Text: "two"},
+		{Text: "trois"},
+	}
+	out, stats, err := tc.Rewrite(context.Background(), in, "Translate into French", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fc.calls.Load() != 1 || stats.Done != 1 || stats.Refused != 2 {
+		t.Fatalf("%d appels, stats %+v", fc.calls.Load(), stats)
+	}
+	if out[0].Text != "un en français" || out[0].Labels["categorie"] != "a" || out[0].Meta["rewrite"] != "Translate into French" {
+		t.Fatalf("réécriture mal rapprochée : %+v", out[0])
+	}
+}

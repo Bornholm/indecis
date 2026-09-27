@@ -4,13 +4,25 @@ import (
 	"context"
 	"log"
 	"math/rand"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/bornholm/indecis"
 	"github.com/bornholm/indecis/dataset"
+	"github.com/bornholm/indecis/dataset/synth"
 )
+
+// mixOptions choisit les sources d'entraînement en plus des tickets et des
+// courriels Enron étiquetés.
+type mixOptions struct {
+	fr       bool   // courriels Enron traduits en français
+	synth    int    // courriels synthétiques en français (0 : aucun)
+	synthDir string // gabarits
+}
+
+var mix mixOptions
 
 // choiceBatches regroupe des tickets par lots d'une même liste (files,
 // types, mots-clés). Les options d'un lot sont les catégories justes de ses
@@ -82,9 +94,9 @@ func choiceBatches(tickets []dataset.Example, size, options int, rng *rand.Rand)
 // listBatches regroupe les courriels étiquetés selon les listes
 // d'entraînement : pour chaque liste, des lots de courriels dont les options
 // sont toutes les catégories de la liste.
-func listBatches(emails []dataset.Example, size int, rng *rand.Rand) []indecis.ChoiceBatch {
+func listBatches(emails []dataset.Example, lists []taxonomy, size int, rng *rand.Rand) []indecis.ChoiceBatch {
 	var out []indecis.ChoiceBatch
-	for _, t := range training {
+	for _, t := range lists {
 		index := map[string]int{}
 		for i, o := range t.Options {
 			index[o.Name] = i
@@ -130,12 +142,38 @@ func trainEmbed(ctx context.Context, dir, backbone, out string, n, epochs int) e
 	pool = pool[:min(n, len(pool))]
 	batches := choiceBatches(pool, 16, 24, rng)
 	log.Printf("%d tickets → %d lots de 16", len(pool), len(batches))
-	if emails, err := dataset.ReadFile(filepath.Join(dir, "enron_train.jsonl")); err == nil {
-		eb := listBatches(emails, 16, rng)
-		log.Printf("%d courriels Enron étiquetés → %d lots sur %d listes", len(emails), len(eb), len(training))
-		batches = append(batches, eb...)
-		rng.Shuffle(len(batches), func(i, j int) { batches[i], batches[j] = batches[j], batches[i] })
+	sources := []struct {
+		file  string
+		lists []taxonomy
+		use   bool
+	}{
+		{"enron_train.jsonl", training, true},
+		{"enron_train_fr.jsonl", training, mix.fr},
 	}
+	for _, src := range sources {
+		if !src.use {
+			continue
+		}
+		if emails, err := dataset.ReadFile(filepath.Join(dir, src.file)); err == nil {
+			eb := listBatches(emails, src.lists, 16, rng)
+			log.Printf("%s : %d courriels → %d lots", src.file, len(emails), len(eb))
+			batches = append(batches, eb...)
+		}
+	}
+	if mix.synth > 0 {
+		c, err := synth.LoadFS(os.DirFS(mix.synthDir), synth.DefaultGazetteerOptions())
+		if err != nil {
+			return err
+		}
+		gen, err := c.Generate(mix.synth, synth.Options{Seed: 1, Dedupe: true})
+		if err != nil {
+			return err
+		}
+		eb := listBatches(gen, templated, 16, rng)
+		log.Printf("gabarits : %d courriels → %d lots", len(gen), len(eb))
+		batches = append(batches, eb...)
+	}
+	rng.Shuffle(len(batches), func(i, j int) { batches[i], batches[j] = batches[j], batches[i] })
 
 	m, err := indecis.New(backbone, indecis.Schema{indecis.NewNoul(question, "")}, 1)
 	if err != nil {

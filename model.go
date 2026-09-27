@@ -33,6 +33,10 @@ type Answer struct {
 	Probs map[string]float64 `json:"probs,omitempty"`
 	// Confidence est la probabilité de la réponse retenue.
 	Confidence float64 `json:"confidence"`
+	// Margin (Choice) est l'écart entre la probabilité retenue et la
+	// moyenne des autres, la confiance de CLM : proche de 0 quand les
+	// options se valent, même si elles sont nombreuses.
+	Margin float64 `json:"margin,omitempty"`
 }
 
 // Decision regroupe les réponses d'un texte, par nom de question.
@@ -65,6 +69,7 @@ type Model struct {
 	maxLen        int
 	paired        bool
 	info          Info
+	embedCache    *lru // voir WithEmbedCache
 }
 
 // Input est un texte à juger et son contexte éventuel.
@@ -93,6 +98,18 @@ func WithThreads(n int) Option { return func(*Model) { linalg.SetMaxWorkers(n) }
 // à vérifier pour chaque modèle (Evaluate avec et sans l'option).
 func WithInt8() Option {
 	return func(m *Model) { m.enc.SetInt8(linalg.Int8Fast()) }
+}
+
+// WithEmbedCache garde en mémoire les plongements des n derniers textes
+// distincts passés à Embed (et donc à ChooseIn, ChooseNearest) : un texte
+// revu, une option réutilisée, ne sont pas réencodés. Le cache est vidé à
+// chaque entraînement.
+func WithEmbedCache(n int) Option {
+	return func(m *Model) {
+		if n > 0 {
+			m.embedCache = newLRU(n)
+		}
+	}
 }
 
 // WithPairs fait lire au modèle des paires (contexte, texte) : le prompt

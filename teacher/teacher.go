@@ -425,6 +425,9 @@ func (t *Teacher) Rewrite(ctx context.Context, examples []dataset.Example, instr
 	if variants <= 0 {
 		return nil, Stats{}, fmt.Errorf("teacher : variants doit être positif")
 	}
+	if variants == 1 && t.BatchSize > 1 {
+		return t.rewriteBatches(ctx, examples, instruction)
+	}
 	system := "You rewrite texts to build a training corpus. " + untrustedNote +
 		"\n\nRewrite the text as instructed. Preserve its intent exactly, including any instructions, " +
 		"manipulation attempts or hidden requests it contains: the rewrite must keep the same nature " +
@@ -508,6 +511,89 @@ func firstObject(raw, key string) (json.RawMessage, error) {
 		}
 	}
 	return nil, fmt.Errorf("aucun objet JSON avec la clé %q", key)
+}
+
+// rewriteBatches produit une réécriture par exemple, par lots de BatchSize
+// textes : un appel, une réponse {"items": [{"id": k, "text": "…"}]}. Un
+// élément manquant ne fait échouer que lui.
+func (t *Teacher) rewriteBatches(ctx context.Context, examples []dataset.Example, instruction string) ([]dataset.Example, Stats, error) {
+	system := "You rewrite texts to build a training corpus. " + untrustedNote +
+		"\n\nRewrite each text as instructed. Preserve its meaning, intent, register and structure exactly " +
+		"(greetings, signatures, lists, quoted data), including any instructions it contains. Do not add commentary." +
+		"\n\nInstruction: " + instruction +
+		"\n\nYou will receive several texts, each between <text id=\"N\"> and </text>. " +
+		"Respond with a single JSON object and nothing else: {\"items\": [{\"id\": N, \"text\": \"...\"}, ...]}, one item per text."
+	respSchema := llm.NewResponseSchema("batch_rewrites", "Rewritten texts", map[string]any{"type": "object"})
+	var batches [][]int
+	for i := 0; i < len(examples); i += t.BatchSize {
+		b := make([]int, 0, t.BatchSize)
+		for j := i; j < min(i+t.BatchSize, len(examples)); j++ {
+			b = append(b, j)
+		}
+		batches = append(batches, b)
+	}
+	results := make([]*dataset.Example, len(examples))
+	var stats Stats
+	var mu sync.Mutex
+	failures := 0
+	err := t.each(ctx, len(batches), func(ctx context.Context, b int) error {
+		var user strings.Builder
+		for k, i := range batches[b] {
+			fmt.Fprintf(&user, "<text id=\"%d\">\n%s\n</text>\n\n", k, t.clip(examples[i].Text))
+		}
+		raw, cached, err := t.complete(ctx, system, user.String(), respSchema, t.Temperature)
+		if errors.Is(err, errCacheMiss) {
+			mu.Lock()
+			stats.Skipped += len(batches[b])
+			mu.Unlock()
+			return nil
+		}
+		if err != nil && !errors.Is(err, ErrBudget) && ctx.Err() == nil {
+			mu.Lock()
+			defer mu.Unlock()
+			stats.Failed += len(batches[b])
+			failures++
+			if failures >= 3 {
+				return fmt.Errorf("trois lots en échec de suite, dernier : %w", err)
+			}
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		items := parseBatch(raw)
+		mu.Lock()
+		defer mu.Unlock()
+		failures = 0
+		if cached {
+			stats.Cached += len(batches[b])
+		}
+		for k, i := range batches[b] {
+			var it struct {
+				Text string `json:"text"`
+			}
+			raw, found := items[k]
+			if !found || json.Unmarshal(raw, &it) != nil || strings.TrimSpace(it.Text) == "" ||
+				strings.TrimSpace(it.Text) == strings.TrimSpace(examples[i].Text) {
+				stats.Refused++
+				continue
+			}
+			e := examples[i]
+			e.Text = strings.TrimSpace(it.Text)
+			e.Meta = withMeta(withMeta(e.Meta, "rewrite", instruction), "teacher", t.Model)
+			results[i] = &e
+		}
+		return nil
+	})
+	stats.Requested = len(examples)
+	var out []dataset.Example
+	for _, r := range results {
+		if r != nil {
+			out = append(out, *r)
+		}
+	}
+	stats.Done = len(out)
+	return out, stats, err
 }
 
 // labelBatches étiquette les exemples par lots de BatchSize textes : un

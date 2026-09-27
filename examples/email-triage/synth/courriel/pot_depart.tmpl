@@ -1,0 +1,16 @@
+family: courriel/pot_depart
+lang: fr
+label.service: Vie d'équipe
+label.intention: Invitation
+label.emetteur: Collègue
+label.delai: Aucun
+---
+[?objet:0.7]Objet : {{one:Pot de départ de {{pick:prenom}}|Apéro vendredi !|Petit déj d'équipe}}
+
+[/]{{one}}{{include:part/appel_familier}}
+{{one:{{pick:prenom}} nous quitte après {{int:3-25}} ans, on organise un pot {{pick:jour}} à 17 h en salle de pause.|Pour fêter la fin du projet, apéro vendredi soir !|Je ramène des croissants {{pick:jour}} matin, venez nombreux.}} {{one:Participation libre pour le cadeau.|Dites-moi si vous venez.}}
+
+{{include:part/fin_familier}}{{label:registre=Familier}}{{|}}{{include:part/appel_courant}}
+{{one:{{pick:prenom}} nous quitte après {{int:3-25}} ans, on organise un pot {{pick:jour}} à 17 h en salle de pause.|Pour fêter la fin du projet, apéro vendredi soir !|Je ramène des croissants {{pick:jour}} matin, venez nombreux.}} {{one:Participation libre pour le cadeau.|Dites-moi si vous venez.}}
+
+{{include:part/fin_courant}}{{label:registre=Courant}}{{/one}}

@@ -1,0 +1,12 @@
+family: courriel/confirmation_commande
+lang: fr
+label.service: Logistique
+label.intention: Confirmation
+label.emetteur: Système automatique
+label.delai: Aucun
+---
+[?objet:0.8]Objet : {{one:Confirmation de votre commande n° {{digits:8}}|Votre colis a été expédié|Commande {{digits:8}} : livraison prévue}}
+
+[/]{{one:Nous vous confirmons la réception de votre commande n° {{digits:8}} ({{pick:produit}}).|Votre colis a été remis au transporteur le {{int:1-28}} {{pick:mois}}.|Votre commande sera livrée le {{pick:jour}} {{int:1-28}} {{pick:mois}} entre 8 h et 13 h.}}
+
+{{one:Suivez votre colis sur votre espace client.|Numéro de suivi : {{digits:12}}.}}{{label:registre=Impersonnel}}

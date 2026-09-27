@@ -1,0 +1,12 @@
+family: courriel/alerte_systeme
+lang: fr
+label.service: Informatique interne
+label.intention: Alerte
+label.emetteur: Système automatique
+label.delai: Immédiat
+---
+[?objet:0.8]Objet : {{one:[ALERTE] Espace disque critique|Échec de la sauvegarde nocturne|Tentative de connexion suspecte}}
+
+[/]{{one:Le serveur SRV-{{digits:3}} a atteint {{int:91-99}} % d'occupation disque.|La sauvegarde planifiée du {{int:1-28}} {{pick:mois}} s'est terminée en erreur (code {{digits:4}}).|Une connexion depuis une adresse inhabituelle a été détectée sur votre compte.}}
+
+Ce message est généré automatiquement, merci de ne pas y répondre.{{label:registre=Impersonnel}}

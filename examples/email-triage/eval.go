@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"hash/fnv"
 	"math"
+	"math/rand"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -160,6 +162,9 @@ func hash(s string) uint64 {
 	return h.Sum64()
 }
 
+// dataDir est le répertoire des données, pour les jeux de test facultatifs.
+var dataDir string
+
 // evalSets construit les jeux de test à partir des données préparées.
 func evalSets(tickets, imnim, enron []dataset.Example) []evalSet {
 	var sets []evalSet
@@ -205,6 +210,28 @@ func evalSets(tickets, imnim, enron []dataset.Example) []evalSet {
 	sort.Slice(imnimCands, func(i, j int) bool { return imnimCands[i].Name < imnimCands[j].Name })
 	sets = append(sets, evalSet{"imnim (catégories jamais vues)", cap500(single), imnimCands,
 		func(e dataset.Example) []string { return strings.Split(e.Meta["labels"], "|") }})
+
+	// ASN : vraies lettres en français, thème d'inspection à retrouver.
+	if asn, err := dataset.ReadFile(filepath.Join(dataDir, "asn.jsonl")); err == nil && len(asn) > 0 {
+		themes := map[string]bool{}
+		for _, e := range asn {
+			themes[e.Meta["theme"]] = true
+		}
+		var cands []indecis.Candidate
+		for t := range themes {
+			cands = append(cands, indecis.Candidate{Name: t})
+		}
+		sort.Slice(cands, func(i, j int) bool { return cands[i].Name < cands[j].Name })
+		rng := rand.New(rand.NewSource(5))
+		rng.Shuffle(len(asn), func(i, j int) { asn[i], asn[j] = asn[j], asn[i] })
+		sets = append(sets, evalSet{"ASN, lettres FR, thème", cap500(asn), cands,
+			func(e dataset.Example) []string { return []string{e.Meta["theme"]} }})
+	}
+	// Enron traduit en français, même liste et mêmes étiquettes.
+	if fr, err := dataset.ReadFile(filepath.Join(dataDir, "enron_labeled_fr.jsonl")); err == nil && len(fr) > 0 {
+		sets = append(sets, evalSet{"Enron traduit (FR), liste classique", fr, classic,
+			func(e dataset.Example) []string { return []string{topLabel(e.Labels["categorie"])} }})
+	}
 
 	// Enron, étiqueté par les teachers selon la liste classique.
 	var labeled []dataset.Example

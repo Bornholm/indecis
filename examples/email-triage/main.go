@@ -38,8 +38,12 @@ func main() {
 	n := fs.Int("n", 3000, "train : tickets d'entraînement")
 	epochs := fs.Int("epochs", 1, "train : époques")
 	shots := fs.Int("k", 5, "few-shot : exemples par catégorie")
+	fs.BoolVar(&mix.fr, "fr", false, "train-embed : ajouter les courriels Enron traduits en français")
+	fs.IntVar(&mix.synth, "synth", 0, "train-embed : courriels synthétiques en français à ajouter")
+	fs.StringVar(&mix.synthDir, "synth-dir", "examples/email-triage/synth", "train-embed : gabarits")
 	fs.Parse(os.Args[2:])
 	ctx := context.Background()
+	dataDir = *data
 	if err := os.MkdirAll(*data, 0o755); err != nil {
 		log.Fatal(err)
 	}
@@ -49,6 +53,8 @@ func main() {
 		err = prepare(ctx, *data, *ticketPages, *enronPages)
 	case "teacher-schema":
 		err = writeTeacherSchema(*data)
+	case "asn":
+		err = prepareASN(ctx, *data, 100, 12)
 	case "more-enron":
 		err = moreEnron(ctx, *data, *enronPages, "train")
 	case "train":

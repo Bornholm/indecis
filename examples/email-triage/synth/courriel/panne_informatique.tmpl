@@ -1,0 +1,16 @@
+family: courriel/panne_informatique
+lang: fr
+label.service: Informatique interne
+label.intention: Demande d'intervention
+label.emetteur: Collègue
+label.delai: Immédiat
+---
+[?objet:0.7]Objet : {{one:Problème avec {{pick:logiciel}}|URGENT : {{pick:logiciel}} en panne|Impossible de me connecter}}
+
+[/]{{one}}{{include:part/appel_courant}}
+{{one:Depuis ce matin, impossible d'accéder à {{pick:logiciel}}.|{{pick:logiciel}} ne répond plus depuis {{int:9-17}} h.|J'ai un message d'erreur quand j'ouvre {{pick:logiciel}}.}} {{one:Toute l'équipe est bloquée.|Je dois envoyer un dossier avant midi.|J'ai déjà redémarré le poste, sans effet.}} {{one:Quelqu'un peut passer ?|Merci de regarder au plus vite.}}
+
+{{include:part/fin_courant}}{{label:registre=Courant}}{{|}}{{include:part/appel_familier}}
+{{one:Depuis ce matin, impossible d'accéder à {{pick:logiciel}}.|{{pick:logiciel}} ne répond plus depuis {{int:9-17}} h.|J'ai un message d'erreur quand j'ouvre {{pick:logiciel}}.}} {{one:Toute l'équipe est bloquée.|Je dois envoyer un dossier avant midi.|J'ai déjà redémarré le poste, sans effet.}} {{one:Quelqu'un peut passer ?|Merci de regarder au plus vite.}}
+
+{{include:part/fin_familier}}{{label:registre=Familier}}{{/one}}

@@ -117,20 +117,48 @@ func (c *Client) Decision(ctx context.Context, state any, questions llm.Question
 	for _, q := range m.Schema() {
 		schema[q.Name] = q
 	}
+	// Une question apprise (même nom que dans le schéma du modèle) passe
+	// par sa tête, calibrée. Toute autre question est ouverte : ses
+	// critères sont comparés à l'état par plongements (DecideOpen), comme
+	// chez Jev.
+	var ids []string
+	var open []indecis.OpenQuestion
+	learned := false
 	for id, q := range questions {
+		if _, ok := schema[id]; !ok {
+			ids = append(ids, id)
+			open = append(open, toOpen(id, q))
+			continue
+		}
 		if err := compatible(id, q, schema); err != nil {
 			return nil, err
 		}
+		learned = true
 	}
-
-	ds, err := m.DecideInputs(ctx, in)
-	if err != nil {
-		return nil, err
-	}
-	d := ds[0]
 	answers := make(map[string]llm.Answer, len(questions))
-	for id, q := range questions {
-		answers[id] = toAnswer(q, schema[id], d[id])
+	if learned {
+		ds, err := m.DecideInputs(ctx, in)
+		if err != nil {
+			return nil, err
+		}
+		for id, q := range questions {
+			if _, ok := schema[id]; ok {
+				answers[id] = toAnswer(q, schema[id], ds[0][id])
+			}
+		}
+	}
+	if len(open) > 0 {
+		text := in.Text
+		if in.Context != "" {
+			text = in.Context + "\n\n" + text
+		}
+		ds, err := m.DecideOpen(ctx, open, text)
+		if err != nil {
+			return nil, err
+		}
+		for k, id := range ids {
+			answers[id] = toOpenAnswer(questions[id], ds[0][open[k].Name])
+		}
 	}
 	tokens, _ := m.Tokens(in)
 	return llm.NewDecisionResponse(filepath.Base(dir), answers, llm.NewDecisionUsage(int64(tokens), 0, int64(tokens))), nil
@@ -176,17 +204,7 @@ func stateInput(state any, paired bool) (indecis.Input, error) {
 // compatible vérifie qu'une question de la requête correspond à une question
 // apprise par le modèle.
 func compatible(id string, q llm.Question, schema map[string]indecis.Question) error {
-	sq, ok := schema[id]
-	if !ok {
-		names := make([]string, 0, len(schema))
-		for n, s := range schema {
-			names = append(names, fmt.Sprintf("%s (%s)", n, s.Kind))
-		}
-		sort.Strings(names)
-		return llm.NewValidationError("questions."+id, fmt.Sprintf(
-			"question inconnue du modèle : un modèle indecis ne répond qu'aux questions apprises, identifiées par leur nom : %s",
-			strings.Join(names, ", ")))
-	}
+	sq := schema[id]
 	if string(q.QuestionType()) != string(sq.Kind) {
 		return llm.NewValidationError("questions."+id, fmt.Sprintf("le modèle répond à %q par un %s, pas un %s", id, sq.Kind, q.QuestionType()))
 	}
@@ -245,6 +263,63 @@ func toAnswer(q llm.Question, sq indecis.Question, a indecis.Answer) llm.Answer 
 			conf = math.Max(conf, p)
 		}
 		return llm.NewScoreAnswer(a.Score, legend, probs, conf)
+	default:
+		return llm.NewNoulAnswer(a.P)
+	}
+}
+
+// toOpen traduit une question genai en question ouverte : les critères
+// deviennent des options décrites. Une question oui/non sans critères
+// oppose l'affirmation et la négation de ses instructions.
+func toOpen(id string, q llm.Question) indecis.OpenQuestion {
+	switch v := q.(type) {
+	case llm.NoulQuestion:
+		instr := describe(v.Instructions)
+		yes, no := "Oui : "+instr, "Non, pas du tout : "+instr
+		if v.True != nil {
+			yes = describe(v.True)
+		}
+		if v.False != nil {
+			no = describe(v.False)
+		}
+		return indecis.OpenQuestion{Name: id, Kind: indecis.Noul, Options: []indecis.Candidate{
+			{Name: "true", Description: yes}, {Name: "false", Description: no},
+		}}
+	case llm.ChoiceQuestion:
+		names := make([]string, 0, len(v.Criteria))
+		for o := range v.Criteria {
+			names = append(names, o)
+		}
+		sort.Strings(names)
+		oq := indecis.OpenQuestion{Name: id, Kind: indecis.Choice, Instructions: describe(v.Instructions)}
+		for _, n := range names {
+			c := indecis.Candidate{Name: n}
+			if d := v.Criteria[n]; d != nil {
+				c.Description = describe(d)
+			}
+			oq.Options = append(oq.Options, c)
+		}
+		return oq
+	case llm.ScoreQuestion:
+		oq := indecis.OpenQuestion{Name: id, Kind: indecis.Score, Instructions: describe(v.Instructions)}
+		for i, c := range v.Criteria {
+			oq.Options = append(oq.Options, indecis.Candidate{Name: strconv.Itoa(i), Description: describe(c)})
+		}
+		return oq
+	}
+	return indecis.OpenQuestion{Name: id}
+}
+
+func toOpenAnswer(q llm.Question, a indecis.Answer) llm.Answer {
+	switch v := q.(type) {
+	case llm.ChoiceQuestion:
+		return llm.NewChoiceAnswer(a.Choice, a.Probs, a.Confidence)
+	case llm.ScoreQuestion:
+		legend := map[string]string{}
+		for i, c := range v.Criteria {
+			legend[strconv.Itoa(i)] = describe(c)
+		}
+		return llm.NewScoreAnswer(a.Score, legend, a.Probs, a.Confidence)
 	default:
 		return llm.NewNoulAnswer(a.P)
 	}

@@ -1,0 +1,16 @@
+family: courriel/invitation_reunion
+lang: fr
+label.service: Direction
+label.intention: Invitation
+label.emetteur: Hiérarchie
+label.delai: Sous quelques jours
+---
+[?objet:0.7]Objet : {{one:Réunion sur {{pick:sujet_reunion}}|Invitation : point {{pick:jour}}|Comité de direction}}
+
+[/]{{one}}{{include:part/appel_soutenu}}
+{{one:Je vous convie à une réunion sur {{pick:sujet_reunion}} le {{pick:jour}} à {{int:9-17}} h.|Merci de bloquer une heure {{pick:jour}} prochain pour faire le point sur {{pick:sujet_reunion}}.|Le prochain comité se tiendra le {{pick:jour}} {{int:1-28}} {{pick:mois}} en salle {{int:1-12}}.}} {{one:Merci de confirmer votre présence.|L'ordre du jour suivra.}}
+
+{{include:part/fin_soutenu}}{{label:registre=Soutenu}}{{|}}{{include:part/appel_courant}}
+{{one:Je vous convie à une réunion sur {{pick:sujet_reunion}} le {{pick:jour}} à {{int:9-17}} h.|Merci de bloquer une heure {{pick:jour}} prochain pour faire le point sur {{pick:sujet_reunion}}.|Le prochain comité se tiendra le {{pick:jour}} {{int:1-28}} {{pick:mois}} en salle {{int:1-12}}.}} {{one:Merci de confirmer votre présence.|L'ordre du jour suivra.}}
+
+{{include:part/fin_courant}}{{label:registre=Courant}}{{/one}}

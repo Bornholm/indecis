@@ -97,3 +97,24 @@ func teacherSchema() (indecis.Schema, string) {
 	}
 	return s, g
 }
+
+// templated sont les listes des courriels synthétiques en français
+// (synth/courriel) : leurs étiquettes viennent des gabarits. Aucun nom ne
+// reprend la liste classique.
+var templated = []taxonomy{
+	{"service", "Quel service est concerné ?", names("Comptabilité", "Paie et personnel", "Informatique interne", "Achats",
+		"Service juridique", "Logistique", "Relation client", "Direction", "Communication", "Vie d'équipe")},
+	{"intention", "Quelle est l'intention de l'expéditeur ?", names("Demande d'information", "Relance", "Confirmation", "Plainte",
+		"Invitation", "Transmission de document", "Demande d'intervention", "Demande d'accord", "Remerciement", "Annulation", "Alerte", "Information")},
+	{"emetteur", "Qui écrit ?", names("Client", "Fournisseur", "Collègue", "Hiérarchie", "Candidat", "Administration", "Système automatique")},
+	{"delai", "Dans quel délai répondre ?", names("Immédiat", "Sous quelques jours", "Aucun")},
+	{"registre", "Quel registre de langue ?", names("Soutenu", "Courant", "Familier", "Impersonnel")},
+}
+
+func names(ns ...string) []indecis.Candidate {
+	out := make([]indecis.Candidate, len(ns))
+	for i, n := range ns {
+		out[i] = indecis.Candidate{Name: n}
+	}
+	return out
+}

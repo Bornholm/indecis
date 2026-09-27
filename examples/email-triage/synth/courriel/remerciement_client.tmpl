@@ -1,0 +1,19 @@
+family: courriel/remerciement_client
+lang: fr
+label.service: Relation client
+label.intention: Remerciement
+label.emetteur: Client
+label.delai: Aucun
+---
+[?objet:0.7]Objet : {{one:Merci !|Remerciements|Très satisfait}}
+
+[/]{{one}}{{include:part/appel_soutenu}}
+{{one:Je tenais à vous remercier pour la rapidité de l'intervention de votre technicien.|Merci pour votre accueil et vos conseils lors de ma visite à {{pick:ville}}.|Le {{pick:produit}} est arrivé en parfait état, merci pour votre sérieux.}} {{one:Je recommanderai votre entreprise.|Encore bravo à toute l'équipe.}}
+
+{{include:part/fin_soutenu}}{{label:registre=Soutenu}}{{|}}{{include:part/appel_courant}}
+{{one:Je tenais à vous remercier pour la rapidité de l'intervention de votre technicien.|Merci pour votre accueil et vos conseils lors de ma visite à {{pick:ville}}.|Le {{pick:produit}} est arrivé en parfait état, merci pour votre sérieux.}} {{one:Je recommanderai votre entreprise.|Encore bravo à toute l'équipe.}}
+
+{{include:part/fin_courant}}{{label:registre=Courant}}{{|}}{{include:part/appel_familier}}
+{{one:Je tenais à vous remercier pour la rapidité de l'intervention de votre technicien.|Merci pour votre accueil et vos conseils lors de ma visite à {{pick:ville}}.|Le {{pick:produit}} est arrivé en parfait état, merci pour votre sérieux.}} {{one:Je recommanderai votre entreprise.|Encore bravo à toute l'équipe.}}
+
+{{include:part/fin_familier}}{{label:registre=Familier}}{{/one}}

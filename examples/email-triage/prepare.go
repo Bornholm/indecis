@@ -6,6 +6,7 @@ import (
 	"log"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/bornholm/indecis/dataset"
@@ -150,4 +151,82 @@ func moreEnron(ctx context.Context, dir string, pages int, seed string) error {
 		return err
 	}
 	return write(dir, "enron_train_unlabeled", out)
+}
+
+// prepareASN collecte des lettres de suite d'inspection de l'Autorité de
+// sûreté nucléaire (AdrienB134/ASN_Lettres_De_Suivi) : de vraies lettres
+// professionnelles en français, dont l'objet donne le thème de
+// l'inspection. Le texte gardé est la synthèse de l'inspection, sans les
+// phrases qui nomment le thème ; le thème est l'étiquette à retrouver.
+func prepareASN(ctx context.Context, dir string, pages, themes int) error {
+	var all []dataset.Example
+	err := rows(ctx, "AdrienB134/ASN_Lettres_De_Suivi", "train", 14408, pages, "poc", func(r map[string]any) {
+		raw := str(r, "raw_file")
+		m := asnTheme.FindStringSubmatch(raw)
+		if m == nil {
+			return
+		}
+		theme := normTheme(m[1])
+		i := strings.Index(raw, "Synth")
+		if i < 0 {
+			return
+		}
+		body := raw[i:]
+		if j := strings.IndexByte(body, '\n'); j > 0 {
+			body = body[j+1:] // titre de la section
+		}
+		var kept []string
+		for _, s := range sentence.Split(body, -1) {
+			if !strings.Contains(strings.ToLower(s), "thème") && !strings.Contains(s, theme) {
+				kept = append(kept, strings.TrimSpace(s))
+			}
+		}
+		text := strings.Join(kept, ". ")
+		if len(text) < 200 {
+			return
+		}
+		if len(text) > 1500 {
+			text = text[:1500]
+		}
+		all = append(all, dataset.Example{Text: text, Meta: map[string]string{"source": "asn", "theme": theme}})
+	})
+	if err != nil {
+		return err
+	}
+	count := map[string]int{}
+	for _, e := range all {
+		count[e.Meta["theme"]]++
+	}
+	var names []string
+	for t := range count {
+		names = append(names, t)
+	}
+	sort.Slice(names, func(i, j int) bool { return count[names[i]] > count[names[j]] })
+	keep := map[string]bool{}
+	for _, t := range names[:min(themes, len(names))] {
+		keep[t] = true
+	}
+	var out []dataset.Example
+	for _, e := range all {
+		if keep[e.Meta["theme"]] {
+			out = append(out, e)
+		}
+	}
+	return write(dir, "asn", dedupe(out))
+}
+
+var (
+	asnTheme = regexp.MustCompile(`sur le th[èe]me\s*[«"]\s*([^»"]{3,80}?)\s*[»"]`)
+	sentence = regexp.MustCompile(`\.\s+`)
+)
+
+// normTheme unifie la casse et les variantes d'un même thème.
+func normTheme(t string) string {
+	t = strings.ToLower(strings.Join(strings.Fields(t), " "))
+	t = strings.TrimPrefix(t, "gestion des ")
+	if t == "" {
+		return t
+	}
+	r := []rune(t)
+	return strings.ToUpper(string(r[0])) + string(r[1:])
 }

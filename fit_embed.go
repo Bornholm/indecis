@@ -36,7 +36,8 @@ type ChoiceBatch struct {
 const DefaultEmbedScale = 20
 
 // FitEmbeddings affine l'encodeur pour ChooseNearest. opts.HeadLR et
-// opts.Dropout sont ignorés : aucune tête n'intervient.
+// opts.Dropout sont ignorés : aucune tête n'intervient. opts.Symmetric
+// ajoute le sens option → textes à la perte.
 func (m *Model) FitEmbeddings(ctx context.Context, batches []ChoiceBatch, opts TrainOptions) error {
 	if opts.Epochs <= 0 || len(batches) == 0 {
 		return fmt.Errorf("indecis: Epochs positif et au moins un lot requis")
@@ -60,6 +61,7 @@ func (m *Model) FitEmbeddings(ctx context.Context, batches []ChoiceBatch, opts T
 	H := m.enc.Cfg.Hidden
 	m.enc.Materialize()
 	defer m.enc.Invalidate()
+	m.embedCache.clear() // les plongements vont changer
 	grads := m.enc.EnableGrad()
 	var dense []optim.Dense
 	for _, p := range m.enc.Params() {
@@ -85,7 +87,7 @@ func (m *Model) FitEmbeddings(ctx context.Context, batches []ChoiceBatch, opts T
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			loss, n := m.choiceStep(batches[bi], scale, grads)
+			loss, n := m.choiceStep(batches[bi], scale, opts.Symmetric, grads)
 			tokens += n
 			if opts.ClipNorm > 0 {
 				optim.ClipGradNorm(opts.ClipNorm, dense, sparse)
@@ -109,7 +111,7 @@ func (m *Model) FitEmbeddings(ctx context.Context, batches []ChoiceBatch, opts T
 
 // choiceStep calcule la perte d'un lot et accumule les gradients des deux
 // passes (textes, options).
-func (m *Model) choiceStep(b ChoiceBatch, scale float64, grads *modernbert.Grads) (float64, int) {
+func (m *Model) choiceStep(b ChoiceBatch, scale float64, symmetric bool, grads *modernbert.Grads) (float64, int) {
 	H := m.enc.Cfg.Hidden
 	encode := func(texts []string) (modernbert.Batch, *modernbert.State, []float32, []float32) {
 		seqs := make([][]int32, len(texts))
@@ -144,47 +146,115 @@ func (m *Model) choiceStep(b ChoiceBatch, scale float64, grads *modernbert.Grads
 	cb, cs, c, cn := encode(ctxs)
 
 	nt, nc := len(b.Texts), len(ctxs)
-	da := make([]float32, len(a))
-	dc := make([]float32, len(c))
-	var loss float64
+	// Similarités mises à l'échelle, et paires écartées : une option juste
+	// autre que la cible n'est ni un positif ni un négatif.
+	S := make([]float64, nt*nc)
+	masked := make([]bool, nt*nc)
+	target := make([]int, nt)
 	for i := 0; i < nt; i++ {
-		masked := map[int]bool{}
+		target[i] = b.Correct[i][0]
 		for _, j := range b.Correct[i][1:] {
-			masked[j] = true
+			masked[i*nc+j] = true
 		}
-		target := b.Correct[i][0]
-		z := make([]float64, nc)
-		mx := math.Inf(-1)
 		for j := 0; j < nc; j++ {
-			if masked[j] {
-				continue
-			}
 			var dot float64
 			for k := 0; k < H; k++ {
 				dot += float64(a[i*H+k]) * float64(c[j*H+k])
 			}
-			z[j] = scale * dot
-			mx = max(mx, z[j])
+			S[i*nc+j] = scale * dot
+		}
+	}
+	dS := make([]float64, nt*nc) // ∂perte/∂S
+	var loss float64
+
+	// Texte → options : entropie croisée sur les options de chaque texte.
+	weight := 1.0
+	if symmetric {
+		weight = 0.5
+	}
+	for i := 0; i < nt; i++ {
+		mx := math.Inf(-1)
+		for j := 0; j < nc; j++ {
+			if !masked[i*nc+j] {
+				mx = max(mx, S[i*nc+j])
+			}
 		}
 		var sum float64
 		for j := 0; j < nc; j++ {
-			if !masked[j] {
-				sum += math.Exp(z[j] - mx)
+			if !masked[i*nc+j] {
+				sum += math.Exp(S[i*nc+j] - mx)
 			}
 		}
-		loss += -(z[target] - mx - math.Log(sum)) / float64(nt)
+		loss += weight * -(S[i*nc+target[i]] - mx - math.Log(sum)) / float64(nt)
 		for j := 0; j < nc; j++ {
-			if masked[j] {
+			if masked[i*nc+j] {
 				continue
 			}
-			g := math.Exp(z[j]-mx) / sum
-			if j == target {
+			g := math.Exp(S[i*nc+j]-mx) / sum
+			if j == target[i] {
 				g--
 			}
-			g *= scale / float64(nt)
+			dS[i*nc+j] += weight * g / float64(nt)
+		}
+	}
+
+	// Option → textes, comme CLM : chaque option cible d'au moins un texte
+	// doit préférer ses textes aux autres. Plusieurs textes peuvent la viser :
+	// la probabilité à maximiser est leur somme.
+	if symmetric {
+		var cols []int
+		for j := 0; j < nc; j++ {
+			for i := 0; i < nt; i++ {
+				if target[i] == j {
+					cols = append(cols, j)
+					break
+				}
+			}
+		}
+		for _, j := range cols {
+			mx := math.Inf(-1)
+			for i := 0; i < nt; i++ {
+				if !masked[i*nc+j] {
+					mx = max(mx, S[i*nc+j])
+				}
+			}
+			var all, pos float64
+			for i := 0; i < nt; i++ {
+				if masked[i*nc+j] {
+					continue
+				}
+				e := math.Exp(S[i*nc+j] - mx)
+				all += e
+				if target[i] == j {
+					pos += e
+				}
+			}
+			loss += weight * -math.Log(pos/all) / float64(len(cols))
+			for i := 0; i < nt; i++ {
+				if masked[i*nc+j] {
+					continue
+				}
+				e := math.Exp(S[i*nc+j] - mx)
+				g := e / all
+				if target[i] == j {
+					g -= e / pos
+				}
+				dS[i*nc+j] += weight * g / float64(len(cols))
+			}
+		}
+	}
+
+	da := make([]float32, len(a))
+	dc := make([]float32, len(c))
+	for i := 0; i < nt; i++ {
+		for j := 0; j < nc; j++ {
+			g := float32(scale * dS[i*nc+j])
+			if g == 0 {
+				continue
+			}
 			for k := 0; k < H; k++ {
-				da[i*H+k] += float32(g) * c[j*H+k]
-				dc[j*H+k] += float32(g) * a[i*H+k]
+				da[i*H+k] += g * c[j*H+k]
+				dc[j*H+k] += g * a[i*H+k]
 			}
 		}
 	}
@@ -326,6 +396,7 @@ func (m *Model) ChooseIn(ctx context.Context, set *CandidateSet, texts ...string
 			}
 		}
 		a.Choice, a.Confidence, a.Score = set.candidates[best].Name, p[best], cos[best]
+		a.Margin = margin(p, best)
 		out[i] = a
 	}
 	return out, nil

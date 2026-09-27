@@ -1,0 +1,16 @@
+family: courriel/facture_impayee
+lang: fr
+label.service: Comptabilité
+label.intention: Relance
+label.emetteur: Fournisseur
+label.delai: Sous quelques jours
+---
+[?objet:0.7]Objet : {{one:Relance facture n° {{digits:6}}|Facture impayée|Rappel de paiement}}
+
+[/]{{one}}{{include:part/appel_soutenu}}
+{{one:Sauf erreur de notre part, la facture n° {{digits:6}} du {{int:1-28}} {{pick:mois}}, d'un montant de {{int:180-9800}} €, reste impayée à ce jour.|Nous n'avons toujours pas reçu le règlement de notre facture de {{pick:mois}} ({{int:180-9800}} € TTC).|Notre service comptable constate un retard de paiement sur la facture {{digits:6}}.}} {{one:Merci de bien vouloir procéder au règlement sous huitaine.|Pourriez-vous nous indiquer la date de paiement prévue ?|Sans règlement de votre part, nous serons contraints de suspendre les livraisons.}}
+
+{{include:part/fin_soutenu}}{{label:registre=Soutenu}}{{|}}{{include:part/appel_courant}}
+{{one:Sauf erreur de notre part, la facture n° {{digits:6}} du {{int:1-28}} {{pick:mois}}, d'un montant de {{int:180-9800}} €, reste impayée à ce jour.|Nous n'avons toujours pas reçu le règlement de notre facture de {{pick:mois}} ({{int:180-9800}} € TTC).|Notre service comptable constate un retard de paiement sur la facture {{digits:6}}.}} {{one:Merci de bien vouloir procéder au règlement sous huitaine.|Pourriez-vous nous indiquer la date de paiement prévue ?|Sans règlement de votre part, nous serons contraints de suspendre les livraisons.}}
+
+{{include:part/fin_courant}}{{label:registre=Courant}}{{/one}}
