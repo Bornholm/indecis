@@ -1,9 +1,15 @@
-// Command prunevocab réduit le vocabulaire d'un modèle aux tokens qu'utilise
-// un corpus représentatif, et mesure l'effet sur des textes tenus à l'écart.
+// Command compact réduit la place d'un modèle et mesure l'effet sur des
+// textes tenus à l'écart :
 //
-//	go run ./tools/prunevocab -model runs/policy-P5 -out runs/policy-P5-pruned \
-//	    -corpus 'datasets/real/*.jsonl,teacher/*_policy.jsonl' \
-//	    -eval examples/prompt-injection/eval/policy_eval.jsonl
+//   - -corpus : réduit le vocabulaire aux tokens qu'utilise un corpus
+//     représentatif (PruneVocabulary) ;
+//
+//   - -int8-embeddings : écrit la table d'embeddings en int8
+//     (WithInt8Embeddings).
+//
+//     go run ./tools/compact -model runs/policy-P5 -out runs/policy-P5-compact -int8-embeddings \
+//     -corpus 'datasets/real/*.jsonl,teacher/*_policy.jsonl' \
+//     -eval examples/prompt-injection/eval/policy_eval.jsonl
 //
 // Le corpus doit ressembler aux textes que le modèle jugera (langues,
 // domaines) : les données d'entraînement du modèle conviennent. Les jeux
@@ -31,13 +37,12 @@ func main() {
 	corpusGlobs := flag.String("corpus", "", "fichiers JSONL du corpus (motifs, séparés par des virgules)")
 	evalGlobs := flag.String("eval", "", "fichiers JSONL tenus à l'écart, pour mesurer l'effet (facultatif)")
 	minCount := flag.Int("min-count", 1, "occurrences minimales d'un token dans le corpus")
+	int8Emb := flag.Bool("int8-embeddings", false, "écrire la table d'embeddings en int8")
 	flag.Parse()
-	if *modelDir == "" || *out == "" || *corpusGlobs == "" {
-		log.Fatal("-model, -out et -corpus sont obligatoires")
+	if *modelDir == "" || *out == "" || (*corpusGlobs == "" && !*int8Emb) {
+		log.Fatal("-model, -out, et -corpus ou -int8-embeddings sont obligatoires")
 	}
 	ctx := context.Background()
-	corpus := read(*corpusGlobs)
-	log.Printf("corpus : %d textes", len(corpus))
 
 	m, err := indecis.Load(*modelDir)
 	if err != nil {
@@ -53,15 +58,22 @@ func main() {
 		beforeTokens = tokens(m, evalEx)
 	}
 
-	inputs := make([]indecis.Input, len(corpus))
-	for i, e := range corpus {
-		inputs[i] = indecis.Input{Context: e.Context, Text: e.Text}
+	if *corpusGlobs != "" {
+		corpus := read(*corpusGlobs)
+		log.Printf("corpus : %d textes", len(corpus))
+		inputs := make([]indecis.Input, len(corpus))
+		for i, e := range corpus {
+			inputs[i] = indecis.Input{Context: e.Context, Text: e.Text}
+		}
+		st, err := m.PruneVocabulary(inputs, *minCount)
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Printf("vocabulaire : %d → %d tokens (%.1f %%)", st.Before, st.After, 100*float64(st.After)/float64(st.Before))
 	}
-	st, err := m.PruneVocabulary(inputs, *minCount)
-	if err != nil {
-		log.Fatal(err)
+	if *int8Emb {
+		indecis.WithInt8Embeddings()(m)
 	}
-	log.Printf("vocabulaire : %d → %d tokens (%.1f %%)", st.Before, st.After, 100*float64(st.After)/float64(st.Before))
 	if err := m.Save(*out); err != nil {
 		log.Fatal(err)
 	}

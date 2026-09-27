@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -73,6 +74,7 @@ type Model struct {
 	paired        bool
 	info          Info
 	embedCache    *lru // voir WithEmbedCache
+	embedInt8     bool // voir WithInt8Embeddings
 }
 
 // Input est un texte à juger et son contexte éventuel.
@@ -116,6 +118,14 @@ func WithEmbedCache(n int) Option {
 		}
 	}
 }
+
+// WithInt8Embeddings fait écrire par Save la table d'embeddings en int8,
+// une échelle par ligne : deux fois plus petite qu'en bf16, sur disque comme
+// dans les pages lues. Les lignes modifiées par l'entraînement perdent leur
+// valeur exacte ; l'écart se mesure avec Evaluate avant et après. Un modèle
+// sauvegardé ainsi est reconnu au chargement et le reste. Les outils de
+// Hugging Face ne lisent pas ce format.
+func WithInt8Embeddings() Option { return func(m *Model) { m.embedInt8 = true } }
 
 // WithPairs fait lire au modèle des paires (contexte, texte) : le prompt
 // système et le message, par exemple. Toutes les entrées sont alors encodées
@@ -340,7 +350,32 @@ const (
 	exactRows   = "indecis.embeddings.exact_rows"
 	exactValues = "indecis.embeddings.exact_values"
 	embName     = "embeddings.tok_embeddings.weight"
+	embScale    = "indecis.embeddings.scale"
 )
+
+// quantizeRows quantifie w (rows × h) en int8 par ligne : q = arrondi(w /
+// s), s = max |w| / 127. Les entiers sont rendus en float32 pour
+// safetensors.Write.
+func quantizeRows(w []float32, rows, h int) (q, scale []float32) {
+	q = make([]float32, rows*h)
+	scale = make([]float32, rows)
+	for r := 0; r < rows; r++ {
+		row := w[r*h : (r+1)*h]
+		var mx float32
+		for _, v := range row {
+			mx = max(mx, float32(math.Abs(float64(v))))
+		}
+		if mx == 0 {
+			continue
+		}
+		s := mx / 127
+		scale[r] = s
+		for j, v := range row {
+			q[r*h+j] = float32(math.RoundToEven(float64(v / s)))
+		}
+	}
+	return q, scale
+}
 
 // Save écrit le modèle dans dir. Le répertoire reste lisible par
 // transformers : config.json et les poids de l'encodeur gardent leurs noms.
@@ -359,9 +394,16 @@ func (m *Model) Save(dir string) error {
 	// pour que Load redonne le modèle au bit près.
 	emb := m.enc.Emb
 	embW := m.enc.EmbeddingMatrix()
-	tensors[emb.Name] = safetensors.Tensor{Shape: emb.Shape, Data: embW, DType: "BF16"}
+	if m.embedInt8 {
+		q, scale := quantizeRows(embW, emb.Shape[0], H)
+		tensors[emb.Name] = safetensors.Tensor{Shape: emb.Shape, Data: q, DType: "I8"}
+		tensors[embScale] = safetensors.Tensor{Shape: []int{emb.Shape[0]}, Data: scale}
+		embW = nil // pas de lignes exactes : la table est quantifiée
+	} else {
+		tensors[emb.Name] = safetensors.Tensor{Shape: emb.Shape, Data: embW, DType: "BF16"}
+	}
 	var rows, values []float32
-	for r := 0; r < emb.Shape[0]; r++ {
+	for r := 0; embW != nil && r < emb.Shape[0]; r++ {
 		row := embW[r*H : (r+1)*H]
 		for _, v := range row {
 			if safetensors.FromBF16(safetensors.ToBF16(v)) != v {
@@ -486,8 +528,21 @@ func Load(dir string, opts ...Option) (*Model, error) {
 	}
 	tensors := map[string]safetensors.Tensor{}
 	var table *mappedEmbeddings
+	embedInt8 := false
 	for _, name := range f.Names() {
-		if name == exactRows || name == exactValues {
+		if name == exactRows || name == exactValues || name == embScale {
+			continue
+		}
+		if dtype, shape, raw, _ := f.Raw(name); name == embName && dtype == "I8" && len(shape) == 2 && shape[1] == cfg.Hidden {
+			sc, ok, err := f.Tensor(embScale)
+			if err != nil || !ok {
+				return nil, fmt.Errorf("indecis: table int8 sans échelles (%v)", err)
+			}
+			if table, err = newInt8Embeddings(cfg.Hidden, raw, sc.Data); err != nil {
+				return nil, err
+			}
+			tensors[name] = safetensors.Tensor{Shape: shape}
+			embedInt8 = true
 			continue
 		}
 		if dtype, shape, raw, _ := f.Raw(name); name == embName && dtype == "BF16" && len(shape) == 2 && shape[1] == cfg.Hidden {
@@ -543,7 +598,7 @@ func Load(dir string, opts ...Option) (*Model, error) {
 	if err != nil {
 		return nil, err
 	}
-	m := &Model{schema: meta.Schema, enc: enc, tok: tok, tokenizerPath: tokPath, maxLen: meta.MaxLen, paired: meta.Paired, info: meta.Info}
+	m := &Model{schema: meta.Schema, enc: enc, tok: tok, tokenizerPath: tokPath, embedInt8: embedInt8, maxLen: meta.MaxLen, paired: meta.Paired, info: meta.Info}
 	H := cfg.Hidden
 	for _, q := range meta.Schema {
 		h := newHead(q, H, rand.New(rand.NewSource(0)))

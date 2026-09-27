@@ -16,6 +16,18 @@ type mappedEmbeddings struct {
 	bf16  []byte        // [V, H] en bf16 little-endian
 	exact map[int32]int // id → rang dans values
 	f32   []byte        // [len(exact), H] en float32 little-endian
+
+	// Table en int8 (WithInt8Embeddings) : i8 [V, H], scale [V].
+	i8    []byte
+	scale []float32
+}
+
+// newInt8Embeddings lit une table int8 : chaque ligne vaut i8 × scale.
+func newInt8Embeddings(h int, i8 []byte, scale []float32) (*mappedEmbeddings, error) {
+	if len(i8) != len(scale)*h {
+		return nil, fmt.Errorf("indecis: table int8 de %d octets pour %d lignes", len(i8), len(scale))
+	}
+	return &mappedEmbeddings{h: h, i8: i8, scale: scale}, nil
 }
 
 func newMappedEmbeddings(h int, bf16 []byte, rows []float32, values []byte) (*mappedEmbeddings, error) {
@@ -36,6 +48,13 @@ func newMappedEmbeddings(h int, bf16 []byte, rows []float32, values []byte) (*ma
 
 func (e *mappedEmbeddings) Row(id int32, dst []float32) {
 	h := e.h
+	if e.i8 != nil {
+		raw, s := e.i8[int(id)*h:(int(id)+1)*h], e.scale[id]
+		for j := range dst[:h] {
+			dst[j] = float32(int8(raw[j])) * s
+		}
+		return
+	}
 	if i, ok := e.exact[id]; ok {
 		raw := e.f32[i*h*4 : (i+1)*h*4]
 		for j := range dst[:h] {

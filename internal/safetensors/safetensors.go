@@ -19,8 +19,9 @@ import (
 type Tensor struct {
 	Shape []int
 	Data  []float32
-	// DType est le format d'écriture : "F32" (défaut) ou "BF16", arrondi au
-	// plus proche. À la lecture, il vaut toujours "".
+	// DType est le format d'écriture : "F32" (défaut), "BF16" (arrondi au
+	// plus proche) ou "I8" (Data porte des entiers déjà quantifiés). À la
+	// lecture, il vaut toujours "".
 	DType string
 }
 
@@ -200,6 +201,8 @@ func (e entry) bytes(data []byte) (int, []byte, error) {
 		size = 4
 	case "BF16", "F16":
 		size = 2
+	case "I8":
+		size = 1
 	default:
 		return 0, nil, fmt.Errorf("dtype %s non pris en charge", e.DType)
 	}
@@ -229,6 +232,10 @@ func decode(e entry, data []byte) (Tensor, error) {
 	case "F16":
 		for i := range t.Data {
 			t.Data[i] = halfToFloat(binary.LittleEndian.Uint16(raw[2*i:]))
+		}
+	case "I8":
+		for i := range t.Data {
+			t.Data[i] = float32(int8(raw[i]))
 		}
 	}
 	return t, nil
@@ -277,6 +284,8 @@ func Write(w io.Writer, tensors map[string]Tensor, meta map[string]string) error
 		case "", "F32":
 		case "BF16":
 			size, dtype = 2, "BF16"
+		case "I8":
+			size, dtype = 1, "I8"
 		default:
 			return fmt.Errorf("safetensors: %s : dtype d'écriture %q non pris en charge", name, t.DType)
 		}
@@ -301,11 +310,14 @@ func Write(w io.Writer, tensors map[string]Tensor, meta map[string]string) error
 	}
 	buf := make([]byte, 0, 1<<16)
 	for _, name := range names {
-		bf16 := tensors[name].DType == "BF16"
+		dt := tensors[name].DType
 		for _, v := range tensors[name].Data {
-			if bf16 {
+			switch dt {
+			case "BF16":
 				buf = binary.LittleEndian.AppendUint16(buf, ToBF16(v))
-			} else {
+			case "I8":
+				buf = append(buf, byte(int8(max(-128, min(127, v)))))
+			default:
 				buf = binary.LittleEndian.AppendUint32(buf, math.Float32bits(v))
 			}
 			if len(buf) >= cap(buf)-4 {

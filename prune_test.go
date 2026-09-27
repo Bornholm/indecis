@@ -68,3 +68,45 @@ func TestPruneVocabulary(t *testing.T) {
 	fi, _ := os.Stat(filepath.Join(dir, "model.safetensors"))
 	t.Logf("model.safetensors : %.1f Mo", float64(fi.Size())/(1<<20))
 }
+
+func TestInt8Embeddings(t *testing.T) {
+	ctx := context.Background()
+	m, err := New(bekkoDir(t), toySchema, 1, WithMaxLen(64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var texts []string
+	for _, e := range toyData {
+		texts = append(texts, e.Text)
+	}
+	want, _ := m.Embed(ctx, texts...)
+	dirs := []string{t.TempDir(), t.TempDir()}
+	WithInt8Embeddings()(m)
+	if err := m.Save(dirs[0]); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(dirs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := loaded.Embed(ctx, texts...)
+	for i := range texts {
+		var dot float64
+		for k := range got[i] {
+			dot += float64(got[i][k]) * float64(want[i][k])
+		}
+		if dot < 0.999 {
+			t.Errorf("%q : cosinus %.5f", texts[i], dot)
+		}
+	}
+	// Le format se conserve d'une sauvegarde à l'autre.
+	if err := loaded.Save(dirs[1]); err != nil {
+		t.Fatal(err)
+	}
+	a, _ := os.Stat(filepath.Join(dirs[0], "model.safetensors"))
+	b, _ := os.Stat(filepath.Join(dirs[1], "model.safetensors"))
+	if a.Size() != b.Size() || a.Size() > 150<<20 {
+		t.Fatalf("tailles %d puis %d", a.Size(), b.Size())
+	}
+	t.Logf("model.safetensors en int8 : %.1f Mo", float64(a.Size())/(1<<20))
+}
