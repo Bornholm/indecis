@@ -21,17 +21,22 @@ out = ['''// Code généré par gen_vnni.py ; NE PAS MODIFIER.
 
 #include "textflag.h"
 
-// func microKernelVNNI(kq int, ap *uint8, bp *int8, tile *int32)
+// func microKernelVNNI(kq int, ap *uint8, lda int, bp *int8, tile *int32)
 //
 // Tuile 6×16 en entiers : Y0..Y11 accumulent C (ligne r dans Y(2r),
 // Y(2r+1)), Y12 et Y13 portent 16 colonnes × 4 profondeurs de B (int8),
-// Y14 et Y15 diffusent 4 octets d'une ligne de A (uint8). VPDPBUSD somme
-// les quatre produits de chaque colonne dans son accumulateur int32.
-TEXT ·microKernelVNNI(SB), NOSPLIT, $0-32
+// Y14 et Y15 diffusent 4 octets d'une ligne de A (uint8). Les 6 lignes de
+// A sont contiguës, espacées de lda octets : SI pointe les lignes 0 à 2,
+// R9 les lignes 3 à 5. VPDPBUSD somme les quatre produits de chaque
+// colonne dans son accumulateur int32.
+TEXT ·microKernelVNNI(SB), NOSPLIT, $0-40
 	MOVQ kq+0(FP), CX
 	MOVQ ap+8(FP), SI
-	MOVQ bp+16(FP), DI
-	MOVQ tile+24(FP), DX
+	MOVQ lda+16(FP), R8
+	MOVQ bp+24(FP), DI
+	MOVQ tile+32(FP), DX
+	LEAQ (SI)(R8*2), R9
+	ADDQ R8, R9
 ''']
 for r in range(12):
     out.append("\tVPXOR Y%d, Y%d, Y%d" % (r, r, r))
@@ -42,12 +47,14 @@ out.append('''
 loop:
 	VMOVDQU (DI), Y12
 	VMOVDQU 32(DI), Y13''')
+addr = ["(SI)", "(SI)(R8*1)", "(SI)(R8*2)", "(R9)", "(R9)(R8*1)", "(R9)(R8*2)"]
 for r in range(6):
     reg = 14 + (r % 2)
-    out.append("\tVPBROADCASTD %s(SI), Y%d" % (str(4 * r) if r else "", reg))
+    out.append("\tVPBROADCASTD %s, Y%d" % (addr[r], reg))
     out.append(vpdpbusd(2 * r, reg, 12))
     out.append(vpdpbusd(2 * r + 1, reg, 13))
-out.append('''	ADDQ $24, SI
+out.append('''	ADDQ $4, SI
+	ADDQ $4, R9
 	ADDQ $64, DI
 	DECQ CX
 	JNZ  loop

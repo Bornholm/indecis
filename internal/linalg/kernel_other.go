@@ -14,6 +14,6 @@ func microKernel(kb int, ap, bp, tile []float32, nr int) {
 // Int8Fast indique si MatMul8 dispose d'un noyau matériel.
 func Int8Fast() bool { return false }
 
-func microKernel8(kq int, ap []uint8, bp []int8, tile *[mr8 * nr8]int32) {
-	microKernel8Go(kq, ap, bp, tile)
+func microKernel8(kq int, ap []uint8, lda int, bp []int8, tile *[mr8 * nr8]int32) {
+	microKernel8Go(kq, ap, lda, bp, tile)
 }

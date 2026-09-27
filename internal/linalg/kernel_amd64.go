@@ -64,7 +64,7 @@ func microKernel(kb int, ap, bp, tile []float32, nr int) {
 }
 
 //go:noescape
-func microKernelVNNI(kq int, ap *uint8, bp *int8, tile *int32)
+func microKernelVNNI(kq int, ap *uint8, lda int, bp *int8, tile *int32)
 
 // vnni indique si le micro-noyau int8 AVX-VNNI (forme VEX) est utilisable.
 // INDECIS_NOASM=1 le désactive aussi.
@@ -83,16 +83,16 @@ func detectVNNI() bool {
 // noyau portable est exact mais bien plus lent que MatMul.
 func Int8Fast() bool { return vnni }
 
-func microKernel8(kq int, ap []uint8, bp []int8, tile *[mr8 * nr8]int32) {
+func microKernel8(kq int, ap []uint8, lda int, bp []int8, tile *[mr8 * nr8]int32) {
 	if vnni {
 		if kq == 0 {
 			*tile = [mr8 * nr8]int32{}
 			return
 		}
-		_ = ap[kq*mr8*4-1]
+		_ = ap[(mr8-1)*lda+kq*4-1]
 		_ = bp[kq*nr8*4-1]
-		microKernelVNNI(kq, &ap[0], &bp[0], &tile[0])
+		microKernelVNNI(kq, &ap[0], lda, &bp[0], &tile[0])
 		return
 	}
-	microKernel8Go(kq, ap, bp, tile)
+	microKernel8Go(kq, ap, lda, bp, tile)
 }

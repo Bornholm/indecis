@@ -2,17 +2,22 @@
 
 #include "textflag.h"
 
-// func microKernelVNNI(kq int, ap *uint8, bp *int8, tile *int32)
+// func microKernelVNNI(kq int, ap *uint8, lda int, bp *int8, tile *int32)
 //
 // Tuile 6×16 en entiers : Y0..Y11 accumulent C (ligne r dans Y(2r),
 // Y(2r+1)), Y12 et Y13 portent 16 colonnes × 4 profondeurs de B (int8),
-// Y14 et Y15 diffusent 4 octets d'une ligne de A (uint8). VPDPBUSD somme
-// les quatre produits de chaque colonne dans son accumulateur int32.
-TEXT ·microKernelVNNI(SB), NOSPLIT, $0-32
+// Y14 et Y15 diffusent 4 octets d'une ligne de A (uint8). Les 6 lignes de
+// A sont contiguës, espacées de lda octets : SI pointe les lignes 0 à 2,
+// R9 les lignes 3 à 5. VPDPBUSD somme les quatre produits de chaque
+// colonne dans son accumulateur int32.
+TEXT ·microKernelVNNI(SB), NOSPLIT, $0-40
 	MOVQ kq+0(FP), CX
 	MOVQ ap+8(FP), SI
-	MOVQ bp+16(FP), DI
-	MOVQ tile+24(FP), DX
+	MOVQ lda+16(FP), R8
+	MOVQ bp+24(FP), DI
+	MOVQ tile+32(FP), DX
+	LEAQ (SI)(R8*2), R9
+	ADDQ R8, R9
 
 	VPXOR Y0, Y0, Y0
 	VPXOR Y1, Y1, Y1
@@ -36,22 +41,23 @@ loop:
 	VPBROADCASTD (SI), Y14
 	BYTE $0xC4; BYTE $0xC2; BYTE $0x0D; BYTE $0x50; BYTE $0xC4 // VPDPBUSD Y12, Y14, Y0
 	BYTE $0xC4; BYTE $0xC2; BYTE $0x0D; BYTE $0x50; BYTE $0xCD // VPDPBUSD Y13, Y14, Y1
-	VPBROADCASTD 4(SI), Y15
+	VPBROADCASTD (SI)(R8*1), Y15
 	BYTE $0xC4; BYTE $0xC2; BYTE $0x05; BYTE $0x50; BYTE $0xD4 // VPDPBUSD Y12, Y15, Y2
 	BYTE $0xC4; BYTE $0xC2; BYTE $0x05; BYTE $0x50; BYTE $0xDD // VPDPBUSD Y13, Y15, Y3
-	VPBROADCASTD 8(SI), Y14
+	VPBROADCASTD (SI)(R8*2), Y14
 	BYTE $0xC4; BYTE $0xC2; BYTE $0x0D; BYTE $0x50; BYTE $0xE4 // VPDPBUSD Y12, Y14, Y4
 	BYTE $0xC4; BYTE $0xC2; BYTE $0x0D; BYTE $0x50; BYTE $0xED // VPDPBUSD Y13, Y14, Y5
-	VPBROADCASTD 12(SI), Y15
+	VPBROADCASTD (R9), Y15
 	BYTE $0xC4; BYTE $0xC2; BYTE $0x05; BYTE $0x50; BYTE $0xF4 // VPDPBUSD Y12, Y15, Y6
 	BYTE $0xC4; BYTE $0xC2; BYTE $0x05; BYTE $0x50; BYTE $0xFD // VPDPBUSD Y13, Y15, Y7
-	VPBROADCASTD 16(SI), Y14
+	VPBROADCASTD (R9)(R8*1), Y14
 	BYTE $0xC4; BYTE $0x42; BYTE $0x0D; BYTE $0x50; BYTE $0xC4 // VPDPBUSD Y12, Y14, Y8
 	BYTE $0xC4; BYTE $0x42; BYTE $0x0D; BYTE $0x50; BYTE $0xCD // VPDPBUSD Y13, Y14, Y9
-	VPBROADCASTD 20(SI), Y15
+	VPBROADCASTD (R9)(R8*2), Y15
 	BYTE $0xC4; BYTE $0x42; BYTE $0x05; BYTE $0x50; BYTE $0xD4 // VPDPBUSD Y12, Y15, Y10
 	BYTE $0xC4; BYTE $0x42; BYTE $0x05; BYTE $0x50; BYTE $0xDD // VPDPBUSD Y13, Y15, Y11
-	ADDQ $24, SI
+	ADDQ $4, SI
+	ADDQ $4, R9
 	ADDQ $64, DI
 	DECQ CX
 	JNZ  loop

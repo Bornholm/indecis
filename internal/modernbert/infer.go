@@ -314,24 +314,7 @@ func (m *Model) attentionInfer(l int, b Batch, qkv, ctx []float32, workers int) 
 func layerNormInfer(out, x, gamma []float32, n, h int, eps float64, workers int) {
 	linalg.ParallelN(workers, n, rowGrain, func(lo, hi int) {
 		for r := lo; r < hi; r++ {
-			row := x[r*h : (r+1)*h]
-			var mean float64
-			for _, v := range row {
-				mean += float64(v)
-			}
-			mean /= float64(h)
-			var variance float64
-			for _, v := range row {
-				d := float64(v) - mean
-				variance += d * d
-			}
-			variance /= float64(h)
-			rstd := float32(1 / math.Sqrt(variance+eps))
-			mf := float32(mean)
-			o := out[r*h : (r+1)*h]
-			for i, v := range row {
-				o[i] = (v - mf) * rstd * gamma[i]
-			}
+			linalg.LayerNormRow(out[r*h:(r+1)*h], x[r*h:(r+1)*h], gamma, eps)
 		}
 	})
 }
@@ -340,12 +323,7 @@ func layerNormInfer(out, x, gamma []float32, n, h int, eps float64, workers int)
 func gluInfer(g, z []float32, n, inter int, workers int) {
 	linalg.ParallelN(workers, n, rowGrain, func(lo, hi int) {
 		for r := lo; r < hi; r++ {
-			a := z[r*2*inter : r*2*inter+inter]
-			b := z[r*2*inter+inter : (r+1)*2*inter]
-			o := g[r*inter : (r+1)*inter]
-			for i := range o {
-				o[i] = geluFast(a[i]) * b[i]
-			}
+			linalg.GeluMul(g[r*inter:(r+1)*inter], z[r*2*inter:r*2*inter+inter], z[r*2*inter+inter:(r+1)*2*inter])
 		}
 	})
 }
@@ -408,46 +386,33 @@ func attendBlocks(o, q, k, v []float32, n, D, window int, scale float32, b *bloc
 			for r := 0; r < rows; r++ {
 				i := i0 + r
 				row := sc[r*cols : (r+1)*cols]
-				bm := negInf
-				for c := range row {
-					j := jb + c
-					if window >= 0 && (i-j > window || j-i > window) {
-						row[c] = negInf
-						continue
-					}
-					row[c] *= scale
-					bm = max(bm, row[c])
+				// Colonnes de la fenêtre dans ce bloc : [cs, ce).
+				cs, ce := 0, cols
+				if window >= 0 {
+					cs, ce = max(0, i-window-jb), min(cols, i+window+1-jb)
 				}
-				if bm == negInf {
+				if cs >= ce {
 					clear(row) // aucune clé de ce bloc dans la fenêtre
 					continue
 				}
+				valid := row[cs:ce]
+				linalg.Scale(valid, scale)
+				bm := linalg.MaxOf(valid)
 				m := max(mx[r], bm)
 				if corr := exp32(mx[r] - m); corr != 1 {
 					sum[r] *= corr
-					orow := ob[r*D : (r+1)*D]
-					for d := range orow {
-						orow[d] *= corr
-					}
+					linalg.Scale(ob[r*D:(r+1)*D], corr)
 				}
 				mx[r] = m
-				var bs float32
-				for c, x := range row {
-					e := exp32(x - m)
-					row[c] = e
-					bs += e
-				}
-				sum[r] += bs
+				sum[r] += linalg.ExpShift(valid, m)
+				clear(row[:cs])
+				clear(row[ce:])
 			}
 			// o += P·V du bloc.
 			linalg.MatMulSerial(ob, sc, v[jb*D:je*D], rows, cols, D, false, false, true)
 		}
 		for r := 0; r < rows; r++ {
-			inv := 1 / sum[r]
-			orow := ob[r*D : (r+1)*D]
-			for d := range orow {
-				orow[d] *= inv
-			}
+			linalg.Scale(ob[r*D:(r+1)*D], 1/sum[r])
 		}
 	}
 }

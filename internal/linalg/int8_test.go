@@ -13,7 +13,8 @@ func TestMicroKernel8MatchesGo(t *testing.T) {
 	}
 	r := rand.New(rand.NewSource(1))
 	for _, kq := range []int{1, 3, 96, 288} {
-		ap := make([]uint8, kq*mr8*4)
+		lda := kq*4 + 12 // pas plus large que la ligne : le noyau doit le respecter
+		ap := make([]uint8, mr8*lda)
 		bp := make([]int8, kq*nr8*4)
 		for i := range ap {
 			ap[i] = uint8(r.Intn(256))
@@ -22,8 +23,8 @@ func TestMicroKernel8MatchesGo(t *testing.T) {
 			bp[i] = int8(r.Intn(255) - 127)
 		}
 		var got, want [mr8 * nr8]int32
-		microKernel8(kq, ap, bp, &got)
-		microKernel8Go(kq, ap, bp, &want)
+		microKernel8(kq, ap, lda, bp, &got)
+		microKernel8Go(kq, ap, lda, bp, &want)
 		if got != want {
 			t.Fatalf("kq=%d : %v\nattendu %v", kq, got[:8], want[:8])
 		}
