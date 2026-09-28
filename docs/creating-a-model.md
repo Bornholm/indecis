@@ -148,5 +148,5 @@ bin/indecis-serve -model support=model
 
 ## Going further
 
-- A complete, reproducible example with relabeled real data, a written labeling policy, and hand-reviewed references: the prompt-injection detector [xolo-plugin-injection-guard](../../xolo-plugin-injection-guard).
-- A model that classifies emails among categories chosen at call time: [indecis-email-triage](../../indecis-email-triage).
+- A complete, reproducible example with relabeled real data, a written labeling policy, and hand-reviewed references: the Xolo prompt-injection detector [xolo-plugin-injection-guard](https://github.com/xolo-gateway/xolo-plugin-injection-guard).
+- A model that classifies emails among categories chosen at call time: [indecis-email-triage](https://github.com/Bornholm/indecis-email-triage).
