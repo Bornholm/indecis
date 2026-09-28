@@ -57,7 +57,7 @@ func readSchema(path string) (*schemaFile, error) {
 		sf.candidates[q.Name] = cands
 	}
 	if err := sf.schema.Validate(); err != nil {
-		return nil, fmt.Errorf("%s : %w", path, err)
+		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return sf, nil
 }
@@ -68,10 +68,7 @@ func (sf *schemaFile) open() []indecis.OpenQuestion {
 	for _, q := range sf.schema {
 		oq := indecis.OpenQuestion{Name: q.Name, Kind: q.Kind, Instructions: q.Instructions, Options: sf.candidates[q.Name]}
 		if q.Kind == indecis.Noul && len(oq.Options) != 2 {
-			oq.Options = []indecis.Candidate{
-				{Name: "true", Description: "Oui : " + q.Instructions},
-				{Name: "false", Description: "Non : " + q.Instructions},
-			}
+			oq = indecis.OpenNoul(q.Name, q.Instructions)
 		}
 		out = append(out, oq)
 	}

@@ -47,7 +47,7 @@ func LoadFS(fsys fs.FS, opts GazetteerOptions) (*Corpus, error) {
 			defer f.Close()
 			g, err := LoadGazetteer(f, opts)
 			if err != nil {
-				return fmt.Errorf("%s : %w", p, err)
+				return fmt.Errorf("%s: %w", p, err)
 			}
 			name := strings.TrimSuffix(path.Base(p), ".tsv")
 			if _, dup := c.Gazetteers[name]; dup {

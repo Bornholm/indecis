@@ -270,8 +270,8 @@ func toAnswer(q llm.Question, sq indecis.Question, a indecis.Answer) llm.Answer 
 }
 
 // toOpen translates a genai question into an open question: the criteria
-// become described options. A yes/no question with no criteria opposes the
-// affirmation and the negation of its instructions.
+// become described options. A yes/no question with no criteria opposes its
+// instructions to a fixed anchor (see indecis.OpenNoul).
 //
 // A criterion's description can be an object {"description": ...,
 // "examples": [...]}, a form the TypeSafe API allows (a description is a
@@ -281,9 +281,8 @@ func toAnswer(q llm.Question, sq indecis.Question, a indecis.Answer) llm.Answer 
 func toOpen(id string, q llm.Question) indecis.OpenQuestion {
 	switch v := q.(type) {
 	case llm.NoulQuestion:
-		instr := describe(v.Instructions)
-		yes := indecis.Candidate{Name: "true", Description: "Oui : " + instr}
-		no := indecis.Candidate{Name: "false", Description: "Non, pas du tout : " + instr}
+		oq := indecis.OpenNoul(id, describe(v.Instructions))
+		yes, no := oq.Options[0], oq.Options[1]
 		if v.True != nil {
 			yes = criterion("true", v.True)
 		}

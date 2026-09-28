@@ -96,9 +96,11 @@ On the same 24 messages:
 
 | Method | Topic | Urgency | Human agent |
 | --- | --- | --- | --- |
-| backbone only, no training (`eval -schema`) | 62.5% | 33.3% | 62.5% |
+| backbone only, no training (`eval -schema`) | 62.5% | 33.3% | 45.8% |
 | fixed answers (`train`) | 75.0% | 58.3% | 75.0% |
-| fine-tuned open mode (`train -open`) | 75.0% | 66.7% | 87.5% |
+| fine-tuned open mode (`train -open`) | 75.0% | 58.3% | 75.0% |
+
+On 24 messages, one message is worth 4 points: these differences are small.
 
 Pick according to your use: fixed answers are calibrated and do not depend on how you describe the options; open mode accepts new options. [open-categories.md](open-categories.md) covers open mode in detail.
 

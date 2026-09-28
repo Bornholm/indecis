@@ -116,24 +116,24 @@ func Parse(name, src string) (*Template, error) {
 	t := &Template{Name: name, Weight: 1, Labels: map[string]any{}, Blocks: map[string][]Node{}}
 	head, body, err := splitHeader(src)
 	if err != nil {
-		return nil, fmt.Errorf("%s : %w", name, err)
+		return nil, fmt.Errorf("%s: %w", name, err)
 	}
 	if err := t.parseHeader(head); err != nil {
-		return nil, fmt.Errorf("%s : %w", name, err)
+		return nil, fmt.Errorf("%s: %w", name, err)
 	}
 	body, err = t.extractBlocks(body)
 	if err != nil {
-		return nil, fmt.Errorf("%s : %w", name, err)
+		return nil, fmt.Errorf("%s: %w", name, err)
 	}
 	body = strings.TrimSuffix(body, "\n")
 	p := &parser{src: body}
 	nodes, err := p.nodes("")
 	if err != nil {
-		return nil, fmt.Errorf("%s : %w", name, err)
+		return nil, fmt.Errorf("%s: %w", name, err)
 	}
 	t.Body = nodes
 	if err := t.checkBlocks(t.Body); err != nil {
-		return nil, fmt.Errorf("%s : %w", name, err)
+		return nil, fmt.Errorf("%s: %w", name, err)
 	}
 	return t, nil
 }

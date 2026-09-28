@@ -73,7 +73,7 @@ func (m *Model) DecideOpen(ctx context.Context, questions []OpenQuestion, texts 
 		}
 		set, err := m.PrepareCandidates(ctx, q.candidates())
 		if err != nil {
-			return nil, fmt.Errorf("indecis: %s : %w", q.Name, err)
+			return nil, fmt.Errorf("indecis: %s: %w", q.Name, err)
 		}
 		answers, err := m.ChooseIn(ctx, set, texts...)
 		if err != nil {
@@ -96,3 +96,19 @@ func (m *Model) DecideOpen(ctx context.Context, questions []OpenQuestion, texts 
 	}
 	return out, nil
 }
+
+// OpenNoul builds an open yes/no question from its instructions alone:
+// "true" is described by the instructions, "false" by a fixed anchor,
+// "Something else". Opposing the instructions to their negation ("Yes: X"
+// against "No: X") gives almost no signal, because the two embeddings are
+// nearly identical. The anchor ranks texts much better, but its
+// probabilities are not calibrated: tune a threshold on examples.
+func OpenNoul(name, instructions string) OpenQuestion {
+	return OpenQuestion{Name: name, Kind: Noul, Options: []Candidate{
+		{Name: "true", Description: instructions},
+		{Name: "false", Description: NoulAnchor},
+	}}
+}
+
+// NoulAnchor describes the "false" option of OpenNoul.
+const NoulAnchor = "Something else"

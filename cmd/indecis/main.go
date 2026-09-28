@@ -87,7 +87,7 @@ func readExamples(globs string) ([]dataset.Example, error) {
 		for _, f := range files {
 			ex, err := dataset.ReadFile(f)
 			if err != nil {
-				return nil, fmt.Errorf("%s : %w", f, err)
+				return nil, fmt.Errorf("%s: %w", f, err)
 			}
 			out = append(out, ex...)
 		}

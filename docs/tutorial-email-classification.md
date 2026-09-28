@@ -203,7 +203,7 @@ curl -s localhost:8080/api/alpha/decisions -d '{
 
 On this email (the production server is down), the fine-tuned model answers "Informatique" (IT), but the backbone alone answers "Commercial". Both put the urgency at about 1.1, "within the week", although production is stopped. Embeddings capture urgency poorly. If it matters to you, try describing the levels with examples (step 5) and measure the result on your emails.
 
-Yes/no (`noul`) questions work poorly in open mode, because the model barely tells a statement from its negation. Prefer a `choice` or `score` question with described options.
+Yes/no (`noul`) questions without criteria compare the email with the instructions and with a fixed anchor, "Something else". They rank emails better than chance, but their probabilities are not calibrated: tune a threshold on a few dozen emails, or prefer a `choice` or `score` question with described options.
 
 ## 7. Classify an email stored in a file
 

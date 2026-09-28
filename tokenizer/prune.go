@@ -27,15 +27,15 @@ func Prune(src []byte, keep func(id int32) bool) ([]byte, []int32, error) {
 	}
 	var model map[string]json.RawMessage
 	if err := json.Unmarshal(root["model"], &model); err != nil {
-		return nil, nil, fmt.Errorf("tokenizer: model : %w", err)
+		return nil, nil, fmt.Errorf("tokenizer: model: %w", err)
 	}
 	var vocab map[string]int32
 	if err := json.Unmarshal(model["vocab"], &vocab); err != nil {
-		return nil, nil, fmt.Errorf("tokenizer: vocab : %w", err)
+		return nil, nil, fmt.Errorf("tokenizer: vocab: %w", err)
 	}
 	var added []map[string]any
 	if err := json.Unmarshal(root["added_tokens"], &added); err != nil {
-		return nil, nil, fmt.Errorf("tokenizer: added_tokens : %w", err)
+		return nil, nil, fmt.Errorf("tokenizer: added_tokens: %w", err)
 	}
 	var unk string
 	json.Unmarshal(model["unk_token"], &unk)
@@ -157,7 +157,7 @@ func decodeMergesJSON(raw json.RawMessage) ([][2]string, error) {
 	}
 	var legacy []string
 	if err := json.Unmarshal(raw, &legacy); err != nil {
-		return nil, fmt.Errorf("tokenizer: merges : %w", err)
+		return nil, fmt.Errorf("tokenizer: merges: %w", err)
 	}
 	pairs = make([][2]string, 0, len(legacy))
 	for _, s := range legacy {
@@ -175,7 +175,7 @@ func decodeMergesJSON(raw json.RawMessage) ([][2]string, error) {
 func remapPostProcessor(raw json.RawMessage, newID []int32) (json.RawMessage, error) {
 	var pp map[string]any
 	if err := json.Unmarshal(raw, &pp); err != nil {
-		return nil, fmt.Errorf("tokenizer: post_processor : %w", err)
+		return nil, fmt.Errorf("tokenizer: post_processor: %w", err)
 	}
 	if st, ok := pp["special_tokens"].(map[string]any); ok {
 		for _, v := range st {

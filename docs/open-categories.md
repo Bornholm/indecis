@@ -38,7 +38,7 @@ The fine-tuned models learned from support tickets and from 2,000 Enron emails l
 ## Limits
 
 - **The probabilities are not calibrated.** They come from a softmax over similarities with a fixed scale. To catch a text that fits no option, set a threshold on `Answer.Score` (the similarity of the chosen option) or on `Answer.Margin`, tuned on a few dozen examples.
-- **Yes/no questions work poorly**: embeddings barely tell a statement from its negation. Prefer a choice between described options.
+- **Yes/no questions rank texts but do not decide them.** Without described criteria, `OpenNoul` opposes the instructions to a fixed anchor, "Something else". Opposing "Yes: X" to "No: X" gave an AUC close to 0.5 on 4,000 email and prompt-injection questions, because the two embeddings are nearly identical; the anchor gives 0.6 to 0.85. Its probabilities are not calibrated, though: at 0.5, accuracy stays between 50 and 65%. Tune a threshold on examples, or prefer a choice between described options. Questions about an intention ("does the message ask for a human agent?") fail either way.
 - **Neighboring categories** (billing and refunds) get mixed up more than distinct ones. Examples help, and so does a25m, at three times the compute.
 
 ## Why not a model that reads the (option, text) pair
