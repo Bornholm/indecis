@@ -1,46 +1,45 @@
-// Package synth génère des exemples d'entraînement à partir de gabarits, avec
-// des étiquettes exactes par construction.
+// Package synth generates training examples from templates, with labels
+// that are exact by construction.
 //
-// Le moteur est adapté du générateur de corpus de go-anon (même auteur,
-// GPL-3.0), généralisé : les étiquettes ne sont plus des entités nommées mais
-// les réponses aux questions d'un schéma indecis.
+// The engine is adapted from the corpus generator of go-anon (same author,
+// GPL-3.0) and generalized: the labels are no longer named entities but the
+// answers to the questions of an indecis schema.
 //
-// Un gabarit a un en-tête et un corps :
+// A template has a header and a body:
 //
 //	family: benign/support-ticket
-//	lang: fr
+//	lang: en
 //	weight: 2
 //	label.injection: false
 //	label.category: none
 //	---
-//	Bonjour, {{one:ma commande|mon colis|ma facture}} {{pick:product}} n'est
-//	[?late]toujours [/]pas arrivée.{{include:attack/*|p=0.3}}
+//	Hello, {{one:my order|my parcel|my invoice}} {{pick:product}} has
+//	[?late]still [/]not arrived.{{include:attack/*|p=0.3}}
 //
-// Directives du corps :
+// Body directives:
 //
-//	{{pick:set}}, {{pick:set:slot}}   valeur tirée d'un gazetteer ; un slot nommé
-//	                                  garde la même valeur dans tout l'exemple
-//	{{one:a|b|c}}                     une alternative, en texte simple (\n : saut
-//	                                  de ligne)
-//	{{one}}…{{|}}…{{/one}}            une alternative, pouvant contenir des directives
-//	{{int:1-100}}, {{digits:6}}       nombres
-//	{{pad:2-8}}                       espaces
-//	[?nom]…[/], [?nom:0.3]…[/]        section optionnelle (même nom = même décision)
-//	@block nom … @end + {{LINES:nom:1-5}}  bloc répété
-//	{{x:transform|p=0.5}}…{{/x}}      transformation du texte rendu (voir Transforms)
-//	{{include:motif|p=0.4}}           rend un autre gabarit dont la famille correspond
-//	                                  au motif (path.Match) et fusionne ses étiquettes
-//	{{label:nom=valeur}}              fixe une étiquette depuis la branche rendue
-//	{{user}}                          ce qui précède devient le contexte de
-//	                                  l'exemple (prompt système), ce qui suit
-//	                                  le texte jugé ; dans un gabarit inclus,
-//	                                  ce qui précède est abandonné
+//	{{pick:set}}, {{pick:set:slot}}   value drawn from a gazetteer; a named slot
+//	                                  keeps the same value in the whole example
+//	{{one:a|b|c}}                     one alternative, in plain text (\n: line
+//	                                  break)
+//	{{one}}…{{|}}…{{/one}}            one alternative, which may hold directives
+//	{{int:1-100}}, {{digits:6}}       numbers
+//	{{pad:2-8}}                       spaces
+//	[?name]…[/], [?name:0.3]…[/]      optional section (same name, same decision)
+//	@block name … @end + {{LINES:name:1-5}}  repeated block
+//	{{x:transform|p=0.5}}…{{/x}}      transformation of the rendered text (see Transforms)
+//	{{include:pattern|p=0.4}}         renders another template whose family matches
+//	                                  the pattern (path.Match) and merges its labels
+//	{{label:name=value}}              sets a label from the rendered branch
+//	{{user}}                          what comes before becomes the example's
+//	                                  context (system prompt), what follows the
+//	                                  judged text; in an included template,
+//	                                  what comes before is dropped
 //
-// Fusion des étiquettes : l'en-tête donne les valeurs de départ, les
-// directives label les remplacent au fil du rendu, et les étiquettes d'un
-// gabarit inclus s'y ajoutent à la fin de l'inclusion. Pour une étiquette
-// booléenne, vrai l'emporte toujours : un document bénin qui contient une
-// injection est une injection.
+// Label merging: the header gives the starting values, label directives
+// replace them during rendering, and the labels of an included template are
+// merged at the end of the inclusion. For a boolean label, true always wins:
+// a benign document that holds an injection is an injection.
 package synth
 
 import (

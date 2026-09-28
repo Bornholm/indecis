@@ -1,0 +1,86 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: test (${{ matrix.variant }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Portable SIMD, the default build.
+          - variant: simd
+            goexperiment: simd
+            noasm: ""
+          # Scalar fallback: the build without SIMD must stay correct.
+          - variant: scalar
+            goexperiment: ""
+            noasm: ""
+          # Assembly kernels turned off.
+          - variant: noasm
+            goexperiment: simd
+            noasm: "1"
+    env:
+      GOEXPERIMENT: ${{ matrix.goexperiment }}
+      INDECIS_NOASM: ${{ matrix.noasm }}
+      INDECIS_BEKKO_DIR: ${{ github.workspace }}/.bekko
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+          cache-dependency-path: |
+            go.sum
+            teacher/go.sum
+            decision/go.sum
+      # Parity tests need the bekko weights (MIT license, 210 MB); they are
+      # skipped when the weights are missing.
+      - name: Cache bekko
+        uses: actions/cache@v4
+        with:
+          path: .bekko
+          key: bekko-embedding-v1-a8m
+      - name: Download bekko
+        run: |
+          mkdir -p .bekko
+          for f in config.json model.safetensors tokenizer.json; do
+            [ -s .bekko/$f ] || curl -sfL -o .bekko/$f \
+              https://huggingface.co/hotchpotch/bekko-embedding-v1-a8m/resolve/main/$f
+          done
+      - name: Vet
+        run: |
+          go vet ./...
+          (cd teacher && go vet ./...)
+          (cd decision && go vet ./...)
+      - name: Test
+        run: |
+          go test ./...
+          (cd teacher && go test ./...)
+          (cd decision && go test ./...)
+
+  race:
+    runs-on: ubuntu-latest
+    env:
+      GOEXPERIMENT: simd
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+      - name: Race detector
+        run: go test -race ./...
+
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)

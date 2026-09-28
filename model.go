@@ -103,7 +103,7 @@ func WithThreads(n int) Option { return func(*Model) { linalg.SetMaxWorkers(n) }
 // canal, activations par token) quand le processeur dispose d'AVX-VNNI ;
 // sans lui, l'option est sans effet. L'inférence est environ deux fois plus
 // rapide et les poids des couches quatre fois plus petits ; les décisions
-// du modèle prompt-injection sont inchangées sur sa référence. L'écart reste
+// du détecteur d'injections (xolo-plugin-injection-guard) sont inchangées sur sa référence. L'écart reste
 // à vérifier pour chaque modèle (Evaluate avec et sans l'option).
 func WithInt8() Option {
 	return func(m *Model) { m.enc.SetInt8(linalg.Int8Fast()) }

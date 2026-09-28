@@ -1,13 +1,13 @@
-// Package calibrate combine des probabilités en log-odds.
+// Package calibrate combines probabilities in log-odds.
 //
-// Deux opérations seulement, parce que ce sont les deux qu'un détecteur
-// entraîné sur un corpus équilibré doit faire avant de parler de production :
+// It has two operations only, the two that a detector trained on a balanced
+// corpus needs before it meets production:
 //
-//   - corriger le prior : le modèle a vu autant d'attaques que de textes
-//     honnêtes, le trafic réel non. Sans correction, sa probabilité surestime
-//     le risque d'un facteur qui peut dépasser 20 ;
-//   - ajouter une preuve indépendante : le risque d'un autre détecteur entre
-//     comme un rapport de vraisemblance, pas comme une moyenne.
+//   - shifting the prior: the model saw as many attacks as honest texts, the
+//     real traffic does not. Without the shift, its probability overestimates
+//     the risk by a factor that can exceed 20;
+//   - adding independent evidence: the risk from another detector comes in
+//     as a likelihood ratio, not as an average.
 package calibrate
 
 import "math"

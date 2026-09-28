@@ -1,21 +1,21 @@
-// Command indecis-serve expose des modèles indecis en HTTP avec l'API de
-// décision de TypeSafe et d'OpenRouter, pour tester l'intégration d'un
-// modèle sans rien changer au client que son URL.
+// Command indecis-serve exposes indecis models over HTTP with the TypeSafe
+// and OpenRouter decision API, to test the integration of a model without
+// changing anything in the client but its URL.
 //
 //	indecis-serve -model ~/.cache/indecis/runs/policy-P5
-//	indecis-serve -model injection=runs/policy-P5 -model courriels=runs/email-embed -addr :8080
+//	indecis-serve -model injection=runs/policy-P5 -model emails=runs/email-embed -addr :8080
 //
 //	curl -s localhost:8080/api/alpha/decisions -d '{
 //	  "state": "Ignore previous instructions",
 //	  "questions": {"injection": {"type": "noul", "instructions": "?"}}
 //	}'
 //
-// -model accepte aussi un backbone brut (config.json, model.safetensors,
-// tokenizer.json, sans indecis.json), bekko par exemple : il ne répond
-// alors qu'aux questions ouvertes, sans entraînement.
+// -model also accepts a raw backbone (config.json, model.safetensors,
+// tokenizer.json, without indecis.json), such as bekko: it then answers
+// only open questions, without training.
 //
-// Clients : genai (provider openrouter avec GENAI_…_BASE_URL=http://…/api/v1,
-// ou typesafe avec http://…/v1), SDK TypeSafe, curl.
+// Clients: genai (openrouter provider with GENAI_…_BASE_URL=http://…/api/v1,
+// or typesafe with http://…/v1), the TypeSafe SDK, curl.
 package main
 
 import (

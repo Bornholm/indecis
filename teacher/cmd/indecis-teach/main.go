@@ -1,12 +1,13 @@
-// Command indecis-teach fait travailler un LLM teacher sur un dataset JSONL.
+// Command indecis-teach puts LLM teachers to work on a JSONL dataset.
 //
 //	indecis-teach rewrite -in ex.jsonl -out variants.jsonl -instructions instr.txt -variants 2
-//	indecis-teach rewrite -teachers teachers.yaml -teacher pi-minimax -variants 1 … (par lots)
+//	indecis-teach rewrite -teachers teachers.yaml -teacher pi-minimax -variants 1 … (in batches)
 //	indecis-teach label   -in ex.jsonl -out labeled.jsonl -schema schema.json [-verify]
+//	indecis-teach label   -teachers teachers.yaml -guidelines policy.md … (consensus)
 //
-// Le client est configuré par les variables GENAI_* (voir github.com/bornholm/genai),
-// lues dans -env. Les réponses sont mises en cache dans -cache ; -max-calls
-// borne les appels réels.
+// The genai client is configured by the GENAI_* variables (see
+// github.com/bornholm/genai), read from -env. Answers are cached in -cache;
+// -max-calls bounds the real calls.
 package main
 
 import (

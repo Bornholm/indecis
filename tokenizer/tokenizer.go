@@ -1,22 +1,22 @@
-// Package tokenizer reproduit en Go pur le tokenizer BPE des modèles de la
-// famille Gemma, tel que le décrit un fichier tokenizer.json de Hugging Face.
+// Package tokenizer reproduces in pure Go the BPE tokenizer of the Gemma
+// model family, as a Hugging Face tokenizer.json file describes it.
 //
-// Le contrat est la parité exacte avec la bibliothèque Rust `tokenizers` :
-// mêmes ids pour le même texte. Un id différent, c'est un modèle qui lit un
-// autre texte que celui sur lequel il a été entraîné. La chaîne est donc
-// reproduite étape par étape, y compris ses particularités :
+// The contract is exact parity with the Rust `tokenizers` library: the same
+// ids for the same text. A different id means the model reads another text
+// than the one it was trained on. The pipeline is therefore reproduced step
+// by step, quirks included:
 //
-//  1. les tokens ajoutés (spéciaux ou non) sont repérés dans le texte brut,
-//     en correspondance leftmost-longest, avant toute normalisation ;
-//  2. chaque segment restant est normalisé (espace → ▁), reçoit un ▁ en tête
-//     s'il n'en a pas, puis est découpé devant chaque ▁ ;
-//  3. chaque morceau passe par le BPE : fusions par rang croissant, à rang
-//     égal la plus à gauche, et repli sur les octets pour les caractères
-//     inconnus du vocabulaire ;
-//  4. le gabarit ajoute <bos> et <eos>.
+//  1. added tokens (special or not) are found in the raw text, with
+//     leftmost-longest matching, before any normalization;
+//  2. each remaining segment is normalized (space becomes ▁), gets a leading
+//     ▁ if it has none, then is split before each ▁;
+//  3. each piece goes through BPE: merges by increasing rank, the leftmost
+//     one on equal ranks, and byte fallback for characters missing from the
+//     vocabulary;
+//  4. the template adds <bos> and <eos>.
 //
-// Seule cette configuration est acceptée : un tokenizer.json qui en diffère
-// est refusé au chargement plutôt que tokenisé approximativement.
+// Only this configuration is accepted: a tokenizer.json that differs is
+// rejected at load time instead of being tokenized approximately.
 package tokenizer
 
 import (

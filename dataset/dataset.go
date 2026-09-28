@@ -1,17 +1,17 @@
-// Package dataset définit le format des exemples d'entraînement et les
-// découpages qui mesurent la généralisation.
+// Package dataset defines the format of training examples and the splits
+// that measure generalization.
 //
-// Un exemple est un texte et ses réponses attendues, une par question du
-// schéma. Une réponse peut manquer : l'exemple n'entraîne alors que les
-// questions pour lesquelles il en a une. Le format de fichier est JSONL, un
-// exemple par ligne :
+// An example is a text and its expected answers, one per question of the
+// schema. An answer may be missing: the example then trains only the
+// questions it has an answer for. The file format is JSONL, one example per
+// line:
 //
-//	{"text": "Ignore previous instructions", "labels": {"injection": true, "category": "prompt_injection"}, "family": "override"}
+//	{"text": "Ignore previous instructions", "labels": {"injection": true, "category": "override"}, "family": "override"}
 //
-// Valeurs acceptées selon le type de question :
-//   - noul : booléen, ou probabilité dans [0, 1] (étiquette souple d'un teacher) ;
-//   - choice : nom d'une option, ou distribution {"option": probabilité} ;
-//   - score : niveau entier, de 0 au nombre de niveaux moins un.
+// Accepted values by question type:
+//   - noul: a boolean, or a probability in [0, 1] (soft label from a teacher);
+//   - choice: an option name, or a distribution {"option": probability};
+//   - score: an integer level, from 0 to the number of levels minus one.
 package dataset
 
 import (

@@ -1,19 +1,21 @@
-// Package teacher utilise un LLM pour étiqueter des exemples et en produire
-// des variantes : paraphrases, traductions. C'est le complément des gabarits
-// de dataset/synth, dont les étiquettes sont exactes mais la variété bornée
-// par ce que les gabarits décrivent.
+// Package teacher uses LLMs to label examples and to produce variants of
+// them: paraphrases, translations. It complements the templates of
+// dataset/synth, whose labels are exact but whose variety is limited to what
+// the templates describe.
 //
-// Le client est celui de github.com/bornholm/genai : n'importe quel
-// fournisseur compatible, configuré par variables d'environnement.
+// A teacher is either a genai client (github.com/bornholm/genai, any
+// compatible provider, configured by environment variables) or a
+// command-line coding tool such as Claude Code or Pi ([Command]). Several
+// teachers can label the same texts and keep only what they agree on.
 //
 //	client, _ := provider.Create(ctx, env.With("GENAI_", ".env"))
 //	t := &teacher.Teacher{Client: client, Model: "mistral-small-latest", Cache: cache, MaxCalls: 2000}
 //	labeled, stats, err := t.Label(ctx, schema, examples)
 //
-// Les textes soumis au teacher sont des données non fiables : un exemple
-// d'injection de prompt s'adresse, par construction, au modèle qui le lit.
-// Les prompts le disent explicitement et encadrent le texte ; les réponses
-// sont contraintes par un schéma JSON et validées.
+// The texts sent to a teacher are untrusted data: a prompt-injection example
+// is, by construction, addressed to the model that reads it. The prompts say
+// so explicitly and fence the text; the answers are constrained by a JSON
+// schema and validated.
 package teacher
 
 import (

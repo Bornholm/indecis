@@ -1,16 +1,32 @@
-// Package indecis construit de petits modèles de décision : un encodeur de
-// texte pré-entraîné, fine-tuné en Go pur, qui répond à des questions typées
-// par des probabilités calibrées plutôt que par du texte.
+// Package indecis builds small decision models: a pretrained text encoder,
+// fully fine-tuned in pure Go, that answers typed questions with calibrated
+// probabilities instead of generated text.
 //
-// Trois types de questions, comme dans les modèles de décision « System 1 » :
-//   - Noul : une question fermée, réponse P(vrai) ;
-//   - Choice : une option parmi plusieurs, réponse une distribution ;
-//   - Score : un niveau sur une échelle ordonnée, réponse le niveau attendu et
-//     sa distribution.
+// A [Schema] lists the questions, of three types:
+//   - noul ([NewNoul]): a yes/no question, answered with P(yes);
+//   - choice ([NewChoice]): one option among several, answered with a
+//     distribution;
+//   - score ([NewScore]): a level on an ordered scale, answered with the
+//     expected level and its distribution.
 //
-// Toutes les questions d'un schéma sont répondues par une seule passe de
-// l'encodeur : chaque question n'est qu'une tête de plus sur la même
-// représentation du texte.
+// One pass of the encoder answers every question of a schema: each question
+// is one more head on the same representation of the text.
+//
+//	m, _ := indecis.New(backboneDir, schema, 1)
+//	_ = m.Fit(ctx, train, indecis.DefaultTrainOptions())
+//	_, _ = m.Calibrate(ctx, calib)
+//	_ = m.Save("model")
+//
+//	m, _ = indecis.Load("model", indecis.WithInt8())
+//	d, _ := m.Decide(ctx, "My parcel has not arrived")
+//
+// In open mode, the options are described in text at call time and compared
+// with the text through embeddings ([Model.ChooseNearest],
+// [Model.PrepareCandidates], [Model.DecideOpen]); [Model.FitEmbeddings]
+// fine-tunes the encoder for it.
+//
+// The guides in the docs directory of the repository cover the whole
+// process, from the schema to the deployment.
 package indecis
 
 import (

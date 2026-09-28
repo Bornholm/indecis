@@ -1,15 +1,15 @@
-// Command indecis crée, évalue et utilise de petits modèles de décision.
+// Command indecis creates, evaluates and uses small decision models.
 //
 //	indecis synth    -templates dir -n 10000 -out data.jsonl
 //	indecis train    -backbone dir -schema schema.json -train 'data/*.jsonl' -out model
 //	indecis eval     -model model -data test.jsonl
-//	indecis predict  -model model < textes.jsonl
+//	indecis predict  -model model < texts.jsonl
 //	indecis compact  -model model -out model-compact -int8-embeddings
 //	indecis split    -in data.jsonl -fraction 0.2 -by family -kept train.jsonl -held test.jsonl
 //
-// Le guide docs/guide-creer-un-modele.md enchaîne ces étapes sur un
-// exemple. L'étiquetage par des LLM (teachers) est fait par indecis-teach,
-// module teacher, et le service HTTP par indecis-serve, module decision.
+// The guide docs/creating-a-model.md goes through these steps on an example.
+// Labeling by LLMs (teachers) is done by indecis-teach, in the teacher
+// module, and the HTTP service by indecis-serve, in the decision module.
 package main
 
 import (

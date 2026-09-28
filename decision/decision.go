@@ -1,25 +1,26 @@
-// Package decision expose un modèle indecis comme fournisseur de décision de
-// genai (llm.DecisionClient), à la place d'un service comme Jev :
+// Package decision exposes indecis models as a genai decision provider
+// (llm.DecisionClient), in place of a service such as Jev, and as an HTTP
+// server compatible with the TypeSafe and OpenRouter decision API
+// ([Server]).
 //
 //	import _ "github.com/bornholm/indecis/decision"
 //
 //	GENAI_DECISION_PROVIDER=indecis
-//	GENAI_DECISION_INDECIS_MODEL=/chemin/vers/le/modèle
+//	GENAI_DECISION_INDECIS_MODEL=/path/to/the/model
 //
-// Différence de fond avec Jev : Jev lit les instructions et les critères de
-// chaque question et répond à n'importe laquelle. Un modèle indecis a appris
-// un schéma fixe ; il répond aux questions de ce schéma, reconnues par leur
-// identifiant, et ne lit pas leurs instructions. Une question inconnue du
-// modèle est refusée avec la liste de celles qu'il connaît.
+// A question the model learned, recognized by its identifier, is answered by
+// its trained head; its instructions are not read. Any other question is
+// asked in open mode: its criteria are compared with the state through
+// embeddings (see indecis.Model.DecideOpen).
 //
-// L'état est jugé ainsi :
-//   - une chaîne : le texte tel quel ;
-//   - un objet {"context": …, "text": …} : une paire (prompt système,
-//     message) pour un modèle construit avec indecis.WithPairs ;
-//   - tout autre valeur : sa sérialisation JSON.
+// The state is judged as follows:
+//   - a string: the text as is;
+//   - an object {"context": …, "text": …}: a (system prompt, message) pair
+//     for a model built with indecis.WithPairs;
+//   - any other value: its JSON serialization.
 //
-// Ce module est séparé d'indecis pour que la bibliothèque reste sans
-// dépendance, et de genai parce qu'indecis est sous GPL.
+// This module is separate from indecis so that the library keeps no
+// dependency, and separate from genai because indecis is under the GPL.
 package decision
 
 import (
