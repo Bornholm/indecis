@@ -40,12 +40,12 @@ import (
 	"github.com/bornholm/indecis"
 )
 
-// Name est le nom du fournisseur dans la configuration de genai.
+// Name is the provider name in genai's configuration.
 const Name provider.Name = "indecis"
 
-// Options est lu depuis GENAI_DECISION_INDECIS_*.
+// Options is read from GENAI_DECISION_INDECIS_*.
 type Options struct {
-	// Model est le répertoire d'un modèle écrit par indecis.Model.Save.
+	// Model is the directory of a model written by indecis.Model.Save.
 	Model string `env:"MODEL"`
 }
 
@@ -58,18 +58,18 @@ func init() {
 	)
 }
 
-// Client répond aux questions avec des modèles indecis locaux.
+// Client answers questions with local indecis models.
 type Client struct {
 	defaultDir string
 	mu         sync.Mutex
 	models     map[string]*indecis.Model
 }
 
-// New charge le modèle de dir, qui sert quand l'appel n'en désigne pas
-// d'autre avec llm.WithDecisionModel.
+// New loads the model from dir, which serves when the call does not
+// designate another one with llm.WithDecisionModel.
 func New(dir string) (*Client, error) {
 	if dir == "" {
-		return nil, fmt.Errorf("indecis : répertoire du modèle non configuré (GENAI_DECISION_INDECIS_MODEL)")
+		return nil, fmt.Errorf("indecis: model directory not configured (GENAI_DECISION_INDECIS_MODEL)")
 	}
 	c := &Client{defaultDir: dir, models: map[string]*indecis.Model{}}
 	if _, err := c.model(dir); err != nil {
@@ -78,7 +78,7 @@ func New(dir string) (*Client, error) {
 	return c, nil
 }
 
-// FromModel enveloppe un modèle déjà chargé, désigné par name.
+// FromModel wraps an already loaded model, designated by name.
 func FromModel(name string, m *indecis.Model) *Client {
 	return &Client{defaultDir: name, models: map[string]*indecis.Model{name: m}}
 }
@@ -91,13 +91,13 @@ func (c *Client) model(dir string) (*indecis.Model, error) {
 	}
 	m, err := indecis.Load(dir)
 	if err != nil {
-		return nil, fmt.Errorf("indecis : chargement de %s : %w", dir, err)
+		return nil, fmt.Errorf("indecis: loading %s: %w", dir, err)
 	}
 	c.models[dir] = m
 	return m, nil
 }
 
-// Decision implémente llm.DecisionClient.
+// Decision implements llm.DecisionClient.
 func (c *Client) Decision(ctx context.Context, state any, questions llm.Questions, funcs ...llm.DecisionOptionFunc) (llm.DecisionResponse, error) {
 	if err := questions.Validate(); err != nil {
 		return nil, err
@@ -118,10 +118,10 @@ func (c *Client) Decision(ctx context.Context, state any, questions llm.Question
 	for _, q := range m.Schema() {
 		schema[q.Name] = q
 	}
-	// Une question apprise (même nom que dans le schéma du modèle) passe
-	// par sa tête, calibrée. Toute autre question est ouverte : ses
-	// critères sont comparés à l'état par plongements (DecideOpen), comme
-	// chez Jev.
+	// A learned question (same name as in the model's schema) goes
+	// through its calibrated head. Any other question is open: its
+	// criteria are compared to the state by embeddings (DecideOpen), as
+	// with Jev.
 	var ids []string
 	var open []indecis.OpenQuestion
 	learned := false
@@ -165,7 +165,7 @@ func (c *Client) Decision(ctx context.Context, state any, questions llm.Question
 	return llm.NewDecisionResponse(filepath.Base(dir), answers, llm.NewDecisionUsage(int64(tokens), 0, int64(tokens))), nil
 }
 
-// stateInput convertit l'état en entrée du modèle.
+// stateInput converts the state into a model input.
 func stateInput(state any, paired bool) (indecis.Input, error) {
 	var in indecis.Input
 	switch v := state.(type) {
@@ -186,28 +186,28 @@ func stateInput(state any, paired bool) (indecis.Input, error) {
 		}
 		b, err := json.Marshal(v)
 		if err != nil {
-			return in, fmt.Errorf("indecis : état non sérialisable : %w", err)
+			return in, fmt.Errorf("indecis: unserializable state: %w", err)
 		}
 		in.Text = string(b)
 	default:
 		b, err := json.Marshal(v)
 		if err != nil {
-			return in, fmt.Errorf("indecis : état non sérialisable : %w", err)
+			return in, fmt.Errorf("indecis: unserializable state: %w", err)
 		}
 		in.Text = string(b)
 	}
 	if in.Context != "" && !paired {
-		return in, llm.NewValidationError("state", "ce modèle indecis ne lit pas de contexte : passer le texte seul")
+		return in, llm.NewValidationError("state", "this indecis model does not read a context: pass the text alone")
 	}
 	return in, nil
 }
 
-// compatible vérifie qu'une question de la requête correspond à une question
-// apprise par le modèle.
+// compatible checks that a question of the request matches a question
+// learned by the model.
 func compatible(id string, q llm.Question, schema map[string]indecis.Question) error {
 	sq := schema[id]
 	if string(q.QuestionType()) != string(sq.Kind) {
-		return llm.NewValidationError("questions."+id, fmt.Sprintf("le modèle répond à %q par un %s, pas un %s", id, sq.Kind, q.QuestionType()))
+		return llm.NewValidationError("questions."+id, fmt.Sprintf("the model answers %q with a %s, not a %s", id, sq.Kind, q.QuestionType()))
 	}
 	switch v := q.(type) {
 	case llm.ChoiceQuestion:
@@ -217,12 +217,12 @@ func compatible(id string, q llm.Question, schema map[string]indecis.Question) e
 		}
 		for o := range v.Criteria {
 			if !known[o] {
-				return llm.NewValidationError("questions."+id+".criteria", fmt.Sprintf("option %q inconnue du modèle (options apprises : %s)", o, strings.Join(sq.Options, ", ")))
+				return llm.NewValidationError("questions."+id+".criteria", fmt.Sprintf("option %q unknown to the model (learned options: %s)", o, strings.Join(sq.Options, ", ")))
 			}
 		}
 	case llm.ScoreQuestion:
 		if len(v.Criteria) != len(sq.Options) {
-			return llm.NewValidationError("questions."+id+".criteria", fmt.Sprintf("le modèle note sur %d niveaux (%s), pas %d", len(sq.Options), strings.Join(sq.Options, " < "), len(v.Criteria)))
+			return llm.NewValidationError("questions."+id+".criteria", fmt.Sprintf("the model scores on %d levels (%s), not %d", len(sq.Options), strings.Join(sq.Options, " < "), len(v.Criteria)))
 		}
 	}
 	return nil
@@ -231,7 +231,7 @@ func compatible(id string, q llm.Question, schema map[string]indecis.Question) e
 func toAnswer(q llm.Question, sq indecis.Question, a indecis.Answer) llm.Answer {
 	switch v := q.(type) {
 	case llm.ChoiceQuestion:
-		// Distribution renormalisée sur les options demandées.
+		// Distribution renormalized over the requested options.
 		probs := map[string]float64{}
 		var sum float64
 		for o := range v.Criteria {
@@ -252,8 +252,8 @@ func toAnswer(q llm.Question, sq indecis.Question, a indecis.Answer) llm.Answer 
 		}
 		return llm.NewChoiceAnswer(best, probs, conf)
 	case llm.ScoreQuestion:
-		// Niveaux indexés par leur position, comme chez TypeSafe ; l'ordre
-		// est celui du schéma appris, la légende celle de la requête.
+		// Levels indexed by their position, as with TypeSafe; the order
+		// is that of the learned schema, the legend that of the request.
 		probs := map[string]float64{}
 		legend := map[string]string{}
 		conf := 0.0
@@ -269,15 +269,15 @@ func toAnswer(q llm.Question, sq indecis.Question, a indecis.Answer) llm.Answer 
 	}
 }
 
-// toOpen traduit une question genai en question ouverte : les critères
-// deviennent des options décrites. Une question oui/non sans critères
-// oppose l'affirmation et la négation de ses instructions.
+// toOpen translates a genai question into an open question: the criteria
+// become described options. A yes/no question with no criteria opposes the
+// affirmation and the negation of its instructions.
 //
-// Une description de critère peut être un objet {"description": …,
-// "examples": […]}, forme que l'API TypeSafe admet (une description est
-// une chaîne, un objet ou un tableau) : les exemples situent alors
-// l'option (voir indecis.Candidate.Examples). C'est une convention
-// d'indecis ; un autre fournisseur lit l'objet comme une description.
+// A criterion's description can be an object {"description": ...,
+// "examples": [...]}, a form the TypeSafe API allows (a description is a
+// string, an object or an array): the examples then situate the option
+// (see indecis.Candidate.Examples). This is an indecis convention; another
+// provider reads the object as a description.
 func toOpen(id string, q llm.Question) indecis.OpenQuestion {
 	switch v := q.(type) {
 	case llm.NoulQuestion:
@@ -312,10 +312,10 @@ func toOpen(id string, q llm.Question) indecis.OpenQuestion {
 	return indecis.OpenQuestion{Name: id}
 }
 
-// criterion lit la description d'un critère : une chaîne, nil, ou un
-// objet dont « examples » (liste de textes) donne des exemples et
-// « description » la description ; les autres champs d'un objet restent
-// dans la description.
+// criterion reads a criterion's description: a string, nil, or an
+// object whose "examples" (list of texts) gives examples and
+// "description" the description; the other fields of an object stay in
+// the description.
 func criterion(name string, v any) indecis.Candidate {
 	c := indecis.Candidate{Name: name}
 	obj, ok := v.(map[string]any)
@@ -342,8 +342,8 @@ func criterion(name string, v any) indecis.Candidate {
 	return c
 }
 
-// texts accepte une liste de textes, qu'elle vienne de Go ([]string) ou
-// d'un JSON décodé ([]any).
+// texts accepts a list of texts, whether it comes from Go ([]string) or
+// from decoded JSON ([]any).
 func texts(v any) []string {
 	switch x := v.(type) {
 	case []string:

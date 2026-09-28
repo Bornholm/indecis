@@ -4,7 +4,7 @@ package linalg
 
 import "math"
 
-// Versions scalaires des opérations vectorielles (voir vec_simd.go).
+// Scalar versions of the vector operations (see vec_simd.go).
 
 func AbsMax(x []float32) float32 {
 	var m float32

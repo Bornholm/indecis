@@ -8,23 +8,23 @@ import (
 	"github.com/bornholm/indecis/internal/linalg"
 )
 
-// EmbeddingTable fournit les lignes de la table d'embeddings à la demande.
-// La table fait 93 % des poids ; en inférence, une requête n'en lit que
-// quelques dizaines de lignes, qu'il est inutile de garder en float32.
+// EmbeddingTable supplies rows of the embedding table on demand. The table
+// makes up 93% of the weights; in inference, a request reads only a few
+// dozen rows, which is pointless to keep in float32.
 type EmbeddingTable interface {
-	// Row écrit la ligne id dans dst (Hidden valeurs).
+	// Row writes row id into dst (Hidden values).
 	Row(id int32, dst []float32)
 }
 
-// SetEmbeddingTable remplace la table d'embeddings en float32 par une table
-// lue à la demande. Emb.W vaut alors nil jusqu'à Materialize.
+// SetEmbeddingTable replaces the float32 embedding table with an
+// on-demand table. Emb.W is then nil until Materialize.
 func (m *Model) SetEmbeddingTable(t EmbeddingTable) {
 	m.embTable = t
 	m.Emb.W = nil
 }
 
-// Materialize recopie la table d'embeddings en float32 dans Emb.W, ce
-// qu'exige l'entraînement.
+// Materialize copies the embedding table into Emb.W in float32, as
+// required by training.
 func (m *Model) Materialize() {
 	m.restoreWeights()
 	if m.Emb.W != nil {
@@ -34,8 +34,8 @@ func (m *Model) Materialize() {
 	m.embTable = nil
 }
 
-// EmbeddingMatrix retourne la table d'embeddings en float32 : Emb.W, ou une
-// copie temporaire si la table est lue à la demande.
+// EmbeddingMatrix returns the embedding table in float32: Emb.W, or a
+// temporary copy if the table is read on demand.
 func (m *Model) EmbeddingMatrix() []float32 {
 	if m.Emb.W != nil {
 		return m.Emb.W
@@ -57,8 +57,8 @@ func (m *Model) embRow(id int32, dst []float32) {
 	m.embTable.Row(id, dst)
 }
 
-// packedMat est une matrice de poids prête pour le produit : empaquetée en
-// float32, ou quantifiée en int8 (voir SetInt8).
+// packedMat is a weight matrix ready for multiplication: packed in
+// float32, or quantized to int8 (see SetInt8).
 type packedMat struct {
 	f *linalg.PackedB
 	q *linalg.PackedB8
@@ -71,7 +71,7 @@ func packMat(w []float32, k, n int, int8 bool) packedMat {
 	return packedMat{f: linalg.PackB(w, k, n, true)}
 }
 
-// mul calcule c = a·Wᵀ (ou c += si accumulate), a ayant m lignes.
+// mul computes c = a·Wᵀ (or c += if accumulate), a having m rows.
 func (p packedMat) mul(c, a []float32, m int, accumulate bool, workers int) {
 	if p.q != nil {
 		linalg.MatMul8N(c, a, p.q, m, accumulate, workers)
@@ -80,18 +80,17 @@ func (p packedMat) mul(c, a []float32, m int, accumulate bool, workers int) {
 	linalg.MatMulPackedN(c, a, p.f, m, accumulate, workers)
 }
 
-// packedLayer contient les matrices d'une couche prêtes pour le produit.
+// packedLayer holds the matrices of a layer ready for multiplication.
 type packedLayer struct {
 	qkv, o, i, oMLP packedMat
 }
 
-// WeightSource relit une matrice de poids par son nom, dans le fichier du
-// modèle par exemple.
+// WeightSource re-reads a weight matrix by name, from the model file for
+// example.
 type WeightSource func(name string) ([]float32, error)
 
-// Invalidate signale que les poids ont changé : les matrices empaquetées
-// pour l'inférence sont à refaire. L'entraînement l'appelle après chaque
-// pas.
+// Invalidate signals that the weights have changed: the matrices packed
+// for inference must be redone. Training calls this after every step.
 func (m *Model) Invalidate() {
 	m.packMu.Lock()
 	defer m.packMu.Unlock()
@@ -99,12 +98,12 @@ func (m *Model) Invalidate() {
 	m.packed = nil
 }
 
-// SetCompact fait garder les matrices des couches sous leur seule forme
-// empaquetée, dès la première inférence : elles ne sont plus en double. Les
-// fonctions qui lisent les poids (Params, Forward, Materialize) les
-// reconstruisent au besoin, depuis source si elle est fournie, et le mode
-// compact prend fin. En int8, les matrices ne sont libérées que si source
-// est fournie : la quantification ne se défait pas.
+// SetCompact makes the layer matrices kept only in their packed form,
+// starting at the first inference: they are no longer duplicated. The
+// functions that read the weights (Params, Forward, Materialize) rebuild
+// them as needed, from source if it is provided, and compact mode then
+// ends. In int8, the matrices are freed only if source is provided:
+// quantization is not undone.
 func (m *Model) SetCompact(source WeightSource) {
 	m.packMu.Lock()
 	m.compact = true
@@ -112,29 +111,28 @@ func (m *Model) SetCompact(source WeightSource) {
 	m.packMu.Unlock()
 }
 
-// SetInt8 fait calculer les produits par les couches en int8 (poids par
-// canal, activations par token). Sans noyau matériel (linalg.Int8Fast),
-// c'est exact mais lent.
+// SetInt8 makes the layers compute their products in int8 (per-channel
+// weights, per-token activations). Without a hardware kernel
+// (linalg.Int8Fast), this is exact but slow.
 func (m *Model) SetInt8(on bool) {
 	m.packMu.Lock()
 	defer m.packMu.Unlock()
 	if m.int8 == on {
 		return
 	}
-	// Les matrices seront réempaquetées depuis Param.W ou, absentes, depuis
-	// la source. Sans source, des matrices libérées ne se retrouvent que
-	// dans les paquets actuels : il faut les restaurer d'abord.
+	// The matrices will be repacked from Param.W or, if absent, from the
+	// source. Without a source, freed matrices only survive in the
+	// current packs: they must be restored first.
 	if m.packed != nil && m.source == nil {
 		compact := m.compact
 		m.restoreLocked()
-		m.compact = compact // changer de format n'est pas lire les poids
+		m.compact = compact // changing format is not reading the weights
 	}
 	m.int8 = on
 	m.packed = nil
 }
 
-// restoreWeights reconstruit les matrices des couches si SetCompact les a
-// libérées.
+// restoreWeights rebuilds the layer matrices if SetCompact freed them.
 func (m *Model) restoreWeights() {
 	m.packMu.Lock()
 	defer m.packMu.Unlock()
@@ -166,17 +164,17 @@ func (m *Model) restoreLocked() {
 	}
 }
 
-// readSource relit une matrice dans la source de SetCompact.
+// readSource re-reads a matrix from the SetCompact source.
 func (m *Model) readSource(w *Param) []float32 {
 	if m.source == nil {
-		panic(fmt.Sprintf("modernbert: %s absente et aucune source pour la relire", w.Name))
+		panic(fmt.Sprintf("modernbert: %s missing and no source to reread it", w.Name))
 	}
 	data, err := m.source(w.Name)
 	if err == nil && len(data) != w.Shape[0]*w.Shape[1] {
-		err = fmt.Errorf("%d valeurs", len(data))
+		err = fmt.Errorf("%d values", len(data))
 	}
 	if err != nil {
-		panic(fmt.Sprintf("modernbert: relecture de %s : %v", w.Name, err))
+		panic(fmt.Sprintf("modernbert: rereading %s: %v", w.Name, err))
 	}
 	return data
 }
@@ -190,9 +188,9 @@ func (m *Model) packs() []packedLayer {
 	H, I := m.Cfg.Hidden, m.Cfg.Intermediate
 	p := make([]packedLayer, len(m.Layers))
 	drop := m.compact && (m.source != nil || !m.int8)
-	// Une matrice absente (chargement paresseux, voir SetCompact) est lue
-	// dans la source au moment d'être empaquetée : il n'y en a jamais plus
-	// d'une en float32 à la fois.
+	// A missing matrix (lazy loading, see SetCompact) is read from the
+	// source at the moment it is packed: there is never more than one in
+	// float32 at a time.
 	pack := func(w *Param, k, n int) packedMat {
 		data := w.W
 		if data == nil {
@@ -218,23 +216,24 @@ func (m *Model) packs() []packedLayer {
 	return p
 }
 
-// workspace regroupe les tampons d'un passage d'inférence, réutilisés d'une
-// requête à l'autre.
+// workspace groups the buffers of an inference pass, reused across
+// requests.
 type workspace struct {
 	x, xn, qkv, ctx, z, g []float32
 }
 
 var workspaces sync.Pool
 
-// Encode calcule le plongement moyen de chaque séquence du lot, [B, H].
+// Encode computes the mean embedding of each sequence in the batch,
+// [B, H].
 //
-// C'est le chemin d'inférence : même calcul que Forward suivi de MeanPool,
-// sans rien garder pour la rétropropagation, avec des poids empaquetés une
-// fois pour toutes et des erf et exp en float32. L'écart avec Forward reste
-// de l'ordre de 1e-6.
+// This is the inference path: the same computation as Forward followed by
+// MeanPool, without keeping anything for backpropagation, with weights
+// packed once and for all and erf/exp in float32. The discrepancy with
+// Forward stays around 1e-6.
 func (m *Model) Encode(b Batch) ([]float32, error) {
 	if len(b.IDs) != b.B()*b.T {
-		return nil, fmt.Errorf("modernbert: lot incohérent")
+		return nil, fmt.Errorf("modernbert: inconsistent batch")
 	}
 	seqs := make([][]int32, b.B())
 	for i, n := range b.Lens {
@@ -243,12 +242,12 @@ func (m *Model) Encode(b Batch) ([]float32, error) {
 	return m.EncodeSeqs(seqs)
 }
 
-// EncodeSeqs est Encode sur des séquences de longueurs quelconques, mises
-// bout à bout sans padding : les calculs par ligne (projections, MLP,
-// normalisations) portent sur la somme des longueurs, pas sur le nombre
-// de séquences fois la plus longue, et l'attention se calcule séquence par
-// séquence. Réunir des séquences de longueurs différentes ne coûte donc
-// rien de plus que de les calculer séparément.
+// EncodeSeqs is Encode on sequences of arbitrary lengths, concatenated
+// without padding: the per-row computations (projections, MLP,
+// normalizations) run on the sum of the lengths, not on the number of
+// sequences times the longest one, and attention is computed sequence by
+// sequence. Combining sequences of different lengths therefore costs no
+// more than computing them separately.
 func (m *Model) EncodeSeqs(seqs [][]int32) ([]float32, error) {
 	cfg := m.Cfg
 	H, I := cfg.Hidden, cfg.Intermediate
@@ -256,7 +255,7 @@ func (m *Model) EncodeSeqs(seqs [][]int32) ([]float32, error) {
 	for i, sq := range seqs {
 		for _, id := range sq {
 			if id < 0 || int(id) >= cfg.Vocab {
-				return nil, fmt.Errorf("modernbert: id %d hors vocabulaire", id)
+				return nil, fmt.Errorf("modernbert: id %d out of vocabulary", id)
 			}
 		}
 		offs[i+1] = offs[i] + len(sq)
@@ -307,9 +306,8 @@ func (m *Model) EncodeSeqs(seqs [][]int32) ([]float32, error) {
 		p.o.mul(x, ws.ctx, N, true, w) // x += attention
 
 		layerNormInfer(xn, x, L.MLPNorm.W, N, H, cfg.NormEps, w)
-		// Le MLP travaille par tranches de lignes : ses tampons (2·I + I
-		// valeurs par ligne, plus que tout le reste) ne dépendent pas de la
-		// longueur du texte.
+		// The MLP works in row chunks: its buffers (2·I + I values per row,
+		// more than everything else) do not depend on the text length.
 		for r0 := 0; r0 < N; r0 += chunk {
 			rows := min(chunk, N-r0)
 			p.i.mul(ws.z, xn[r0*H:(r0+rows)*H], rows, false, w)
@@ -319,7 +317,7 @@ func (m *Model) EncodeSeqs(seqs [][]int32) ([]float32, error) {
 	}
 	layerNormInfer(xn, x, m.FinalNorm.W, N, H, cfg.NormEps, w)
 
-	// Moyenne des états de chaque séquence, spéciaux compris.
+	// Average of each sequence's states, special tokens included.
 	for i := range seqs {
 		n := offs[i+1] - offs[i]
 		if n == 0 {
@@ -338,9 +336,9 @@ func (m *Model) EncodeSeqs(seqs [][]int32) ([]float32, error) {
 	return out, nil
 }
 
-// attentionInfer est attentionForward sans rien conserver : q, k, v de
-// chaque (séquence, tête) vivent dans des tampons de la tâche, et
-// l'attention se calcule par blocs (attendBlocks), en mémoire linéaire.
+// attentionInfer is attentionForward without keeping anything: q, k, v of
+// each (sequence, head) live in the task's buffers, and attention is
+// computed block by block (attendBlocks), in linear memory.
 func (m *Model) attentionInfer(l int, offs []int, qkv, ctx []float32, workers int) {
 	cfg := m.Cfg
 	H, nh, D := cfg.Hidden, cfg.Heads, cfg.HeadDim()
@@ -385,7 +383,7 @@ func (m *Model) attentionInfer(l int, offs []int, qkv, ctx []float32, workers in
 	})
 }
 
-// layerNormInfer est layerNorm sans cache pour le backward.
+// layerNormInfer is layerNorm without a cache for the backward pass.
 func layerNormInfer(out, x, gamma []float32, n, h int, eps float64, workers int) {
 	linalg.ParallelN(workers, n, rowGrain, func(lo, hi int) {
 		for r := lo; r < hi; r++ {
@@ -394,7 +392,7 @@ func layerNormInfer(out, x, gamma []float32, n, h int, eps float64, workers int)
 	})
 }
 
-// gluInfer est gluForward avec la GELU en float32.
+// gluInfer is gluForward with GELU in float32.
 func gluInfer(g, z []float32, n, inter int, workers int) {
 	linalg.ParallelN(workers, n, rowGrain, func(lo, hi int) {
 		for r := lo; r < hi; r++ {
@@ -403,49 +401,47 @@ func gluInfer(g, z []float32, n, inter int, workers int) {
 	})
 }
 
-// Attention par blocs, à la manière de FlashAttention : les requêtes sont
-// traitées par blocs de qBlock positions, les clés par blocs de kBlock, et
-// le softmax est mis à jour au fil des blocs de clés (maximum et somme
-// courants par ligne). La matrice complète des scores n'existe jamais : la
-// mémoire est linéaire en la longueur. Dans une couche locale, seuls les
-// blocs de clés qui touchent la fenêtre sont parcourus : le calcul devient
-// linéaire lui aussi. Le résultat est celui du softmax complet, à
-// l'arrondi près.
+// Block attention, FlashAttention-style: queries are processed in blocks
+// of qBlock positions, keys in blocks of kBlock, and the softmax is
+// updated as key blocks are processed (running max and sum per row). The
+// full score matrix never exists: memory is linear in the length. In a
+// local layer, only the key blocks that touch the window are visited: the
+// computation becomes linear too. The result is that of the full softmax,
+// up to rounding.
 const (
 	qBlock = 64
 	kBlock = 128
 
-	// mlpChunk est le nombre de lignes que le MLP traite à la fois.
+	// mlpChunk is the number of rows the MLP processes at a time.
 	mlpChunk = 256
 
-	// parallelRows est le nombre de positions (toutes séquences du lot
-	// confondues) à partir duquel Encode répartit son calcul sur plusieurs
-	// cœurs. En deçà, lancer des goroutines coûte plus que le calcul, et un
-	// processeur hybride les envoie sur ses cœurs lents : une phrase se
-	// calcule deux fois plus vite sur un seul cœur.
+	// parallelRows is the number of positions (across all sequences in
+	// the batch) above which Encode spreads its computation over multiple
+	// cores. Below it, launching goroutines costs more than the
+	// computation, and a hybrid processor sends them to its slow cores: a
+	// sentence computes twice as fast on a single core.
 	parallelRows = 1024
 )
 
 type blockBuffers struct {
-	s       []float32 // scores d'un bloc, [qBlock, kBlock]
-	mx, sum []float32 // maximum et somme courants par ligne, [n]
+	s       []float32 // scores of a block, [qBlock, kBlock]
+	mx, sum []float32 // running max and sum per row, [n]
 }
 
 func newBlockBuffers() *blockBuffers {
 	return &blockBuffers{s: make([]float32, qBlock*kBlock)}
 }
 
-// attendBlocks écrit dans o (n×D) l'attention de q sur k, v (n×D chacun).
-// window < 0 : attention globale ; sinon, |i − j| ≤ window. q est modifié
-// (multiplié par scale).
+// attendBlocks writes into o (n×D) the attention of q over k, v (n×D
+// each). window < 0: global attention; otherwise |i − j| ≤ window. q is
+// modified (multiplied by scale).
 //
-// Les blocs de clés sont à l'extérieur : chaque bloc de K et de V est
-// empaqueté une fois pour le produit matriciel, puis sert à tous les blocs
-// de requêtes qui le voient. Le maximum et la somme du softmax sont tenus
-// pour toutes les lignes.
+// The key blocks are the outer loop: each block of K and V is packed once
+// for the matrix product, then serves every query block that sees it. The
+// softmax max and sum are kept for all rows.
 func attendBlocks(o, q, k, v []float32, n, D, window int, scale float32, b *blockBuffers) {
 	negInf := float32(math.Inf(-1))
-	linalg.Scale(q[:n*D], scale) // scores déjà mis à l'échelle
+	linalg.Scale(q[:n*D], scale) // scores already scaled
 	clear(o[:n*D])
 	if cap(b.mx) < n {
 		b.mx, b.sum = make([]float32, n), make([]float32, n)
@@ -457,9 +453,9 @@ func attendBlocks(o, q, k, v []float32, n, D, window int, scale float32, b *bloc
 	for jb := 0; jb < n; jb += kBlock {
 		je := min(n, jb+kBlock)
 		cols := je - jb
-		pk := linalg.PackB(k[jb*D:je*D], D, cols, true)  // Kᵀ du bloc : D×cols
-		pv := linalg.PackB(v[jb*D:je*D], cols, D, false) // V du bloc : cols×D
-		// Requêtes qui voient au moins une clé du bloc.
+		pk := linalg.PackB(k[jb*D:je*D], D, cols, true)  // block Kᵀ: D×cols
+		pv := linalg.PackB(v[jb*D:je*D], cols, D, false) // block V: cols×D
+		// Queries that see at least one key of the block.
 		q0, q1 := 0, n
 		if window >= 0 {
 			q0, q1 = max(0, jb-window), min(n, je+window)
@@ -473,13 +469,13 @@ func attendBlocks(o, q, k, v []float32, n, D, window int, scale float32, b *bloc
 			for r := 0; r < rows; r++ {
 				i := i0 + r
 				row := sc[r*cols : (r+1)*cols]
-				// Colonnes de la fenêtre dans ce bloc : [cs, ce).
+				// Window columns in this block: [cs, ce).
 				cs, ce := 0, cols
 				if window >= 0 {
 					cs, ce = max(0, i-window-jb), min(cols, i+window+1-jb)
 				}
 				if cs >= ce {
-					clear(row) // aucune clé de ce bloc dans la fenêtre
+					clear(row) // no key of this block within the window
 					continue
 				}
 				valid := row[cs:ce]
@@ -493,7 +489,7 @@ func attendBlocks(o, q, k, v []float32, n, D, window int, scale float32, b *bloc
 				clear(row[:cs])
 				clear(row[ce:])
 			}
-			// o += P·V du bloc.
+			// o += P·V of the block.
 			linalg.MatMulPackedN(o[i0*D:i1*D], sc, pv, rows, true, 1)
 		}
 	}
@@ -502,22 +498,22 @@ func attendBlocks(o, q, k, v []float32, n, D, window int, scale float32, b *bloc
 	}
 }
 
-// RemapVocabulary réduit la table d'embeddings à un nouveau vocabulaire :
-// newID[ancien] est le nouvel id d'un token gardé, -1 pour un token retiré.
-// Les ids gardés doivent former [0, size).
+// RemapVocabulary shrinks the embedding table to a new vocabulary:
+// newID[old] is the new id of a kept token, -1 for a removed token. The
+// kept ids must form [0, size).
 func (m *Model) RemapVocabulary(newID []int32, size int) error {
 	if len(newID) != m.Cfg.Vocab {
-		return fmt.Errorf("modernbert: correspondance de %d ids pour un vocabulaire de %d", len(newID), m.Cfg.Vocab)
+		return fmt.Errorf("modernbert: mapping of %d ids for a vocabulary of %d", len(newID), m.Cfg.Vocab)
 	}
 	if pad := newID[m.Cfg.PadID]; pad < 0 {
-		return fmt.Errorf("modernbert: le token de padding est retiré")
+		return fmt.Errorf("modernbert: padding token is removed")
 	}
 	H := m.Cfg.Hidden
 	w := make([]float32, size*H)
 	for old, id := range newID {
 		if id >= 0 {
 			if int(id) >= size {
-				return fmt.Errorf("modernbert: id %d hors du nouveau vocabulaire", id)
+				return fmt.Errorf("modernbert: id %d out of the new vocabulary", id)
 			}
 			m.embRow(int32(old), w[int(id)*H:(int(id)+1)*H])
 		}

@@ -12,10 +12,10 @@ package calibrate
 
 import "math"
 
-// eps borne les probabilités loin de 0 et 1, où le logit diverge.
+// eps keeps probabilities away from 0 and 1, where the logit diverges.
 const eps = 1e-6
 
-// Clamp ramène p dans [eps, 1-eps].
+// Clamp brings p into [eps, 1-eps].
 func Clamp(p float64) float64 {
 	if math.IsNaN(p) {
 		return 0.5
@@ -23,59 +23,59 @@ func Clamp(p float64) float64 {
 	return math.Min(math.Max(p, eps), 1-eps)
 }
 
-// Logit retourne log(p / (1-p)).
+// Logit returns log(p / (1-p)).
 func Logit(p float64) float64 {
 	p = Clamp(p)
 	return math.Log(p / (1 - p))
 }
 
-// Sigmoid est l'inverse de Logit.
+// Sigmoid is the inverse of Logit.
 func Sigmoid(z float64) float64 {
 	return 1 / (1 + math.Exp(-z))
 }
 
-// PriorShift retourne les log-odds à ajouter à la sortie d'un classifieur
-// entraîné avec la proportion trainPrior de positifs pour qu'elle reflète la
-// proportion deployPrior observée en production.
+// PriorShift returns the log-odds to add to the output of a classifier
+// trained with the trainPrior proportion of positives so that it
+// reflects the deployPrior proportion observed in production.
 //
-// C'est la règle de Bayes appliquée au seul terme qui change entre les deux
-// distributions : la vraisemblance P(texte | classe) est supposée la même,
-// seul P(classe) diffère.
+// This is Bayes' rule applied to the only term that changes between the
+// two distributions: the likelihood P(text | class) is assumed the
+// same, only P(class) differs.
 func PriorShift(trainPrior, deployPrior float64) float64 {
 	return Logit(deployPrior) - Logit(trainPrior)
 }
 
-// Evidence traduit le risque d'un autre détecteur en rapport de
-// vraisemblance (log-LR).
+// Evidence translates the risk from another detector into a
+// likelihood ratio (log-LR).
 //
-// L'asymétrie est le point central. Un détecteur précis mais peu sensible,
-// comme un jeu de règles, apporte une preuve forte quand il se déclenche et
-// une preuve faible quand il se tait : son silence couvre aussi toutes les
-// attaques qu'il ne connaît pas. D'où deux poids, un au-dessus de Neutral et
-// un en dessous.
+// The asymmetry is the central point. A precise but low-sensitivity
+// detector, like a rule set, provides strong evidence when it fires and
+// weak evidence when it stays silent: its silence also covers all the
+// attacks it does not know about. Hence two weights, one above Neutral
+// and one below.
 //
-// Les poids inférieurs à 1 servent aussi de rétrécissement : deux détecteurs
-// qui lisent le même texte ne sont pas indépendants, et une somme brute de
-// log-LR compterait deux fois la même preuve.
+// Weights below 1 also serve as shrinkage: two detectors reading the
+// same text are not independent, and a raw sum of log-LR would count
+// the same evidence twice.
 type Evidence struct {
-	// Neutral est le risque qui ne déplace pas la décision.
+	// Neutral is the risk that does not move the decision.
 	Neutral float64
-	// HitWeight pondère l'écart au-dessus de Neutral.
+	// HitWeight weighs the gap above Neutral.
 	HitWeight float64
-	// MissWeight pondère l'écart en dessous de Neutral.
+	// MissWeight weighs the gap below Neutral.
 	MissWeight float64
-	// Floor et Ceil bornent le risque avant le logit : un risque de 0 ne
-	// doit pas valoir une preuve infinie d'innocuité.
+	// Floor and Ceil bound the risk before the logit: a risk of 0 must
+	// not amount to infinite proof of innocence.
 	Floor, Ceil float64
 }
 
-// DefaultEvidence est un réglage de départ, à remplacer par un réglage
-// ajusté sur un jeu de validation réel.
+// DefaultEvidence is a starting setting, to be replaced by a setting
+// tuned on a real validation set.
 func DefaultEvidence() Evidence {
 	return Evidence{Neutral: 0.3, HitWeight: 1, MissWeight: 0.2, Floor: 0.01, Ceil: 0.99}
 }
 
-// LLR retourne le log-rapport de vraisemblance apporté par risk.
+// LLR returns the log-likelihood ratio contributed by risk.
 func (e Evidence) LLR(risk float64) float64 {
 	r := math.Min(math.Max(risk, e.Floor), e.Ceil)
 	d := Logit(r) - Logit(e.Neutral)

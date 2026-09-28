@@ -8,10 +8,10 @@ import (
 	"strings"
 )
 
-// decode lit un tokenizer.json en flux. Le vocabulaire (256 000 entrées) et
-// les fusions sont lus entrée par entrée : ni le fichier (34 Mo) ni une map
-// du vocabulaire ne passent en mémoire. Le reste du fichier, petit, est
-// décodé normalement dans f.
+// decode reads a tokenizer.json as a stream. The vocabulary (256,000
+// entries) and the merges are read entry by entry: neither the file
+// (34 MB) nor a vocabulary map ever sits in memory. The rest of the file,
+// small, is decoded normally into f.
 func decode(r io.Reader) (f fileJSON, byID []string, pairs [][2]string, err error) {
 	d := jsontext.NewDecoder(r, jsontext.AllowDuplicateNames(true))
 	if err = expect(d, '{'); err != nil {
@@ -95,7 +95,7 @@ func decodeModel(d *jsontext.Decoder, f *fileJSON) (byID []string, pairs [][2]st
 	return
 }
 
-// decodeVocab lit {"chaîne": id, …} dans byID[id] = chaîne.
+// decodeVocab reads {"string": id, ...} into byID[id] = string.
 func decodeVocab(d *jsontext.Decoder) ([]string, error) {
 	if err := expect(d, '{'); err != nil {
 		return nil, err
@@ -111,27 +111,27 @@ func decodeVocab(d *jsontext.Decoder) ([]string, error) {
 			return nil, err
 		}
 		if tok.Kind() != '0' {
-			return nil, fmt.Errorf("tokenizer: vocab : id attendu pour %q", s)
+			return nil, fmt.Errorf("tokenizer: vocab: expected id for %q", s)
 		}
 		id, err := tok.Int()
 		if err != nil || id < 0 || id >= 1<<24 {
-			return nil, fmt.Errorf("tokenizer: vocab : id %d invalide", id)
+			return nil, fmt.Errorf("tokenizer: vocab: invalid id %d", id)
 		}
 		for int(id) >= len(byID) {
 			byID = append(byID, "")
 		}
 		if byID[id] != "" {
-			return nil, fmt.Errorf("tokenizer: id %d attribué deux fois", id)
+			return nil, fmt.Errorf("tokenizer: id %d assigned twice", id)
 		}
 		if s == "" {
-			return nil, fmt.Errorf("tokenizer: vocab : chaîne vide")
+			return nil, fmt.Errorf("tokenizer: vocab: empty string")
 		}
 		byID[id] = s
 	}
 	return byID, expect(d, '}')
 }
 
-// decodeMerges accepte les deux formats : ["a","b"] et "a b".
+// decodeMerges accepts both formats: ["a","b"] and "a b".
 func decodeMerges(d *jsontext.Decoder) ([][2]string, error) {
 	if err := expect(d, '['); err != nil {
 		return nil, err
@@ -146,7 +146,7 @@ func decodeMerges(d *jsontext.Decoder) ([][2]string, error) {
 			}
 			a, b, ok := strings.Cut(s, " ")
 			if !ok {
-				return nil, fmt.Errorf("tokenizer: merge invalide %q", s)
+				return nil, fmt.Errorf("tokenizer: invalid merge %q", s)
 			}
 			pairs = append(pairs, [2]string{a, b})
 		case '[':
@@ -164,7 +164,7 @@ func decodeMerges(d *jsontext.Decoder) ([][2]string, error) {
 			}
 			pairs = append(pairs, [2]string{a, b})
 		default:
-			return nil, fmt.Errorf("tokenizer: merges : élément inattendu")
+			return nil, fmt.Errorf("tokenizer: merges: unexpected element")
 		}
 	}
 	return pairs, expect(d, ']')
@@ -176,7 +176,7 @@ func readString(d *jsontext.Decoder) (string, error) {
 		return "", fmt.Errorf("tokenizer: %w", err)
 	}
 	if tok.Kind() != '"' {
-		return "", fmt.Errorf("tokenizer: chaîne attendue, %v lu", tok.Kind())
+		return "", fmt.Errorf("tokenizer: expected string, got %v", tok.Kind())
 	}
 	return tok.String(), nil
 }
@@ -187,7 +187,7 @@ func expect(d *jsontext.Decoder, k jsontext.Kind) error {
 		return fmt.Errorf("tokenizer: %w", err)
 	}
 	if tok.Kind() != k {
-		return fmt.Errorf("tokenizer: %v attendu, %v lu", k, tok.Kind())
+		return fmt.Errorf("tokenizer: expected %v, got %v", k, tok.Kind())
 	}
 	return nil
 }

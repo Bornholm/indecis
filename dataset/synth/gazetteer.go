@@ -1,9 +1,9 @@
-// Gazetteers : listes pondérées de valeurs, reprises de go-anon.
+// Gazetteers: weighted lists of values, taken from go-anon.
 //
-// Le format est un TSV « valeur <TAB> poids <TAB> metadata(JSON) », choisi pour
-// rester lisible et diffable. Les poids bruts issus de
-// sources statistiques sont très piqués : une poignée de valeurs écrase la
-// longue traîne. L'exposant d'aplatissement rend ce compromis réglable.
+// The format is a TSV "value <TAB> weight <TAB> metadata(JSON)", chosen to
+// stay readable and diffable. Raw weights from statistical sources are
+// very spiky: a handful of values overwhelm the long tail. The
+// flattening exponent makes this trade-off tunable.
 package synth
 
 import (
@@ -18,34 +18,34 @@ import (
 	"strings"
 )
 
-// Entry est une valeur du gazetteer avec son poids et ses métadonnées.
+// Entry is a gazetteer value with its weight and metadata.
 type Entry struct {
 	Value    string
 	Weight   float64
 	Metadata map[string]string
 }
 
-// Gazetteer est une liste pondérée prête pour le tirage.
+// Gazetteer is a weighted list ready for sampling.
 type Gazetteer struct {
 	entries []Entry
-	cum     []float64 // poids cumulés, pour la recherche binaire
+	cum     []float64 // cumulative weights, for binary search
 	total   float64
 }
 
-// Options pilote la mise en forme de la distribution au chargement.
+// GazetteerOptions drives the shaping of the distribution at load time.
 type GazetteerOptions struct {
-	// Alpha aplatit les poids : w' = w^Alpha. 1 conserve la distribution
-	// réelle, 0 la rend uniforme. Défaut 0.6.
+	// Alpha flattens the weights: w' = w^Alpha. 1 keeps the real
+	// distribution, 0 makes it uniform. Default 0.6.
 	Alpha float64
-	// MinWeight écarte les valeurs sous ce poids brut, pour couper le bruit
-	// orthographique des fichiers sources.
+	// MinWeight discards values below this raw weight, to cut the
+	// spelling noise of source files.
 	MinWeight float64
 }
 
-// DefaultOptions retourne les réglages recommandés.
+// DefaultGazetteerOptions returns the recommended settings.
 func DefaultGazetteerOptions() GazetteerOptions { return GazetteerOptions{Alpha: 0.6} }
 
-// NewGazetteer construit un Gazetteer à partir d'entrées déjà chargées.
+// NewGazetteer builds a Gazetteer from already-loaded entries.
 func NewGazetteer(entries []Entry, opts GazetteerOptions) (*Gazetteer, error) {
 	if opts.Alpha <= 0 {
 		opts.Alpha = 1
@@ -61,13 +61,13 @@ func NewGazetteer(entries []Entry, opts GazetteerOptions) (*Gazetteer, error) {
 		s.cum = append(s.cum, s.total)
 	}
 	if len(s.entries) == 0 {
-		return nil, fmt.Errorf("gazetteer vide après filtrage (MinWeight=%v)", opts.MinWeight)
+		return nil, fmt.Errorf("gazetteer empty after filtering (MinWeight=%v)", opts.MinWeight)
 	}
 	return s, nil
 }
 
-// LoadGazetteer lit un gazetteer au format TSV. Les lignes vides et celles commençant
-// par « # » sont ignorées. Un poids absent vaut 1.
+// LoadGazetteer reads a gazetteer in TSV format. Empty lines and those
+// starting with "#" are ignored. A missing weight defaults to 1.
 func LoadGazetteer(r io.Reader, opts GazetteerOptions) (*Gazetteer, error) {
 	var entries []Entry
 	sc := bufio.NewScanner(r)
@@ -87,13 +87,13 @@ func LoadGazetteer(r io.Reader, opts GazetteerOptions) (*Gazetteer, error) {
 		if len(cols) > 1 && strings.TrimSpace(cols[1]) != "" {
 			w, err := strconv.ParseFloat(strings.TrimSpace(cols[1]), 64)
 			if err != nil {
-				return nil, fmt.Errorf("ligne %d : poids invalide %q : %w", line, cols[1], err)
+				return nil, fmt.Errorf("line %d: invalid weight %q: %w", line, cols[1], err)
 			}
 			e.Weight = w
 		}
 		if len(cols) > 2 && strings.TrimSpace(cols[2]) != "" {
 			if err := json.Unmarshal([]byte(cols[2]), &e.Metadata); err != nil {
-				return nil, fmt.Errorf("ligne %d : metadata invalide : %w", line, err)
+				return nil, fmt.Errorf("line %d: invalid metadata: %w", line, err)
 			}
 		}
 		entries = append(entries, e)
@@ -104,12 +104,12 @@ func LoadGazetteer(r io.Reader, opts GazetteerOptions) (*Gazetteer, error) {
 	return NewGazetteer(entries, opts)
 }
 
-// Subset construit un Gazetteer restreint aux entrées satisfaisant pred, en
-// conservant leurs poids déjà aplatis.
+// Subset builds a Gazetteer restricted to the entries satisfying pred,
+// keeping their already-flattened weights.
 //
-// Sert à contraindre la cohérence sémantique : on ne compose pas un
-// « Laboratoire de Travaux Publics ». Retourne nil si aucune entrée ne passe,
-// à l'appelant de retomber sur le Gazetteer complet.
+// Used to constrain semantic coherence: we do not compose a "Public
+// Works Laboratory". Returns nil if no entry passes, leaving it to the
+// caller to fall back to the full Gazetteer.
 func (s *Gazetteer) Subset(pred func(Entry) bool) *Gazetteer {
 	out := &Gazetteer{}
 	for i, e := range s.entries {
@@ -130,7 +130,7 @@ func (s *Gazetteer) Subset(pred func(Entry) bool) *Gazetteer {
 	return out
 }
 
-// Pick tire une entrée selon la distribution pondérée.
+// Pick draws an entry according to the weighted distribution.
 func (s *Gazetteer) Pick(rng *rand.Rand) Entry {
 	target := rng.Float64() * s.total
 	i := sort.SearchFloat64s(s.cum, target)
@@ -140,8 +140,8 @@ func (s *Gazetteer) Pick(rng *rand.Rand) Entry {
 	return s.entries[i]
 }
 
-// PickValue tire une entrée et n'en retourne que la valeur.
+// PickValue draws an entry and returns only its value.
 func (s *Gazetteer) PickValue(rng *rand.Rand) string { return s.Pick(rng).Value }
 
-// Len retourne le nombre d'entrées retenues.
+// Len returns the number of retained entries.
 func (s *Gazetteer) Len() int { return len(s.entries) }

@@ -12,11 +12,11 @@ import (
 
 func runEval(args []string) error {
 	fs := flag.NewFlagSet("eval", flag.ExitOnError)
-	model := fs.String("model", "", "modèle")
-	data := fs.String("data", "", "exemples étiquetés (JSONL, motifs séparés par des virgules)")
-	schemaPath := fs.String("schema", "", "questions posées en mode ouvert (sinon : les têtes du modèle)")
-	int8 := fs.Bool("int8", true, "calcul en int8 si le processeur le permet")
-	by := fs.String("by", "", "mesurer aussi par valeur de ce champ meta (source, lang…)")
+	model := fs.String("model", "", "model")
+	data := fs.String("data", "", "labeled examples (JSONL, comma-separated patterns)")
+	schemaPath := fs.String("schema", "", "questions asked in open mode (otherwise: the model's heads)")
+	int8 := fs.Bool("int8", true, "int8 computation if the processor allows it")
+	by := fs.String("by", "", "also measure by value of this meta field (source, lang, ...)")
 	fs.Parse(args)
 	if err := required(fs, "model", "data"); err != nil {
 		return err
@@ -53,7 +53,7 @@ func runEval(args []string) error {
 		groups[k] = append(groups[k], e)
 	}
 	sort.Strings(keys)
-	fmt.Printf("== tous (%d)\n", len(ex))
+	fmt.Printf("== all (%d)\n", len(ex))
 	if err := report(ctx, m, sf, ex, sf != nil); err != nil {
 		return err
 	}

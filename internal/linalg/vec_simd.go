@@ -7,12 +7,11 @@ import (
 	"simd"
 )
 
-// Opérations vectorielles de l'inférence, en SIMD portable (repli
-// scalaire dans vec_scalar.go, même contrat). Aucune n'est inlinée : une
-// fonction SIMD inlinée dans une closure fait planter le compilateur de
-// Go 1.27.
+// Vector operations for inference, in portable SIMD (scalar fallback in
+// vec_scalar.go, same contract). None is inlined: a SIMD function inlined
+// into a closure crashes the Go 1.27 compiler.
 
-// AbsMax retourne max |x[i]|.
+// AbsMax returns max |x[i]|.
 //
 //go:noinline
 func AbsMax(x []float32) float32 {
@@ -34,12 +33,12 @@ func AbsMax(x []float32) float32 {
 	return m
 }
 
-// QuantizeRow écrit dst[i] = arrondi(x[i]·inv) + 128 (|x[i]·inv| ≤ 127).
+// QuantizeRow writes dst[i] = round(x[i]*inv) + 128 (|x[i]*inv| <= 127).
 //
 //go:noinline
 func QuantizeRow(dst []uint8, x []float32, inv float32) {
 	vinv := simd.BroadcastFloat32s(inv)
-	magic := simd.BroadcastFloat32s(12582912) // 1,5·2²³ : arrondi au pair
+	magic := simd.BroadcastFloat32s(12582912) // 1.5*2^23: round to even
 	off := simd.BroadcastInt32s(128)
 	V := vinv.Len()
 	var tmp [16]int32
@@ -57,8 +56,8 @@ func QuantizeRow(dst []uint8, x []float32, inv float32) {
 	}
 }
 
-// Dequantize écrit, pour une ligne de C, dst[j] (+)= sa·sb[j]·(acc[j] −
-// zc[j]), où zc = 128·Σ qb d'une colonne (voir MatMul8).
+// Dequantize writes, for a row of C, dst[j] (+)= sa*sb[j]*(acc[j] -
+// zc[j]), where zc = 128*Sum qb of a column (see MatMul8).
 //
 //go:noinline
 func Dequantize(dst []float32, acc []int32, sb, zc []float32, sa float32, accumulate bool) {
@@ -83,8 +82,8 @@ func Dequantize(dst []float32, acc []int32, sb, zc []float32, sa float32, accumu
 	}
 }
 
-// GeluMul écrit o[i] = gelu(a[i])·b[i], avec la GELU exacte (erf) en
-// approximation rationnelle float32 (erreur < 2e-7).
+// GeluMul writes o[i] = gelu(a[i])*b[i], using the exact GELU (erf) as a
+// float32 rational approximation (error < 2e-7).
 //
 //go:noinline
 func GeluMul(o, a, b []float32) {
@@ -124,8 +123,8 @@ func GeluMul(o, a, b []float32) {
 	}
 }
 
-// ExpShift écrit x[i] = exp(x[i] − m) (0 sous −87,3, pour les −Inf des
-// positions masquées) et retourne leur somme.
+// ExpShift writes x[i] = exp(x[i] - m) (0 below -87.3, for the -Inf of
+// masked positions) and returns their sum.
 //
 //go:noinline
 func ExpShift(x []float32, m float32) float32 {
@@ -156,7 +155,7 @@ func ExpShift(x []float32, m float32) float32 {
 		p = r.MulAdd(p, c0)
 		y := p.Mul(r).MulAdd(r, r).Add(one)
 		pow := n.ConvertToInt32().Add(bias).ShiftAllLeft(23).ToBits().BitsToFloat32()
-		e := zero.IfElse(under, y.Mul(pow)) // 0 là où x − m < −87,3
+		e := zero.IfElse(under, y.Mul(pow)) // 0 where x - m < -87.3
 		e.Store(x[i:])
 		acc = acc.Add(e)
 	}
@@ -174,7 +173,7 @@ func ExpShift(x []float32, m float32) float32 {
 	return sum
 }
 
-// Scale multiplie x par s.
+// Scale multiplies x by s.
 //
 //go:noinline
 func Scale(x []float32, s float32) {
@@ -189,8 +188,8 @@ func Scale(x []float32, s float32) {
 	}
 }
 
-// LayerNormRow écrit o = (x − μ)/σ · γ, les moments étant calculés en
-// float64 par blocs de V lanes.
+// LayerNormRow writes o = (x - mean)/std * gamma, the moments being
+// computed in float64 in blocks of V lanes.
 //
 //go:noinline
 func LayerNormRow(o, x, gamma []float32, eps float64) {
@@ -237,7 +236,7 @@ func LayerNormRow(o, x, gamma []float32, eps float64) {
 	}
 }
 
-// MaxOf retourne max x[i] (−Inf pour une tranche vide).
+// MaxOf returns max x[i] (-Inf for an empty slice).
 //
 //go:noinline
 func MaxOf(x []float32) float32 {

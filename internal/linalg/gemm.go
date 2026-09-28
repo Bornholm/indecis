@@ -1,19 +1,19 @@
-// Package linalg fournit les noyaux numériques de l'entraînement et de
-// l'inférence : produit matriciel, opérations vectorielles.
+// Package linalg provides the numerical kernels for training and
+// inference: matrix product, vector operations.
 //
-// Tout est en float32, en row-major contigu. Le produit matriciel suit le
-// schéma de GotoBLAS : les deux opérandes sont recopiés (« packés ») en
-// panneaux contigus, puis un micro-noyau calcule des tuiles mr×nr en
-// registres. Le packing absorbe les transpositions : les trois formes dont la
-// rétropropagation a besoin (A·B, A·Bᵀ, Aᵀ·B) partagent le même micro-noyau.
+// Everything is float32, contiguous row-major. The matrix product follows
+// the GotoBLAS scheme: both operands are copied ("packed") into contiguous
+// panels, then a micro-kernel computes mr×nr tiles in registers. Packing
+// absorbs the transpositions: the three forms backpropagation needs
+// (A·B, A·Bᵀ, Aᵀ·B) share the same micro-kernel.
 //
-// Seul le micro-noyau dépend de l'architecture. Il existe en deux versions :
-// SIMD portable (GOEXPERIMENT=simd) et scalaire. Le reste du package est
-// commun.
+// Only the micro-kernel is architecture-dependent. It exists in two
+// versions: portable SIMD (GOEXPERIMENT=simd) and scalar. The rest of the
+// package is shared.
 //
-// Le code qui mène au SIMD n'utilise pas de closures : avec le support
-// expérimental de Go 1.27, une closure appelant une fonction SIMD fait
-// planter le compilateur.
+// The code leading to SIMD does not use closures: with Go 1.27's
+// experimental support, a closure calling a SIMD function crashes the
+// compiler.
 package linalg
 
 import (
@@ -22,20 +22,20 @@ import (
 )
 
 const (
-	mr = 6   // lignes d'une tuile du micro-noyau
-	kc = 256 // profondeur d'un bloc de k : un panneau de B tient en L1/L2
-	mc = 72  // lignes de A par tâche (multiple de mr)
-	nc = 256 // colonnes de C par tâche (arrondi à un multiple de nr)
+	mr = 6   // rows of a micro-kernel tile
+	kc = 256 // depth of a k block: a B panel fits in L1/L2
+	mc = 72  // rows of A per task (multiple of mr)
+	nc = 256 // columns of C per task (rounded to a multiple of nr)
 
-	// Multiplications-additions minimales par worker (~0,2 ms en AVX2).
+	// Minimum multiply-adds per worker (~0.2 ms on AVX2).
 	macsPerWorker = 8 << 20
 )
 
-// MatMul calcule C = op(A)·op(B), ou C += op(A)·op(B) si accumulate.
+// MatMul computes C = op(A)·op(B), or C += op(A)·op(B) if accumulate.
 //
-// op(A) est m×k : A est stockée m×k, ou k×m si transA.
-// op(B) est k×n : B est stockée k×n, ou n×k si transB.
-// C est m×n.
+// op(A) is m×k: A is stored m×k, or k×m if transA.
+// op(B) is k×n: B is stored k×n, or n×k if transB.
+// C is m×n.
 func MatMul(c, a, b []float32, m, k, n int, transA, transB, accumulate bool) {
 	if m == 0 || n == 0 {
 		return
@@ -60,8 +60,8 @@ func MatMul(c, a, b []float32, m, k, n int, transA, transB, accumulate bool) {
 	g.run(Workers())
 }
 
-// MatMulSerial est MatMul sans parallélisme interne, pour les appels faits
-// depuis des tâches déjà parallèles (une tête d'attention par goroutine).
+// MatMulSerial is MatMul without internal parallelism, for calls made from
+// tasks that are already parallel (one attention head per goroutine).
 func MatMulSerial(c, a, b []float32, m, k, n int, transA, transB, accumulate bool) {
 	if m == 0 || n == 0 {
 		return
@@ -91,12 +91,12 @@ type gemm struct {
 	transA, transB bool
 	accumulate     bool
 	nr             int
-	ncr            int // nc arrondi à un multiple de nr
+	ncr            int // nc rounded to a multiple of nr
 
-	// bloc de k courant
+	// current k block
 	pc, kb int
 	bpack  []float32
-	// pre, s'il est défini, fournit B déjà empaquetée.
+	// pre, if set, provides B already packed.
 	pre *PackedB
 
 	tasksM, tasksN int
@@ -106,16 +106,16 @@ type gemm struct {
 func (g *gemm) run(limit int) {
 	g.ncr = (nc + g.nr - 1) / g.nr * g.nr
 	g.tasksM = (g.m + mc - 1) / mc
-	// Autant de workers que le calcul en justifie : lancer et synchroniser
-	// une goroutine coûte plus que quelques millions de multiplications.
-	// Une phrase seule (28 tokens) tourne ainsi deux fois plus vite sur un
-	// cœur que répartie sur quatorze.
+	// As many workers as the computation justifies: launching and
+	// synchronizing a goroutine costs more than a few million
+	// multiplications. A single sentence (28 tokens) thus runs twice as
+	// fast on one core as spread over fourteen.
 	active := min(limit, max(1, g.m*g.n*g.k/macsPerWorker))
-	// Peu de lignes : on découpe plus finement les colonnes pour occuper
-	// les workers retenus.
+	// Few rows: split the columns more finely to keep the chosen workers
+	// busy.
 	if g.tasksM < active && active > 1 {
-		// Quatre tâches par worker : sur un processeur hybride, les cœurs
-		// lents (E, LP-E) n'en retiennent qu'une petite part.
+		// Four tasks per worker: on a hybrid processor, the slow cores
+		// (E, LP-E) only pick up a small share.
 		want := (4*active + g.tasksM - 1) / g.tasksM
 		cols := (g.n + want - 1) / want
 		g.ncr = max(g.nr, (cols+g.nr-1)/g.nr*g.nr)
@@ -156,7 +156,7 @@ func (g *gemm) worker(wg *sync.WaitGroup) {
 	g.work()
 }
 
-// work traite des tâches (bloc de lignes × bloc de colonnes) jusqu'à épuisement.
+// work processes tasks (row block × column block) until exhausted.
 func (g *gemm) work() {
 	apack := getBuf(mc * g.kb)
 	tile := getBuf(mr * g.nr)
@@ -177,7 +177,7 @@ func (g *gemm) work() {
 	}
 }
 
-// compute enchaîne les micro-noyaux sur le bloc [i0,i1)×[j0,j1).
+// compute chains the micro-kernels over the block [i0,i1)×[j0,j1).
 func (g *gemm) compute(apack, tile []float32, i0, i1, j0, j1 int) {
 	nr, kb := g.nr, g.kb
 	store := g.pc == 0 && !g.accumulate
@@ -203,16 +203,16 @@ func (g *gemm) compute(apack, tile []float32, i0, i1, j0, j1 int) {
 	}
 }
 
-// packA recopie les lignes [i0,i1) × colonnes [pc,pc+kb) de op(A) en
-// panneaux de mr lignes : panneau p, profondeur q → apack[p·mr·kb + q·mr + r].
-// Les lignes au-delà de m sont complétées par des zéros.
+// packA copies rows [i0,i1) × columns [pc,pc+kb) of op(A) into panels of
+// mr rows: panel p, depth q -> apack[p·mr·kb + q·mr + r].
+// Rows beyond m are padded with zeros.
 func (g *gemm) packA(apack []float32, i0, i1 int) {
 	kb, pc := g.kb, g.pc
 	for i := i0; i < i1; i += mr {
 		dst := apack[((i-i0)/mr)*mr*kb : ((i-i0)/mr+1)*mr*kb]
 		rows := min(mr, i1-i)
 		if g.transA {
-			// A stockée k×m : op(A)[i][q] = A[q][i]
+			// A stored k×m: op(A)[i][q] = A[q][i]
 			for q := 0; q < kb; q++ {
 				src := g.a[(pc+q)*g.m+i : (pc+q)*g.m+i+rows]
 				d := dst[q*mr : q*mr+mr]
@@ -236,15 +236,15 @@ func (g *gemm) packA(apack []float32, i0, i1 int) {
 	}
 }
 
-// packB recopie les lignes [pc,pc+kb) de op(B), toutes colonnes, en panneaux
-// de nr colonnes : panneau p, profondeur q → bpack[p·nr·kb + q·nr + c].
+// packB copies rows [pc,pc+kb) of op(B), all columns, into panels of nr
+// columns: panel p, depth q -> bpack[p·nr·kb + q·nr + c].
 func (g *gemm) packB() {
 	nr, kb, pc := g.nr, g.kb, g.pc
 	for j := 0; j < g.n; j += nr {
 		dst := g.bpack[(j/nr)*nr*kb : (j/nr+1)*nr*kb]
 		cols := min(nr, g.n-j)
 		if g.transB {
-			// B stockée n×k : op(B)[q][j] = B[j][q]
+			// B stored n×k: op(B)[q][j] = B[j][q]
 			for c := 0; c < nr; c++ {
 				if c >= cols {
 					for q := 0; q < kb; q++ {
@@ -268,16 +268,16 @@ func (g *gemm) packB() {
 	}
 }
 
-// PackedB est un opérande B empaqueté une fois pour toutes. Les poids d'un
-// modèle ne changent pas entre deux requêtes : les empaqueter à chaque
-// produit coûtait près d'un cinquième du temps d'inférence.
+// PackedB is a B operand packed once and for all. A model's weights don't
+// change between requests: packing them on every product used to cost
+// nearly a fifth of inference time.
 type PackedB struct {
 	k, n, nr int
-	blocks   [][]float32 // un bloc par tranche de kc lignes de op(B)
+	blocks   [][]float32 // one block per kc-row slice of op(B)
 }
 
-// PackB empaquette op(B), k×n : B est stockée k×n, ou n×k si transB. Le
-// résultat ne dépend plus de b, qui peut changer ensuite.
+// PackB packs op(B), k×n: B is stored k×n, or n×k if transB. The result no
+// longer depends on b, which can change afterwards.
 func PackB(b []float32, k, n int, transB bool) *PackedB {
 	if len(b) < k*n {
 		panic("linalg: PackB: slice too short")
@@ -294,7 +294,7 @@ func PackB(b []float32, k, n int, transB bool) *PackedB {
 	return p
 }
 
-// Unpack réécrit B, sous la forme donnée à PackB, à partir du paquet.
+// Unpack rewrites B, in the layout given to PackB, from the packed form.
 func (p *PackedB) Unpack(b []float32, transB bool) {
 	k, n, nr := p.k, p.n, p.nr
 	if len(b) < k*n {
@@ -318,7 +318,7 @@ func (p *PackedB) Unpack(b []float32, transB bool) {
 	}
 }
 
-// Size est le nombre de float32 occupés.
+// Size is the number of float32 elements used.
 func (p *PackedB) Size() int {
 	n := 0
 	for _, b := range p.blocks {
@@ -327,13 +327,13 @@ func (p *PackedB) Size() int {
 	return n
 }
 
-// MatMulPacked est MatMul avec un B empaqueté par PackB : C = A·op(B), A
-// étant m×k.
+// MatMulPacked is MatMul with a B packed by PackB: C = A·op(B), A being
+// m×k.
 func MatMulPacked(c, a []float32, b *PackedB, m int, accumulate bool) {
 	MatMulPackedN(c, a, b, m, accumulate, Workers())
 }
 
-// MatMulPackedN est MatMulPacked avec au plus limit workers.
+// MatMulPackedN is MatMulPacked with at most limit workers.
 func MatMulPackedN(c, a []float32, b *PackedB, m int, accumulate bool, limit int) {
 	k, n := b.k, b.n
 	if m == 0 || n == 0 || k == 0 {
@@ -346,7 +346,7 @@ func MatMulPackedN(c, a []float32, b *PackedB, m int, accumulate bool, limit int
 		panic("linalg: MatMulPacked: slice too short")
 	}
 	if b.nr != nr() {
-		panic("linalg: MatMulPacked: B empaquetée pour un autre micro-noyau")
+		panic("linalg: MatMulPacked: B packed for a different micro-kernel")
 	}
 	g := &gemm{
 		c: c, a: a,

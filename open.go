@@ -8,28 +8,28 @@ import (
 	"github.com/bornholm/indecis/dataset"
 )
 
-// Choix parmi des options données à l'inférence.
+// Choice among options given at inference time.
 //
-// Une question Choice a des options fixes : ce sont des sorties de sa tête,
-// apprises à l'entraînement. Pour qu'une liste de catégories puisse changer
-// d'un appel à l'autre, le modèle doit lire l'option au lieu de la
-// connaître : un modèle en paires répond à une question Noul (« le texte
-// relève-t-il de cette option ? ») pour chaque paire (option, texte), et
-// ChooseAmong compare les réponses. CandidatePairs produit les exemples
-// d'entraînement correspondants.
+// A Choice question has fixed options: they are outputs of its head,
+// learned during training. For a list of categories to be able to change
+// from one call to the next, the model must read the option instead of
+// knowing it: a paired model answers a Noul question ("does the text fall
+// under this option?") for each (option, text) pair, and ChooseAmong
+// compares the answers. CandidatePairs produces the corresponding training
+// examples.
 
-// Candidate est une option décrite en langue naturelle. Examples sont des
-// textes qui relèvent de l'option : ChooseNearest s'en sert pour situer
-// l'option (quelques exemples valent souvent mieux qu'une longue
-// description) ; ChooseAmong les ignore.
+// Candidate is an option described in natural language. Examples are texts
+// that fall under the option: ChooseNearest uses them to locate the option
+// (a few examples are often worth more than a long description);
+// ChooseAmong ignores them.
 type Candidate struct {
 	Name        string   `json:"name"`
 	Description string   `json:"description,omitempty"`
 	Examples    []string `json:"examples,omitempty"`
 }
 
-// CandidateContext met une option sous la forme que le modèle lit en
-// contexte, à l'entraînement comme à l'inférence.
+// CandidateContext puts an option in the form the model reads as context,
+// both in training and inference.
 func CandidateContext(c Candidate) string {
 	if c.Description == "" {
 		return c.Name
@@ -37,9 +37,9 @@ func CandidateContext(c Candidate) string {
 	return c.Name + "\n" + c.Description
 }
 
-// CandidatePairs transforme un texte dont l'option juste est correct en
-// exemples pour la question Noul question : un positif, et un négatif par
-// autre option.
+// CandidatePairs turns a text whose correct option is correct into
+// examples for the Noul question named question: one positive, and one
+// negative per other option.
 func CandidatePairs(question, text string, correct Candidate, others []Candidate) []dataset.Example {
 	out := []dataset.Example{{Context: CandidateContext(correct), Text: text, Labels: map[string]any{question: true}}}
 	for _, o := range others {
@@ -48,16 +48,16 @@ func CandidatePairs(question, text string, correct Candidate, others []Candidate
 	return out
 }
 
-// ChooseAmong choisit, pour chaque texte, l'option qui lui convient le mieux
-// parmi candidates, par la question Noul question d'un modèle en paires.
+// ChooseAmong picks, for each text, the option that suits it best among
+// candidates, using the paired model's Noul question named question.
 //
-// Answer.Probs est la distribution sur les options (softmax des logits,
-// température de la question comprise) et Answer.Choice la plus probable.
-// Answer.P est la probabilité que cette meilleure option convienne
-// vraiment : une valeur basse signale un texte qu'aucune option ne décrit.
+// Answer.Probs is the distribution over the options (softmax of the
+// logits, including the question's temperature) and Answer.Choice the most
+// probable one. Answer.P is the probability that this best option really
+// suits the text: a low value signals a text that no option describes.
 func (m *Model) ChooseAmong(ctx context.Context, question string, candidates []Candidate, texts ...string) ([]Answer, error) {
 	if !m.paired {
-		return nil, fmt.Errorf("indecis: ChooseAmong exige un modèle en paires (WithPairs)")
+		return nil, fmt.Errorf("indecis: ChooseAmong requires a paired model (WithPairs)")
 	}
 	qi := -1
 	for i, q := range m.schema {
@@ -66,16 +66,16 @@ func (m *Model) ChooseAmong(ctx context.Context, question string, candidates []C
 		}
 	}
 	if qi < 0 {
-		return nil, fmt.Errorf("indecis: pas de question noul %q", question)
+		return nil, fmt.Errorf("indecis: no noul question %q", question)
 	}
 	if len(candidates) == 0 {
-		return nil, fmt.Errorf("indecis: aucune option")
+		return nil, fmt.Errorf("indecis: no options")
 	}
 	seen := map[string]bool{}
 	inputs := make([]Input, 0, len(texts)*len(candidates))
 	for _, c := range candidates {
 		if c.Name == "" || seen[c.Name] {
-			return nil, fmt.Errorf("indecis: option %q vide ou en double", c.Name)
+			return nil, fmt.Errorf("indecis: option %q empty or duplicate", c.Name)
 		}
 		seen[c.Name] = true
 	}
@@ -115,18 +115,19 @@ func (m *Model) ChooseAmong(ctx context.Context, question string, candidates []C
 	return out, nil
 }
 
-// Embed retourne le plongement de chaque texte : moyenne des états de
-// l'encodeur, normalisée (norme 1). Le produit scalaire de deux plongements
-// est leur similarité cosinus. Chaque texte est encodé seul, même par un
-// modèle en paires : sur le backbone non affiné, c'est l'embedding de phrase
-// du modèle d'origine.
+// Embed returns the embedding of each text: the mean of the encoder's
+// states, normalized (norm 1). The dot product of two embeddings is their
+// cosine similarity. Each text is encoded alone, even by a paired model: on
+// the non-fine-tuned backbone, it is the original model's sentence
+// embedding.
 func (m *Model) Embed(ctx context.Context, texts ...string) ([][]float32, error) {
 	return m.embed(ctx, texts, true)
 }
 
-// embed calcule les plongements ; cache dit si le cache (WithEmbedCache)
-// les garde. Les options d'une liste reviennent d'un appel à l'autre, les
-// textes jugés presque jamais : ChooseIn ne cache pas ces derniers.
+// embed computes the embeddings; cache says whether the cache
+// (WithEmbedCache) keeps them. A list's options recur from one call to the
+// next, the texts being judged almost never: ChooseIn does not cache the
+// latter.
 func (m *Model) embed(ctx context.Context, texts []string, cache bool) ([][]float32, error) {
 	out := make([][]float32, len(texts))
 	var todo []int

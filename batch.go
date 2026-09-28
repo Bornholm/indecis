@@ -2,7 +2,8 @@ package indecis
 
 import "context"
 
-// batcher regroupe les calculs de requêtes simultanées (voir WithBatching).
+// batcher groups the computations of simultaneous requests (see
+// WithBatching).
 type batcher struct {
 	m       *Model
 	maxRows int
@@ -12,7 +13,7 @@ type batcher struct {
 type batchReq struct {
 	seqs [][]int32
 	rows int
-	done chan batchResult // tampon de 1 : le worker n'attend jamais
+	done chan batchResult // buffer of 1: the worker never waits
 }
 
 type batchResult struct {
@@ -46,8 +47,8 @@ func (b *batcher) encode(ctx context.Context, seqs [][]int32) ([]float32, error)
 	}
 }
 
-// work prend la première requête en attente puis, sans attendre, celles
-// déjà en file tant que le lot reste sous maxRows positions.
+// work takes the first pending request then, without waiting, those
+// already queued as long as the batch stays under maxRows positions.
 func (b *batcher) work() {
 	H := b.m.enc.Cfg.Hidden
 	for first := range b.reqs {

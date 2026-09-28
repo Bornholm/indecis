@@ -35,34 +35,34 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage : indecis-teach rewrite|label [options]")
+		fmt.Fprintln(os.Stderr, "usage: indecis-teach rewrite|label [options]")
 		os.Exit(2)
 	}
 	cmd := os.Args[1]
 	fs := flag.NewFlagSet(cmd, flag.ExitOnError)
-	envFile := fs.String("env", ".env", "fichier de configuration GENAI_*")
-	in := fs.String("in", "", "dataset d'entrée (JSONL)")
-	out := fs.String("out", "", "dataset de sortie (JSONL)")
-	cachePath := fs.String("cache", "teacher-cache.jsonl", "cache des réponses")
-	maxCalls := fs.Int("max-calls", 0, "appels réels au plus (0 : illimité)")
-	concurrency := fs.Int("concurrency", 2, "appels simultanés")
-	interval := fs.Duration("interval", 2*time.Second, "intervalle minimal entre deux appels (ménage le quota du fournisseur)")
-	retries := fs.Int("retries", 5, "nouvelles tentatives sur erreur temporaire (429, 5xx)")
-	retryDelay := fs.Duration("retry-delay", 30*time.Second, "première attente avant une nouvelle tentative, doublée ensuite")
-	limit := fs.Int("limit", 0, "ne traiter que les n premiers exemples")
-	instrFile := fs.String("instructions", "", "rewrite : une instruction par ligne, attribuée en tourniquet")
-	variants := fs.Int("variants", 2, "rewrite : variantes par exemple")
-	schemaFile := fs.String("schema", "", "label : schéma JSON (liste de questions) ou indecis.json d'un modèle")
-	teachersFile := fs.String("teachers", "", "label : fichier YAML de teachers en ligne de commande ; active le consensus. rewrite : avec -teacher, réécrit par lots avec ce teacher")
-	teacherID := fs.String("teacher", "", "rewrite -teachers : identifiant du teacher à utiliser")
-	disagreements := fs.String("disagreements", "", "label -teachers : fichier JSONL des désaccords à relire")
-	guidelines := fs.String("guidelines", "", "label : politique d'étiquetage (Markdown) transmise aux teachers")
-	verify := fs.Bool("verify", false, "label : réétiqueter et écarter les exemples dont le teacher contredit l'étiquette noul existante")
-	keepUnverified := fs.Bool("keep-unverified", false, "label -verify : garder, marqués verified=false, les exemples que le teacher n'a pas jugés")
-	cacheOnly := fs.Bool("cache-only", false, "rejouer le cache sans aucun appel au LLM")
+	envFile := fs.String("env", ".env", "GENAI_* configuration file")
+	in := fs.String("in", "", "input dataset (JSONL)")
+	out := fs.String("out", "", "output dataset (JSONL)")
+	cachePath := fs.String("cache", "teacher-cache.jsonl", "response cache")
+	maxCalls := fs.Int("max-calls", 0, "real calls at most (0: unlimited)")
+	concurrency := fs.Int("concurrency", 2, "simultaneous calls")
+	interval := fs.Duration("interval", 2*time.Second, "minimal interval between two calls (respects the provider's quota)")
+	retries := fs.Int("retries", 5, "retries on a temporary error (429, 5xx)")
+	retryDelay := fs.Duration("retry-delay", 30*time.Second, "first wait before a retry, doubled afterwards")
+	limit := fs.Int("limit", 0, "only process the first n examples")
+	instrFile := fs.String("instructions", "", "rewrite: one instruction per line, assigned round-robin")
+	variants := fs.Int("variants", 2, "rewrite: variants per example")
+	schemaFile := fs.String("schema", "", "label: JSON schema (list of questions) or a model's indecis.json")
+	teachersFile := fs.String("teachers", "", "label: YAML file of command-line teachers; enables consensus. rewrite: with -teacher, rewrites in batches with that teacher")
+	teacherID := fs.String("teacher", "", "rewrite -teachers: id of the teacher to use")
+	disagreements := fs.String("disagreements", "", "label -teachers: JSONL file of disagreements to review")
+	guidelines := fs.String("guidelines", "", "label: labeling policy (Markdown) passed to the teachers")
+	verify := fs.Bool("verify", false, "label: relabel and discard examples where the teacher contradicts the existing noul label")
+	keepUnverified := fs.Bool("keep-unverified", false, "label -verify: keep, marked verified=false, examples the teacher did not judge")
+	cacheOnly := fs.Bool("cache-only", false, "replay the cache without any call to the LLM")
 	fs.Parse(os.Args[2:])
 	if *in == "" || *out == "" {
-		log.Fatal("-in et -out sont obligatoires")
+		log.Fatal("-in and -out are required")
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -71,7 +71,7 @@ func main() {
 	var t *teacher.Teacher
 	switch {
 	case *teachersFile != "" && cmd == "rewrite":
-		// Un seul teacher suffit à réécrire : celui que désigne -teacher.
+		// A single teacher is enough to rewrite: the one named by -teacher.
 		cache, err := teacher.OpenCache(*cachePath)
 		if err != nil {
 			log.Fatal(err)
@@ -81,7 +81,7 @@ func main() {
 		}
 	case *teachersFile != "":
 		if cmd != "label" {
-			log.Fatal("-teachers ne s'applique qu'à label et rewrite")
+			log.Fatal("-teachers only applies to label and rewrite")
 		}
 		if err := consensusLabel(ctx, *teachersFile, *in, *out, *disagreements, *schemaFile, *guidelines, *cachePath, *maxCalls, *limit, *cacheOnly); err != nil {
 			log.Fatal(err)
@@ -92,8 +92,8 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		// Débit borné, puis nouvelles tentatives espacées sur 429 : une
-		// limite de quota se contourne en attendant, pas en insistant.
+		// Bounded rate, then spaced-out retries on 429: a quota limit is
+		// worked around by waiting, not by insisting.
 		client := retry.NewClient(ratelimit.NewClient(base, ratelimit.WithChatLimit(*interval, 1)), *retryDelay, *retries)
 		cache, err := teacher.OpenCache(*cachePath)
 		if err != nil {
@@ -118,28 +118,28 @@ func main() {
 	case "label":
 		result, stats, err = label(ctx, t, examples, *schemaFile, *verify, *keepUnverified)
 	default:
-		log.Fatalf("commande %q inconnue", cmd)
+		log.Fatalf("unknown command %q", cmd)
 	}
-	// Le résultat partiel est toujours écrit : les appels déjà payés ne
-	// doivent pas être perdus sur une limite de débit ou une coupure.
+	// The partial result is always written: calls already paid for must
+	// not be lost to a rate limit or an interruption.
 	if werr := dataset.WriteFile(*out, result); werr != nil {
 		log.Fatal(werr)
 	}
-	log.Printf("%s : %d soumis, %d produits, %d depuis le cache, %d refus ou réponses invalides, %d ignorés (hors cache), %d appels réels",
+	log.Printf("%s: %d submitted, %d produced, %d from cache, %d refused or invalid responses, %d skipped (not in cache), %d real calls",
 		cmd, stats.Requested, stats.Done, stats.Cached, stats.Refused, stats.Skipped, t.Calls())
 	if err != nil {
 		if errors.Is(err, teacher.ErrBudget) {
-			log.Printf("budget épuisé : résultat partiel écrit dans %s", *out)
+			log.Printf("budget exhausted: partial result written to %s", *out)
 			return
 		}
-		log.Printf("interrompu : %v", err)
-		log.Printf("résultat partiel écrit dans %s ; relancer reprend depuis le cache", *out)
+		log.Printf("interrupted: %v", err)
+		log.Printf("partial result written to %s; rerunning resumes from the cache", *out)
 		os.Exit(1)
 	}
 }
 
-// rewrite attribue les instructions en tourniquet : chaque exemple reçoit
-// une seule instruction, la dépense reste d'un appel par exemple.
+// rewrite assigns instructions round-robin: each example receives a
+// single instruction, the cost stays one call per example.
 func rewrite(ctx context.Context, t *teacher.Teacher, examples []dataset.Example, instrFile string, variants int) ([]dataset.Example, teacher.Stats, error) {
 	b, err := os.ReadFile(instrFile)
 	if err != nil {
@@ -167,7 +167,7 @@ func rewrite(ctx context.Context, t *teacher.Teacher, examples []dataset.Example
 		total.Done += st.Done
 		total.Cached += st.Cached
 		total.Refused += st.Refused
-		log.Printf("« %s » : %d → %d variantes (%d refus)", instr, st.Requested, st.Done, st.Refused)
+		log.Printf("%q: %d -> %d variants (%d refused)", instr, st.Requested, st.Done, st.Refused)
 		if err != nil {
 			return all, total, err
 		}
@@ -183,9 +183,9 @@ func label(ctx context.Context, t *teacher.Teacher, examples []dataset.Example, 
 	if !verify {
 		return t.Label(ctx, schema, examples)
 	}
-	// Vérification : le teacher étiquette sans voir les étiquettes
-	// existantes ; on garde l'exemple, avec ses étiquettes d'origine
-	// complétées, seulement s'il est d'accord sur chaque question noul.
+	// Verification: the teacher labels without seeing the existing labels;
+	// the example is kept, with its original labels filled in, only if it
+	// agrees on every noul question.
 	stripped := make([]dataset.Example, len(examples))
 	for i, e := range examples {
 		stripped[i] = e
@@ -233,7 +233,7 @@ func label(ctx context.Context, t *teacher.Teacher, examples []dataset.Example, 
 			}
 		}
 	}
-	log.Printf("vérification : %d gardés dont %d non vérifiés, %d écartés (désaccord du teacher)", len(kept), unverified, disagree)
+	log.Printf("verification: %d kept, of which %d unverified, %d discarded (teacher disagreement)", len(kept), unverified, disagree)
 	stats.Done = len(kept)
 	return kept, stats, err
 }
@@ -262,7 +262,7 @@ func indexOf(meta map[string]string) int {
 	return i
 }
 
-// readSchema accepte une liste de questions ou le indecis.json d'un modèle.
+// readSchema accepts a list of questions or a model's indecis.json.
 func readSchema(path string) (indecis.Schema, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -281,8 +281,8 @@ func readSchema(path string) (indecis.Schema, error) {
 	return meta.Schema, meta.Schema.Validate()
 }
 
-// modelName lit le nom du modèle dans le fichier d'environnement, pour la
-// clé de cache ; il n'est pas secret, contrairement à la clé d'API.
+// modelName reads the model name from the environment file, for the
+// cache key; it is not secret, unlike the API key.
 func modelName(envFile string) string {
 	b, err := os.ReadFile(envFile)
 	if err != nil {

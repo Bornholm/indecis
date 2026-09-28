@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-// Vérifie les gradients des trois têtes par différences finies, en float64
-// côté perte.
+// Checks the gradients of the three heads by finite differences, in
+// float64 on the loss side.
 func TestHeadGradients(t *testing.T) {
 	const H = 6
 	r := rand.New(rand.NewSource(1))
@@ -52,17 +52,17 @@ func TestHeadGradients(t *testing.T) {
 			}
 			for i := range h.w {
 				if d := fd(h.w, i); math.Abs(d-float64(h.gw[i])) > 1e-3+1e-2*math.Abs(d) {
-					t.Errorf("w[%d] : %v vs %v", i, h.gw[i], d)
+					t.Errorf("w[%d]: %v vs %v", i, h.gw[i], d)
 				}
 			}
 			for i := range h.b {
 				if d := fd(h.b, i); math.Abs(d-float64(h.gb[i])) > 1e-3+1e-2*math.Abs(d) {
-					t.Errorf("b[%d] : %v vs %v", i, h.gb[i], d)
+					t.Errorf("b[%d]: %v vs %v", i, h.gb[i], d)
 				}
 			}
 			for i := range x {
 				if d := fd(x, i); math.Abs(d-float64(dx[i])) > 1e-3+1e-2*math.Abs(d) {
-					t.Errorf("x[%d] : %v vs %v", i, dx[i], d)
+					t.Errorf("x[%d]: %v vs %v", i, dx[i], d)
 				}
 			}
 		})
@@ -71,12 +71,12 @@ func TestHeadGradients(t *testing.T) {
 
 func TestScoreAnswerIsADistribution(t *testing.T) {
 	h := newHead(NewScore("s", "", "bas", "moyen", "haut"), 4, rand.New(rand.NewSource(1)))
-	// Seuils inversés exprès : la réponse doit rester une distribution.
+	// Thresholds reversed on purpose: the answer must remain a distribution.
 	a := h.answer([]float64{-1, 2}, 1)
 	var sum float64
 	for _, p := range a.Probs {
 		if p < 0 {
-			t.Fatalf("probabilité négative : %v", a.Probs)
+			t.Fatalf("negative probability: %v", a.Probs)
 		}
 		sum += p
 	}
@@ -88,19 +88,19 @@ func TestScoreAnswerIsADistribution(t *testing.T) {
 func TestTargets(t *testing.T) {
 	c := NewChoice("c", "", "a", "b")
 	if tg, ok, err := c.target(map[string]any{"a": 1.0, "b": 3.0}); !ok || err != nil || tg[1] != 0.75 {
-		t.Fatalf("distribution : %v %v %v", tg, ok, err)
+		t.Fatalf("distribution: %v %v %v", tg, ok, err)
 	}
 	if _, _, err := c.target("z"); err == nil {
-		t.Fatal("option inconnue acceptée")
+		t.Fatal("unknown option accepted")
 	}
 	s := NewScore("s", "", "bas", "haut")
 	if tg, ok, _ := s.target("haut"); !ok || tg[0] != 1 {
-		t.Fatalf("niveau par nom : %v", tg)
+		t.Fatalf("level by name: %v", tg)
 	}
 	if _, _, err := s.target(1.5); err == nil {
-		t.Fatal("niveau fractionnaire accepté")
+		t.Fatal("fractional level accepted")
 	}
 	if _, ok, err := NewNoul("n", "").target(nil); ok || err != nil {
-		t.Fatal("étiquette absente mal traitée")
+		t.Fatal("missing label mishandled")
 	}
 }

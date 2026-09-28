@@ -8,20 +8,20 @@ import (
 	"unicode"
 )
 
-// TransformFunc réécrit un texte rendu. Le générateur fournit son rng : les
-// transformations aléatoires restent reproductibles.
+// TransformFunc rewrites a rendered text. The generator provides its
+// rng: random transformations stay reproducible.
 type TransformFunc func(s string, rng *rand.Rand) string
 
-// Transforms recense les transformations de {{x:nom}}…{{/x}}. Elles
-// reproduisent les déguisements courants d'un texte qu'on veut faire passer
-// sous les filtres ; un appelant peut en ajouter avant de parser ses gabarits.
+// Transforms lists the transformations for {{x:name}}...{{/x}}. They
+// reproduce the common disguises of a text meant to slip past filters;
+// a caller can add more before parsing its templates.
 var Transforms = map[string]TransformFunc{
 	"upper":  func(s string, _ *rand.Rand) string { return strings.ToUpper(s) },
 	"lower":  func(s string, _ *rand.Rand) string { return strings.ToLower(s) },
 	"base64": func(s string, _ *rand.Rand) string { return base64.StdEncoding.EncodeToString([]byte(s)) },
 	"hex":    func(s string, _ *rand.Rand) string { return hex.EncodeToString([]byte(s)) },
 	"rot13":  func(s string, _ *rand.Rand) string { return strings.Map(rot13, s) },
-	// spaced sépare chaque lettre d'une espace : « i g n o r e ».
+	// spaced separates each letter with a space: "i g n o r e".
 	"spaced": func(s string, _ *rand.Rand) string {
 		var b strings.Builder
 		for i, r := range s {
@@ -32,7 +32,7 @@ var Transforms = map[string]TransformFunc{
 		}
 		return b.String()
 	},
-	// leet remplace une partie des lettres par des chiffres.
+	// leet replaces some letters with digits.
 	"leet": func(s string, rng *rand.Rand) string {
 		table := map[rune]rune{'a': '4', 'e': '3', 'i': '1', 'o': '0', 's': '5', 't': '7', 'A': '4', 'E': '3', 'I': '1', 'O': '0', 'S': '5', 'T': '7'}
 		return strings.Map(func(r rune) rune {
@@ -42,7 +42,7 @@ var Transforms = map[string]TransformFunc{
 			return r
 		}, s)
 	},
-	// homoglyph remplace des lettres latines par leurs sosies cyrilliques.
+	// homoglyph replaces Latin letters with their Cyrillic lookalikes.
 	"homoglyph": func(s string, rng *rand.Rand) string {
 		table := map[rune]rune{'a': 'а', 'c': 'с', 'e': 'е', 'o': 'о', 'p': 'р', 'x': 'х', 'y': 'у', 'A': 'А', 'C': 'С', 'E': 'Е', 'O': 'О', 'P': 'Р'}
 		return strings.Map(func(r rune) rune {
@@ -52,7 +52,7 @@ var Transforms = map[string]TransformFunc{
 			return r
 		}, s)
 	},
-	// zwsp glisse des espaces de largeur nulle à l'intérieur des mots.
+	// zwsp slips zero-width spaces inside words.
 	"zwsp": func(s string, rng *rand.Rand) string {
 		var b strings.Builder
 		for _, r := range s {
@@ -63,8 +63,8 @@ var Transforms = map[string]TransformFunc{
 		}
 		return b.String()
 	},
-	// noise reproduit l'espacement intra-mot du texte extrait des PDF
-	// (repris de go-anon) : « V is ite te c hniq ue ».
+	// noise reproduces the intra-word spacing of text extracted from
+	// PDFs (taken from go-anon): "s ite v is it".
 	"noise": func(s string, rng *rand.Rand) string {
 		var b strings.Builder
 		for _, r := range s {

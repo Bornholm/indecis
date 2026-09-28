@@ -28,12 +28,12 @@ var commands = []struct {
 	name, summary string
 	run           func(args []string) error
 }{
-	{"synth", "génère des exemples étiquetés à partir de gabarits", runSynth},
-	{"train", "entraîne un modèle (schéma fixe, ou plongements avec -open)", runTrain},
-	{"eval", "mesure un modèle sur des exemples étiquetés", runEval},
-	{"predict", "répond aux questions pour des textes (JSONL ou lignes)", runPredict},
-	{"compact", "réduit la place d'un modèle (vocabulaire, table int8)", runCompact},
-	{"split", "met de côté une part d'un jeu d'exemples (par famille ou par exemple)", runSplit},
+	{"synth", "generates labeled examples from templates", runSynth},
+	{"train", "trains a model (fixed schema, or embeddings with -open)", runTrain},
+	{"eval", "measures a model on labeled examples", runEval},
+	{"predict", "answers questions for texts (JSONL or lines)", runPredict},
+	{"compact", "reduces the size of a model (vocabulary, int8 table)", runCompact},
+	{"split", "sets aside a part of a set of examples (by family or by example)", runSplit},
 }
 
 func main() {
@@ -50,21 +50,21 @@ func main() {
 			return
 		}
 	}
-	fmt.Fprintf(os.Stderr, "commande %q inconnue\n\n", os.Args[1])
+	fmt.Fprintf(os.Stderr, "unknown command %q\n\n", os.Args[1])
 	usage()
 	os.Exit(2)
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage : indecis <commande> [options]\n\nCommandes :")
+	fmt.Fprintln(os.Stderr, "usage: indecis <command> [options]\n\nCommands:")
 	for _, c := range commands {
 		fmt.Fprintf(os.Stderr, "  %-8s %s\n", c.name, c.summary)
 	}
-	fmt.Fprintln(os.Stderr, "\nindecis <commande> -h détaille les options d'une commande.")
+	fmt.Fprintln(os.Stderr, "\nindecis <command> -h details the options of a command.")
 }
 
-// readExamples lit des fichiers JSONL désignés par des motifs séparés par
-// des virgules (~ est développé).
+// readExamples reads JSONL files designated by comma-separated
+// patterns (~ is expanded).
 func readExamples(globs string) ([]dataset.Example, error) {
 	var out []dataset.Example
 	for _, g := range strings.Split(globs, ",") {
@@ -81,7 +81,7 @@ func readExamples(globs string) ([]dataset.Example, error) {
 			return nil, err
 		}
 		if len(files) == 0 {
-			return nil, fmt.Errorf("aucun fichier pour %q", g)
+			return nil, fmt.Errorf("no file for %q", g)
 		}
 		slices.Sort(files)
 		for _, f := range files {
@@ -98,7 +98,7 @@ func readExamples(globs string) ([]dataset.Example, error) {
 func required(fs *flag.FlagSet, names ...string) error {
 	for _, n := range names {
 		if fs.Lookup(n).Value.String() == "" {
-			return fmt.Errorf("-%s est obligatoire (indecis %s -h)", n, fs.Name())
+			return fmt.Errorf("-%s is required (indecis %s -h)", n, fs.Name())
 		}
 	}
 	return nil

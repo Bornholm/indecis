@@ -5,12 +5,12 @@ import (
 	"sync"
 )
 
-// lru est un cache des plongements par texte, borné aux n derniers textes
-// distincts. Un cache nil ne garde rien.
+// lru is a cache of embeddings by text, bounded to the n most recent
+// distinct texts. A nil cache keeps nothing.
 type lru struct {
 	mu    sync.Mutex
 	n     int
-	order *list.List // du plus récent au plus ancien
+	order *list.List // most recent to oldest
 	items map[string]*list.Element
 }
 

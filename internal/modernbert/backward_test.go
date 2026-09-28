@@ -9,9 +9,9 @@ import (
 	"github.com/bornholm/indecis/internal/safetensors"
 )
 
-// tinyModel construit un modèle aléatoire assez petit pour une vérification
-// exhaustive par différences finies, mais qui exerce tout : fenêtre locale
-// plus courte que les séquences, couche 0 sans attn_norm, plusieurs têtes.
+// tinyModel builds a random model small enough for exhaustive finite
+// difference checking, yet exercising everything: local window shorter
+// than the sequences, layer 0 without attn_norm, multiple heads.
 func tinyModel(t *testing.T, seed int64) *Model {
 	t.Helper()
 	cfg := Config{
@@ -62,7 +62,7 @@ func tinyModel(t *testing.T, seed int64) *Model {
 	return m
 }
 
-// lossOf calcule L = Σ_b pooled_b · w_b en float64.
+// lossOf computes L = Σ_b pooled_b · w_b in float64.
 func lossOf(t *testing.T, m *Model, b Batch, w []float32) float64 {
 	t.Helper()
 	s, err := m.Forward(b)
@@ -80,8 +80,8 @@ func lossOf(t *testing.T, m *Model, b Batch, w []float32) float64 {
 func TestBackwardFiniteDifferences(t *testing.T) {
 	m := tinyModel(t, 1)
 	H := m.Cfg.Hidden
-	// Séquences plus longues que la demi-fenêtre (2) et de longueurs
-	// différentes : fenêtre locale et padding sont exercés.
+	// Sequences longer than the half-window (2) and of different lengths:
+	// local window and padding are both exercised.
 	b := NewBatch([][]int32{{1, 5, 9, 3, 3, 12, 7}, {2, 16, 4, 0, 8}}, 0)
 	r := rand.New(rand.NewSource(2))
 	w := make([]float32, b.B()*H)
@@ -96,8 +96,8 @@ func TestBackwardFiniteDifferences(t *testing.T) {
 	}
 	m.Backward(s, MeanPoolBackward(w, b, H), g)
 
-	// Différence centrée extrapolée (Richardson) : erreur en O(ε⁴), sans
-	// descendre à un pas où le bruit float32 dominerait.
+	// Extrapolated central difference (Richardson): error in O(ε⁴), without
+	// going down to a step where float32 noise would dominate.
 	const eps = 1e-2
 	central := func(param []float32, i int, h float32) float64 {
 		orig := param[i]
@@ -111,7 +111,7 @@ func TestBackwardFiniteDifferences(t *testing.T) {
 	check := func(name string, i int, param []float32, analytic float64) {
 		fd := (4*central(param, i, eps/2) - central(param, i, eps)) / 3
 		if math.Abs(analytic-fd) > 2e-3+2e-2*math.Abs(fd) {
-			t.Errorf("%s[%d] : analytique %.6g, différences finies %.6g", name, i, analytic, fd)
+			t.Errorf("%s[%d]: analytic %.6g, finite difference %.6g", name, i, analytic, fd)
 		}
 	}
 
@@ -136,11 +136,11 @@ func TestBackwardFiniteDifferences(t *testing.T) {
 			checked++
 		}
 	}
-	t.Logf("%d paramètres vérifiés", checked)
+	t.Logf("%d parameters checked", checked)
 }
 
-// Deux backward successifs sans ZeroGrad doivent doubler les gradients :
-// l'accumulation sur plusieurs lots en dépend.
+// Two successive backward calls without ZeroGrad must double the
+// gradients: accumulation across multiple batches relies on it.
 func TestBackwardAccumulates(t *testing.T) {
 	m := tinyModel(t, 3)
 	H := m.Cfg.Hidden
@@ -157,16 +157,16 @@ func TestBackwardAccumulates(t *testing.T) {
 	m.Backward(s, MeanPoolBackward(w, b, H), g)
 	for i, v := range m.Layers[2].Wi.G {
 		if math.Abs(float64(v-2*once[i])) > 1e-5 {
-			t.Fatalf("Wi.G[%d] = %v, attendu %v", i, v, 2*once[i])
+			t.Fatalf("Wi.G[%d] = %v, expected %v", i, v, 2*once[i])
 		}
 	}
 	for i, v := range g.Emb.Rows[3] {
 		if math.Abs(float64(v-2*emb[i])) > 1e-5 {
-			t.Fatalf("emb[3][%d] = %v, attendu %v", i, v, 2*emb[i])
+			t.Fatalf("emb[3][%d] = %v, expected %v", i, v, 2*emb[i])
 		}
 	}
 	m.ZeroGrad(g)
 	if len(g.Emb.Rows) != 0 || m.Layers[2].Wi.G[0] != 0 {
-		t.Fatal("ZeroGrad incomplet")
+		t.Fatal("ZeroGrad incomplete")
 	}
 }

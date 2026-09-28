@@ -13,31 +13,31 @@ import (
 	"github.com/bornholm/indecis/internal/optim"
 )
 
-// TrainOptions règle le fine-tuning.
+// TrainOptions configures the fine-tuning.
 type TrainOptions struct {
 	Epochs    int
 	BatchSize int
-	// LR est le taux d'apprentissage de l'encodeur, HeadLR celui des têtes,
-	// plus élevé : elles partent de zéro.
+	// LR is the encoder's learning rate, HeadLR that of the heads, higher:
+	// they start from scratch.
 	LR, HeadLR  float64
 	WeightDecay float64
-	// Warmup est la fraction des pas passée à monter le taux linéairement,
-	// qui décroît ensuite linéairement jusqu'à zéro.
+	// Warmup is the fraction of steps spent raising the rate linearly,
+	// which then decreases linearly to zero.
 	Warmup float64
-	// ClipNorm borne la norme globale des gradients (0 : pas d'écrêtage).
+	// ClipNorm bounds the global gradient norm (0: no clipping).
 	ClipNorm float64
-	// Dropout s'applique au vecteur poolé, avant les têtes.
+	// Dropout applies to the pooled vector, before the heads.
 	Dropout float64
 	Seed    int64
-	// Symmetric (FitEmbeddings) optimise aussi le sens option → textes :
-	// chaque option d'un lot doit préférer ses textes aux autres, comme la
-	// perte InfoNCE bidirectionnelle de CLM.
+	// Symmetric (FitEmbeddings) also optimizes the option -> texts
+	// direction: each option in a batch must prefer its texts over the
+	// others, like CLM's bidirectional InfoNCE loss.
 	Symmetric bool
-	// Progress, s'il est fourni, est appelé après chaque pas.
+	// Progress, if provided, is called after each step.
 	Progress func(Progress)
 }
 
-// DefaultTrainOptions sont des réglages de départ pour un petit encodeur.
+// DefaultTrainOptions are starting settings for a small encoder.
 func DefaultTrainOptions() TrainOptions {
 	return TrainOptions{
 		Epochs: 3, BatchSize: 16, LR: 1e-4, HeadLR: 1e-3, WeightDecay: 0.01,
@@ -45,17 +45,17 @@ func DefaultTrainOptions() TrainOptions {
 	}
 }
 
-// Progress décrit l'avancement de l'entraînement.
+// Progress describes the training's progress.
 type Progress struct {
 	Epoch, Step, Steps int
-	Loss               float64 // perte moyenne du pas
+	Loss               float64 // mean loss of the step
 	LR                 float64
-	Tokens             int // tokens traités depuis le début
+	Tokens             int // tokens processed since the start
 	Elapsed            time.Duration
 }
 
-// encoded est un exemple tokenisé et ses cibles, une par question (nil si
-// l'étiquette manque).
+// encoded is a tokenized example and its targets, one per question (nil if
+// the label is missing).
 type encoded struct {
 	ids     []int32
 	targets [][]float64
@@ -66,19 +66,19 @@ func (m *Model) encode(examples []dataset.Example) ([]encoded, error) {
 	for i, e := range examples {
 		ids, err := m.tokenize(e.Context, e.Text)
 		if err != nil {
-			return nil, fmt.Errorf("indecis: exemple %d : %w", i, err)
+			return nil, fmt.Errorf("indecis: example %d: %w", i, err)
 		}
 		out[i].ids = ids
 		out[i].targets = make([][]float64, len(m.schema))
 		for name := range e.Labels {
 			if m.schema.Index(name) < 0 {
-				return nil, fmt.Errorf("indecis: exemple %d : question %q absente du schéma", i, name)
+				return nil, fmt.Errorf("indecis: example %d: question %q absent from schema", i, name)
 			}
 		}
 		for qi, q := range m.schema {
 			t, ok, err := q.target(e.Labels[q.Name])
 			if err != nil {
-				return nil, fmt.Errorf("indecis: exemple %d : %w", i, err)
+				return nil, fmt.Errorf("indecis: example %d: %w", i, err)
 			}
 			if ok {
 				out[i].targets[qi] = t
@@ -88,27 +88,27 @@ func (m *Model) encode(examples []dataset.Example) ([]encoded, error) {
 	return out, nil
 }
 
-// Fit fine-tune tout le modèle, encodeur compris, sur les exemples.
+// Fit fine-tunes the whole model, encoder included, on the examples.
 func (m *Model) Fit(ctx context.Context, examples []dataset.Example, opts TrainOptions) error {
 	if opts.BatchSize <= 0 || opts.Epochs <= 0 {
-		return fmt.Errorf("indecis: BatchSize et Epochs doivent être positifs")
+		return fmt.Errorf("indecis: BatchSize and Epochs must be positive")
 	}
 	data, err := m.encode(examples)
 	if err != nil {
 		return err
 	}
 	if len(data) == 0 {
-		return fmt.Errorf("indecis: aucun exemple")
+		return fmt.Errorf("indecis: no examples")
 	}
 	m.recordPriors(data)
 
 	H := m.enc.Cfg.Hidden
-	// L'entraînement modifie les poids : la table d'embeddings doit être en
-	// float32, et les poids empaquetés pour l'inférence sont refaits après
-	// chaque pas (Progress peut évaluer le modèle en cours de route).
+	// Training modifies the weights: the embedding table must be in
+	// float32, and the weights packed for inference are rebuilt after
+	// each step (Progress can evaluate the model along the way).
 	m.enc.Materialize()
 	defer m.enc.Invalidate()
-	m.embedCache.clear() // les plongements vont changer
+	m.embedCache.clear() // the embeddings are about to change
 	grads := m.enc.EnableGrad()
 	var encDense []optim.Dense
 	for _, p := range m.enc.Params() {
@@ -168,9 +168,9 @@ func (m *Model) Fit(ctx context.Context, examples []dataset.Example, opts TrainO
 	return nil
 }
 
-// batches mélange les exemples puis regroupe des longueurs voisines : on
-// trie des fenêtres de 50 lots par longueur avant de les découper. Le
-// padding diminue sans que les lots deviennent prévisibles.
+// batches shuffles the examples then groups neighboring lengths: windows of
+// 50 batches are sorted by length before being split. Padding decreases
+// without batches becoming predictable.
 func batches(data []encoded, size int, rng *rand.Rand) [][]*encoded {
 	idx := rng.Perm(len(data))
 	window := size * 50
@@ -190,9 +190,9 @@ func batches(data []encoded, size int, rng *rand.Rand) [][]*encoded {
 	return out
 }
 
-// trainStep calcule la perte d'un lot et accumule tous les gradients. La
-// perte de chaque question est moyennée sur les exemples qui l'étiquettent,
-// puis les questions sont sommées.
+// trainStep computes the loss of a batch and accumulates all the
+// gradients. Each question's loss is averaged over the examples that
+// label it, then the questions are summed.
 func (m *Model) trainStep(batch []*encoded, grads *modernbert.Grads, dropout float64, rng *rand.Rand) (float64, int) {
 	H := m.enc.Cfg.Hidden
 	seqs := make([][]int32, len(batch))
@@ -204,11 +204,11 @@ func (m *Model) trainStep(batch []*encoded, grads *modernbert.Grads, dropout flo
 	b := modernbert.NewBatch(seqs, m.enc.Cfg.PadID)
 	s, err := m.enc.Forward(b)
 	if err != nil {
-		panic(err) // les ids viennent du tokenizer du modèle
+		panic(err) // the ids come from the model's tokenizer
 	}
 	pooled := modernbert.MeanPool(s.Hidden, b, H)
 
-	// Dropout inversé sur le vecteur poolé.
+	// Inverted dropout on the pooled vector.
 	mask := make([]float32, len(pooled))
 	keep := float32(1 / (1 - dropout))
 	for i := range mask {
@@ -277,13 +277,13 @@ func (m *Model) recordPriors(data []encoded) {
 	}
 }
 
-// Calibrate ajuste la température de chaque question sur des exemples
-// distincts de ceux de l'entraînement, en minimisant la log-vraisemblance
-// négative. Retourne les températures retenues.
+// Calibrate tunes each question's temperature on examples distinct from
+// those used in training, by minimizing the negative log-likelihood.
+// Returns the temperatures used.
 //
-// Une question dont les exemples de calibration sont tous parfaitement
-// classés garde sa température : ces exemples ne disent rien de l'erreur du
-// modèle, seulement qu'ils sont trop faciles.
+// A question whose calibration examples are all perfectly classified keeps
+// its temperature: these examples say nothing about the model's error,
+// only that they are too easy.
 func (m *Model) Calibrate(ctx context.Context, examples []dataset.Example) (map[string]float64, error) {
 	data, err := m.encode(examples)
 	if err != nil {
@@ -318,9 +318,9 @@ func (m *Model) Calibrate(ctx context.Context, examples []dataset.Example) (map[
 			return sum / float64(len(zs))
 		}
 		if separable(h, zs, ts) {
-			// Données parfaitement séparées : la vraisemblance décroît
-			// jusqu'à T → 0, et « calibrer » rendrait le modèle
-			// arbitrairement sûr de lui. La température reste inchangée.
+			// Perfectly separated data: the likelihood keeps decreasing
+			// down to T -> 0, and "calibrating" would make the model
+			// arbitrarily sure of itself. The temperature stays unchanged.
 			continue
 		}
 		m.temps[qi] = goldenLog(nll, 0.05, 20)
@@ -328,9 +328,9 @@ func (m *Model) Calibrate(ctx context.Context, examples []dataset.Example) (map[
 	return m.Temperatures(), nil
 }
 
-// separable indique si toutes les réponses sont justes et que la perte ne
-// fait que baisser en rendant le modèle plus tranchant : aucun exemple ne
-// tire la température vers le haut.
+// separable indicates whether all answers are correct and the loss only
+// decreases by making the model sharper: no example pulls the temperature
+// up.
 func separable(h *head, zs, ts [][]float64) bool {
 	for i, z := range zs {
 		a := h.answer(z, 1)
@@ -353,7 +353,7 @@ func separable(h *head, zs, ts [][]float64) bool {
 	return true
 }
 
-// goldenLog minimise f sur [lo, hi] par section dorée sur log(T).
+// goldenLog minimizes f over [lo, hi] by golden section search on log(T).
 func goldenLog(f func(float64) float64, lo, hi float64) float64 {
 	a, b := math.Log(lo), math.Log(hi)
 	const phi = 0.6180339887498949

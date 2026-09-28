@@ -8,13 +8,13 @@ import (
 
 var maxWorkers atomic.Int64
 
-// SetMaxWorkers borne le nombre de goroutines de calcul (0 : GOMAXPROCS).
-// Pour une requête isolée sur un processeur de portable, un seul cœur
-// rapide bat souvent tous les cœurs réunis : la fréquence baisse quand
-// plusieurs cœurs calculent, et les cœurs économes sont plus lents.
+// SetMaxWorkers caps the number of compute goroutines (0: GOMAXPROCS).
+// For an isolated request on a laptop processor, a single fast core often
+// beats all cores combined: frequency drops when several cores compute,
+// and efficiency cores are slower.
 func SetMaxWorkers(n int) { maxWorkers.Store(int64(max(n, 0))) }
 
-// Workers retourne le nombre de goroutines de calcul autorisées.
+// Workers returns the number of compute goroutines allowed.
 func Workers() int {
 	if n := int(maxWorkers.Load()); n > 0 {
 		return min(n, runtime.GOMAXPROCS(0))
@@ -22,13 +22,13 @@ func Workers() int {
 	return runtime.GOMAXPROCS(0)
 }
 
-// Parallel découpe [0, n) en tranches d'au moins grain éléments et appelle
-// fn sur chacune, en parallèle. Les tranches sont disjointes.
+// Parallel splits [0, n) into slices of at least grain elements and calls
+// fn on each, in parallel. The slices are disjoint.
 func Parallel(n, grain int, fn func(lo, hi int)) {
 	ParallelN(Workers(), n, grain, fn)
 }
 
-// ParallelN est Parallel avec au plus limit goroutines (bornées aussi par
+// ParallelN is Parallel with at most limit goroutines (also bounded by
 // Workers).
 func ParallelN(limit, n, grain int, fn func(lo, hi int)) {
 	if n <= 0 {
@@ -57,13 +57,13 @@ func parallelChunk(wg *sync.WaitGroup, fn func(lo, hi int), lo, hi int) {
 	fn(lo, hi)
 }
 
-// Partials réduit [0, n) par tranches fixes de grain éléments : fn accumule
-// chaque tranche dans son propre vecteur de width float64, puis les vecteurs
-// sont sommés dans l'ordre des tranches.
+// Partials reduces [0, n) in fixed slices of grain elements: fn accumulates
+// each slice into its own vector of width float64, then the vectors are
+// summed in slice order.
 //
-// Le découpage ne dépend pas du nombre de cœurs : le résultat est le même,
-// au bit près, sur toutes les machines. C'est ce qui rend un entraînement
-// reproductible.
+// The splitting does not depend on the number of cores: the result is the
+// same, bit for bit, on every machine. This is what makes training
+// reproducible.
 func Partials(n, grain, width int, fn func(lo, hi int, acc []float64)) []float64 {
 	out := make([]float64, width)
 	if n <= 0 {

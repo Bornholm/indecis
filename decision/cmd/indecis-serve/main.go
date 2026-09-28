@@ -41,20 +41,20 @@ func (m *modelFlags) Set(v string) error { *m = append(*m, v); return nil }
 
 func main() {
 	var models modelFlags
-	flag.Var(&models, "model", "modèle à servir : répertoire, ou nom=répertoire (répétable ; le premier est le modèle par défaut)")
-	addr := flag.String("addr", "127.0.0.1:8080", "adresse d'écoute")
-	apiKey := flag.String("api-key", os.Getenv("INDECIS_API_KEY"), "clé exigée en Authorization: Bearer (vide : aucune)")
-	threads := flag.Int("threads", 0, "cœurs au plus par requête (0 : tous) ; un texte de moins de 1024 tokens en utilise toujours un seul")
-	int8 := flag.Bool("int8", true, "couches en int8 si le processeur a AVX-VNNI")
-	cache := flag.Int("embed-cache", 4096, "plongements d'options gardés en cache (questions ouvertes)")
-	maxConcurrent := flag.Int("max-concurrent", runtime.GOMAXPROCS(0), "décisions en cours au plus, les autres attendent (0 : pas de borne)")
-	batching := flag.Bool("batching", false, "regrouper les calculs des requêtes simultanées (gain de quelques % sur des requêtes courtes, plus de mémoire ; monter aussi -max-concurrent)")
-	maxLen := flag.Int("max-len", 0, "tokens lus au plus par texte (0 : la valeur du modèle, 256 en général) ; coût quadratique au-delà de 1024")
-	memLimit := flag.Int("memory-limit", 0, "limite souple de mémoire du tas, en Mio (0 : aucune) ; le ramasse-miettes travaille davantage à l'approche")
+	flag.Var(&models, "model", "model to serve: directory, or name=directory (repeatable; the first is the default model)")
+	addr := flag.String("addr", "127.0.0.1:8080", "listen address")
+	apiKey := flag.String("api-key", os.Getenv("INDECIS_API_KEY"), "key required as Authorization: Bearer (empty: none)")
+	threads := flag.Int("threads", 0, "cores at most per request (0: all); a text under 1024 tokens always uses a single one")
+	int8 := flag.Bool("int8", true, "layers in int8 if the processor has AVX-VNNI")
+	cache := flag.Int("embed-cache", 4096, "option embeddings kept in cache (open questions)")
+	maxConcurrent := flag.Int("max-concurrent", runtime.GOMAXPROCS(0), "decisions in flight at most, others wait (0: no bound)")
+	batching := flag.Bool("batching", false, "group the computation of simultaneous requests (a few % gain on short requests, more memory; also raise -max-concurrent)")
+	maxLen := flag.Int("max-len", 0, "tokens read at most per text (0: the model's value, 256 generally); quadratic cost beyond 1024")
+	memLimit := flag.Int("memory-limit", 0, "soft heap memory limit, in MiB (0: none); the garbage collector works harder as it approaches")
 	flag.Parse()
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	if len(models) == 0 {
-		fmt.Fprintln(os.Stderr, "au moins un -model est requis")
+		fmt.Fprintln(os.Stderr, "at least one -model is required")
 		os.Exit(2)
 	}
 	opts := []indecis.Option{indecis.WithThreads(*threads), indecis.WithEmbedCache(*cache)}
@@ -78,15 +78,15 @@ func main() {
 		}
 		m, err := indecis.Open(dir, opts...)
 		if err != nil {
-			log.Error("chargement", "model", dir, "error", err)
+			log.Error("loading", "model", dir, "error", err)
 			os.Exit(1)
 		}
-		// Un appel à vide prépare les poids pour l'inférence (en int8, les
-		// matrices float32 sont alors libérées), puis la mémoire temporaire
-		// du chargement est rendue au système avant le modèle suivant : le
-		// pic de démarrage ne dépend plus du nombre de modèles.
+		// An empty call prepares the weights for inference (in int8, the
+		// float32 matrices are then freed), then the temporary memory used
+		// for loading is returned to the system before the next model: the
+		// startup peak no longer depends on the number of models.
 		if _, err := m.Embed(context.Background(), "warm-up"); err != nil {
-			log.Error("préchauffage", "model", dir, "error", err)
+			log.Error("warm-up", "model", dir, "error", err)
 			os.Exit(1)
 		}
 		debug.FreeOSMemory()
@@ -94,16 +94,16 @@ func main() {
 		if s.Default == "" {
 			s.Default = name
 		}
-		log.Info("modèle chargé", "name", name, "dir", dir, "paired", m.Paired(), "mémoire", memory())
+		log.Info("model loaded", "name", name, "dir", dir, "paired", m.Paired(), "memory", memory())
 	}
-	log.Info("à l'écoute", "addr", *addr, "endpoints", "POST /api/alpha/decisions, POST /v1/systemone, GET /api/alpha/models")
+	log.Info("listening", "addr", *addr, "endpoints", "POST /api/alpha/decisions, POST /v1/systemone, GET /api/alpha/models")
 	if err := http.ListenAndServe(*addr, s.Handler()); err != nil {
-		log.Error("serveur", "error", err)
+		log.Error("server", "error", err)
 		os.Exit(1)
 	}
 }
 
-// memory résume la mémoire du processus (Linux), pour les journaux.
+// memory summarizes the process memory (Linux), for the logs.
 func memory() string {
 	b, err := os.ReadFile("/proc/self/status")
 	if err != nil {

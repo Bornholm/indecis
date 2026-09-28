@@ -1,5 +1,5 @@
-# Oracle de parité : génère les fixtures de test à partir de l'implémentation
-# de référence. La bibliothèque Go n'en dépend pas.
+# Parity oracle: generates test fixtures from the reference implementation.
+# The Go library does not depend on it.
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch
 transformers>=5.12

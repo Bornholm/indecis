@@ -6,20 +6,20 @@ import (
 	"sort"
 )
 
-// Prune retire d'un tokenizer.json les tokens que keep écarte et retourne
-// le nouveau fichier, ainsi que la correspondance des ids : newID[ancien]
-// est le nouvel id, ou -1 pour un token retiré.
+// Prune removes from a tokenizer.json the tokens that keep rejects and
+// returns the new file, along with the id mapping: newID[old] is the new
+// id, or -1 for a removed token.
 //
-// Restent toujours : les tokens ajoutés (spéciaux compris), les octets de
-// repli (<0x00>…<0xFF>) et le token inconnu, sans lesquels certains textes
-// ne se découperaient plus. Une fusion n'est gardée que si ses deux parties
-// et son résultat le sont. Les ids restants sont renumérotés dans leur
-// ordre d'origine, sans trou.
+// Always kept: added tokens (including special ones), the fallback byte
+// tokens (<0x00>...<0xFF>) and the unknown token, without which some texts
+// would no longer split. A merge is kept only if both its parts and its
+// result are. Remaining ids are renumbered in their original order, with
+// no gaps.
 //
-// Un texte dont le découpage (Trace) ne passe que par des tokens gardés se
-// découpe exactement comme avant, aux ids près. Un autre se découpe en
-// morceaux plus petits, au pire en octets : le résultat reste valide, mais
-// le modèle ne l'a pas vu à l'entraînement.
+// A text whose split (Trace) only goes through kept tokens splits exactly
+// as before, aside from the ids. Another one splits into smaller pieces,
+// down to bytes in the worst case: the result stays valid, but the model
+// did not see it during training.
 func Prune(src []byte, keep func(id int32) bool) ([]byte, []int32, error) {
 	var root map[string]json.RawMessage
 	if err := json.Unmarshal(src, &root); err != nil {
@@ -113,7 +113,7 @@ func Prune(src []byte, keep func(id int32) bool) ([]byte, []int32, error) {
 		return nil, nil, err
 	}
 	if _, err := Parse(out); err != nil {
-		return nil, nil, fmt.Errorf("tokenizer: le fichier élagué est invalide : %w", err)
+		return nil, nil, fmt.Errorf("tokenizer: pruned file is invalid: %w", err)
 	}
 	return out, newID, nil
 }
@@ -122,8 +122,8 @@ func isByteToken(tok string) bool {
 	return len(tok) == 6 && tok[:3] == "<0x" && tok[5] == '>'
 }
 
-// marshalVocab écrit le vocabulaire dans l'ordre des ids, comme les
-// fichiers de Hugging Face.
+// marshalVocab writes the vocabulary in id order, like Hugging Face
+// files do.
 func marshalVocab(v map[string]int32) (json.RawMessage, error) {
 	type entry struct {
 		tok string
@@ -171,7 +171,7 @@ func decodeMergesJSON(raw json.RawMessage) ([][2]string, error) {
 	return pairs, nil
 }
 
-// remapPostProcessor renumérote les ids des tokens spéciaux du gabarit.
+// remapPostProcessor renumbers the special token ids in the template.
 func remapPostProcessor(raw json.RawMessage, newID []int32) (json.RawMessage, error) {
 	var pp map[string]any
 	if err := json.Unmarshal(raw, &pp); err != nil {

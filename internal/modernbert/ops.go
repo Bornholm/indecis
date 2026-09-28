@@ -6,16 +6,16 @@ import (
 	"github.com/bornholm/indecis/internal/linalg"
 )
 
-// Granularité des boucles parallèles, en lignes.
+// Granularity of the parallel loops, in rows.
 const rowGrain = 32
 
-// lnCache garde ce que le backward d'une LayerNorm relit.
+// lnCache holds what a LayerNorm's backward pass reads back.
 type lnCache struct {
 	xhat []float32 // (x - μ) / σ, [N, H]
 	rstd []float32 // 1 / σ, [N]
 }
 
-// layerNorm calcule out = (x - μ)/σ · γ, sans biais, ligne par ligne.
+// layerNorm computes out = (x - μ)/σ · γ, without bias, row by row.
 func layerNorm(out, x, gamma []float32, n, h int, eps float64, c *lnCache) {
 	c.xhat = grow(c.xhat, n*h)
 	c.rstd = grow(c.rstd, n)
@@ -45,11 +45,11 @@ func layerNorm(out, x, gamma []float32, n, h int, eps float64, c *lnCache) {
 	})
 }
 
-// layerNormBackward ajoute dx à dxOut (accumulation : dxOut reçoit aussi le
-// gradient de la connexion résiduelle) et dγ à dgamma.
+// layerNormBackward adds dx to dxOut (accumulation: dxOut also receives
+// the gradient of the residual connection) and dγ to dgamma.
 func layerNormBackward(dxOut, dy, gamma, dgamma []float32, n, h int, c *lnCache) {
-	// dγ se réduit sur les lignes : une somme partielle par tranche, puis
-	// une réduction séquentielle, pour rester déterministe.
+	// dγ is reduced over rows: a partial sum per chunk, then a sequential
+	// reduction, to stay deterministic.
 	parts := linalg.Partials(n, rowGrain, h, func(lo, hi int, acc []float64) {
 		for r := lo; r < hi; r++ {
 			dyr := dy[r*h : (r+1)*h]
@@ -91,7 +91,7 @@ func gelu(x float32) float32 {
 	return float32(0.5 * float64(x) * (1 + math.Erf(float64(x)*invSqrt2)))
 }
 
-// geluGrad est la dérivée de la GELU exacte : Φ(x) + x·φ(x).
+// geluGrad is the derivative of the exact GELU: Φ(x) + x·φ(x).
 func geluGrad(x float32) float32 {
 	xf := float64(x)
 	cdf := 0.5 * (1 + math.Erf(xf*invSqrt2))
@@ -99,7 +99,7 @@ func geluGrad(x float32) float32 {
 	return float32(cdf + xf*pdf)
 }
 
-// gluForward calcule g = gelu(a) ⊙ b, où z = [a | b] par ligne.
+// gluForward computes g = gelu(a) ⊙ b, where z = [a | b] per row.
 func gluForward(g, z []float32, n, inter int) {
 	linalg.Parallel(n, rowGrain, func(lo, hi int) {
 		for r := lo; r < hi; r++ {
@@ -113,7 +113,7 @@ func gluForward(g, z []float32, n, inter int) {
 	})
 }
 
-// gluBackward calcule dz = [dg ⊙ b ⊙ gelu'(a) | dg ⊙ gelu(a)].
+// gluBackward computes dz = [dg ⊙ b ⊙ gelu'(a) | dg ⊙ gelu(a)].
 func gluBackward(dz, dg, z []float32, n, inter int) {
 	linalg.Parallel(n, rowGrain, func(lo, hi int) {
 		for r := lo; r < hi; r++ {
@@ -130,8 +130,8 @@ func gluBackward(dz, dg, z []float32, n, inter int) {
 	})
 }
 
-// applyRope tourne x (D valeurs d'une tête à la position pos), à la façon de
-// rotate_half : x' = x·cos + [-x₂, x₁]·sin.
+// applyRope rotates x (D values of a head at position pos), rotate_half
+// style: x' = x·cos + [-x₂, x₁]·sin.
 func applyRope(x []float32, cos, sin []float32) {
 	half := len(x) / 2
 	for i := 0; i < half; i++ {
@@ -141,8 +141,9 @@ func applyRope(x []float32, cos, sin []float32) {
 	}
 }
 
-// applyRopeBackward applique la rotation transposée : c'est une rotation
-// d'angle opposé, donc le gradient repasse par l'inverse exact du forward.
+// applyRopeBackward applies the transposed rotation: it is a rotation of
+// opposite angle, so the gradient goes back through the exact inverse of
+// the forward pass.
 func applyRopeBackward(d []float32, cos, sin []float32) {
 	half := len(d) / 2
 	for i := 0; i < half; i++ {
@@ -152,8 +153,8 @@ func applyRopeBackward(d []float32, cos, sin []float32) {
 	}
 }
 
-// softmaxRows normalise chaque ligne de s (n lignes de m valeurs) en place.
-// Les masques sont appliqués avant : -Inf.
+// softmaxRows normalizes each row of s (n rows of m values) in place.
+// Masking is applied beforehand: -Inf.
 func softmaxRows(s []float32, n, m int) {
 	for r := 0; r < n; r++ {
 		row := s[r*m : (r+1)*m]
@@ -162,7 +163,7 @@ func softmaxRows(s []float32, n, m int) {
 			mx = max(mx, v)
 		}
 		if math.IsInf(float64(mx), -1) {
-			clear(row) // ligne entièrement masquée
+			clear(row) // fully masked row
 			continue
 		}
 		var sum float64

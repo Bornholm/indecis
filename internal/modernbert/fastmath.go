@@ -2,16 +2,15 @@ package modernbert
 
 import "math"
 
-// Approximations float32 de erf et exp pour l'inférence. Les versions de la
-// bibliothèque standard calculent en float64 à la précision maximale ; en
-// inférence, erf et exp coûtaient un cinquième du temps. L'entraînement
-// garde les fonctions exactes : c'est lui que les tests de parité avec
-// PyTorch contrôlent.
+// float32 approximations of erf and exp for inference. The standard
+// library versions compute in float64 at maximum precision; in inference,
+// erf and exp cost a fifth of the time. Training keeps the exact
+// functions: that is what the parity tests against PyTorch check.
 
-// erf32 est l'approximation rationnelle d'Eigen et de XLA : erreur absolue
-// inférieure à 2e-7 sur tout l'axe réel, soit la précision du float32.
+// erf32 is the rational approximation from Eigen and XLA: absolute error
+// below 2e-7 over the whole real axis, i.e. float32 precision.
 func erf32(x float32) float32 {
-	x = min(max(x, -4), 4) // au-delà, erf vaut ±1 en float32
+	x = min(max(x, -4), 4) // beyond this, erf is ±1 in float32
 	x2 := x * x
 	p := x2*-2.72614225801306e-10 + 2.77068142495902e-08
 	p = x2*p + -2.10102402082508e-06
@@ -31,11 +30,11 @@ func geluFast(x float32) float32 {
 	return 0.5 * x * (1 + erf32(x*invSqrt2))
 }
 
-// exp32 est l'expf de Cephes : réduction à r ∈ [-ln2/2, ln2/2], polynôme de
-// degré 6, puis multiplication par 2ⁿ. Erreur relative de l'ordre de 2e-7.
+// exp32 is Cephes's expf: reduction to r ∈ [-ln2/2, ln2/2], degree-6
+// polynomial, then multiplication by 2ⁿ. Relative error around 2e-7.
 func exp32(x float32) float32 {
 	if x < -87.3 {
-		return 0 // sous-dépassement, et -Inf des positions masquées
+		return 0 // underflow, and -Inf of masked positions
 	}
 	x = min(x, 88.7)
 	n := float32(math.Floor(float64(x*1.44269504088896341 + 0.5)))

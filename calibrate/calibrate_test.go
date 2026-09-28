@@ -29,9 +29,9 @@ func TestPriorShift_SamePriorIsNeutral(t *testing.T) {
 	}
 }
 
-// Un modèle équilibré à 0,5 sur un trafic où 1 % des requêtes sont des
-// attaques ne dit rien de plus que le prior : la probabilité corrigée doit
-// retomber sur 1 %.
+// A balanced model at 0.5 on traffic where 1% of requests are attacks
+// says nothing more than the prior: the corrected probability must fall
+// back to 1%.
 func TestPriorShift_UninformativeOutputFallsBackToDeployPrior(t *testing.T) {
 	p := Sigmoid(Logit(0.5) + PriorShift(0.5, 0.01))
 	if !near(p, 0.01) {
@@ -39,12 +39,12 @@ func TestPriorShift_UninformativeOutputFallsBackToDeployPrior(t *testing.T) {
 	}
 }
 
-// Cas chiffré : 0,9 à l'entraînement équilibré, prior de production 2 %.
-// Odds 9 × (0,02/0,98) = 0,1837, soit p = 0,1552.
+// Worked case: 0.9 at balanced training, production prior 2%.
+// Odds 9 x (0.02/0.98) = 0.1837, i.e. p = 0.1552.
 func TestPriorShift_KnownValue(t *testing.T) {
 	p := Sigmoid(Logit(0.9) + PriorShift(0.5, 0.02))
 	if math.Abs(p-0.15517) > 1e-4 {
-		t.Fatalf("got %v, want ≈0.1552", p)
+		t.Fatalf("got %v, want ~0.1552", p)
 	}
 }
 
@@ -55,8 +55,8 @@ func TestEvidence_NeutralRiskAddsNothing(t *testing.T) {
 	}
 }
 
-// Le silence d'un détecteur peu sensible pèse moins que son déclenchement,
-// à distance égale en log-odds du point neutre.
+// The silence of a low-sensitivity detector weighs less than its
+// firing, at equal log-odds distance from the neutral point.
 func TestEvidence_IsAsymmetric(t *testing.T) {
 	e := Evidence{Neutral: 0.5, HitWeight: 1, MissWeight: 0.2, Floor: 0.01, Ceil: 0.99}
 	hit, miss := e.LLR(0.9), e.LLR(0.1)
@@ -80,6 +80,6 @@ func TestEvidence_IsMonotonic(t *testing.T) {
 func TestEvidence_ZeroRiskIsBounded(t *testing.T) {
 	e := DefaultEvidence()
 	if l := e.LLR(0); l < -1 {
-		t.Fatalf("LLR(0) = %v: un silence ne doit pas écraser le modèle", l)
+		t.Fatalf("LLR(0) = %v: silence must not overwhelm the model", l)
 	}
 }

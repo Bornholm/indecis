@@ -25,8 +25,8 @@ func testServer(t *testing.T, key string) *httptest.Server {
 	return srv
 }
 
-// Les clients TypeSafe et OpenRouter de genai parlent au serveur sans rien
-// changer d'autre que l'URL : questions apprises et ouvertes mêlées.
+// genai's TypeSafe and OpenRouter clients talk to the server without
+// changing anything but the URL: learned and open questions mixed.
 func TestServerWithGenaiClients(t *testing.T) {
 	srv := testServer(t, "secret")
 	q := llm.Questions{
@@ -43,19 +43,19 @@ func TestServerWithGenaiClients(t *testing.T) {
 	for name, c := range clients {
 		res, err := c.Decision(context.Background(), "Your invoice is overdue", q)
 		if err != nil {
-			t.Fatalf("%s : %v", name, err)
+			t.Fatalf("%s: %v", name, err)
 		}
 		if res.Model() != "toy" || len(res.Answers()) != 4 {
-			t.Fatalf("%s : modèle %q, %d réponses", name, res.Model(), len(res.Answers()))
+			t.Fatalf("%s: model %q, %d answers", name, res.Model(), len(res.Answers()))
 		}
 		if team, err := llm.AnswerOf[llm.ChoiceAnswer](res, "team"); err != nil || team.Choice() != "accounting" {
-			t.Fatalf("%s : choix %v, %v", name, team, err)
+			t.Fatalf("%s: choice %v, %v", name, team, err)
 		}
 		if sc, err := llm.AnswerOf[llm.ScoreAnswer](res, "urgency"); err != nil || len(sc.Legend()) != 3 {
-			t.Fatalf("%s : score %v, %v", name, sc, err)
+			t.Fatalf("%s: score %v, %v", name, sc, err)
 		}
 		if res.Usage().InputTokens() == 0 {
-			t.Errorf("%s : usage vide", name)
+			t.Errorf("%s: empty usage", name)
 		}
 	}
 }
@@ -89,7 +89,7 @@ func TestServerErrors(t *testing.T) {
 		status          int
 		want            string
 	}{
-		{"/api/alpha/decision", "", ok, 401, "clé"},
+		{"/api/alpha/decision", "", ok, 401, "key"},
 		{"/api/alpha/decision", "secret", `{`, 400, "JSON"},
 		{"/api/alpha/decision", "secret", `{"state":"x","questions":{"a":{"type":"maybe","instructions":"?"}}}`, 422, "maybe"},
 		{"/api/alpha/decision", "secret", `{"questions":{"a":{"type":"noul","instructions":"?"}}}`, 422, "state"},
@@ -100,7 +100,7 @@ func TestServerErrors(t *testing.T) {
 	for _, c := range cases {
 		status, msg := post(c.path, c.key, c.body)
 		if status != c.status || !strings.Contains(msg, c.want) {
-			t.Errorf("%s : %d %q, attendu %d %q", c.body, status, msg, c.status, c.want)
+			t.Errorf("%s: %d %q, expected %d %q", c.body, status, msg, c.status, c.want)
 		}
 	}
 }

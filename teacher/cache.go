@@ -12,9 +12,9 @@ import (
 	"sync"
 )
 
-// Cache garde les réponses du LLM dans un fichier JSONL, en ajout seul. Une
-// génération relancée ne repaie que les appels nouveaux, et le fichier
-// documente exactement ce que le teacher a répondu.
+// Cache keeps LLM responses in an append-only JSONL file. A rerun of a
+// generation only pays for new calls, and the file documents exactly what
+// the teacher answered.
 type Cache struct {
 	mu   sync.Mutex
 	path string
@@ -26,7 +26,7 @@ type cacheLine struct {
 	Response string `json:"response"`
 }
 
-// OpenCache ouvre, ou crée au premier Put, un cache.
+// OpenCache opens, or creates on the first Put, a cache.
 func OpenCache(path string) (*Cache, error) {
 	c := &Cache{path: path, data: map[string]string{}}
 	f, err := os.Open(path)
@@ -42,14 +42,14 @@ func OpenCache(path string) (*Cache, error) {
 	for n := 1; sc.Scan(); n++ {
 		var l cacheLine
 		if err := json.Unmarshal(sc.Bytes(), &l); err != nil {
-			return nil, fmt.Errorf("teacher : cache %s, ligne %d : %w", path, n, err)
+			return nil, fmt.Errorf("teacher: cache %s, line %d: %w", path, n, err)
 		}
 		c.data[l.Key] = l.Response
 	}
 	return c, sc.Err()
 }
 
-// Get retourne une réponse mémorisée.
+// Get returns a memoized response.
 func (c *Cache) Get(key string) (string, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -57,7 +57,7 @@ func (c *Cache) Get(key string) (string, bool) {
 	return v, ok
 }
 
-// Put mémorise une réponse et l'ajoute au fichier.
+// Put memoizes a response and appends it to the file.
 func (c *Cache) Put(key, response string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -84,7 +84,7 @@ func (c *Cache) Put(key, response string) error {
 	return f.Close()
 }
 
-// Len retourne le nombre de réponses mémorisées.
+// Len returns the number of memoized responses.
 func (c *Cache) Len() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()

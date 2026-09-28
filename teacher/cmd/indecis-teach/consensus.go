@@ -33,8 +33,8 @@ type teachersConfig struct {
 	} `yaml:"teachers"`
 }
 
-// consensusLabel fait étiqueter les exemples par chaque teacher, en
-// parallèle, puis ne garde que ce sur quoi ils s'accordent.
+// consensusLabel has each example labeled by every teacher, in parallel,
+// then keeps only what they agree on.
 func consensusLabel(ctx context.Context, cfgPath, in, out, disagreementsPath, schemaFile, guidelinesPath, cachePath string, maxCalls, limit int, cacheOnly bool) error {
 	var guidelines string
 	if guidelinesPath != "" {
@@ -50,10 +50,10 @@ func consensusLabel(ctx context.Context, cfgPath, in, out, disagreementsPath, sc
 	}
 	var cfg teachersConfig
 	if err := yaml.Unmarshal(b, &cfg); err != nil {
-		return fmt.Errorf("%s : %w", cfgPath, err)
+		return fmt.Errorf("%s: %w", cfgPath, err)
 	}
 	if len(cfg.Teachers) < 2 {
-		return fmt.Errorf("%s : au moins deux teachers pour un consensus", cfgPath)
+		return fmt.Errorf("%s: at least two teachers for a consensus", cfgPath)
 	}
 	schema, err := readSchema(schemaFile)
 	if err != nil {
@@ -71,8 +71,8 @@ func consensusLabel(ctx context.Context, cfgPath, in, out, disagreementsPath, sc
 		return err
 	}
 
-	// Les teachers ne voient pas les étiquettes existantes ; l'index permet
-	// de rapprocher leurs réponses.
+	// The teachers do not see the existing labels; the index is used to
+	// match their responses back up.
 	stripped := make([]dataset.Example, len(examples))
 	for i, e := range examples {
 		stripped[i] = dataset.Example{Context: e.Context, Text: e.Text, Meta: map[string]string{"index": strconv.Itoa(i)}}
@@ -108,10 +108,10 @@ func consensusLabel(ctx context.Context, cfgPath, in, out, disagreementsPath, sc
 				i, _ := strconv.Atoi(e.Meta["index"])
 				byTeacher[ti][i] = e.Labels
 			}
-			log.Printf("%s : %d soumis, %d étiquetés, %d depuis le cache, %d refus, %d en échec, %d ignorés, %d appels réels, %s",
+			log.Printf("%s: %d submitted, %d labeled, %d from cache, %d refused, %d failed, %d skipped, %d real calls, %s",
 				id, st.Requested, st.Done, st.Cached, st.Refused, st.Failed, st.Skipped, t.Calls(), time.Since(start).Round(time.Second))
 			if err != nil && !errors.Is(err, teacher.ErrBudget) {
-				errs[ti] = fmt.Errorf("%s : %w", id, err)
+				errs[ti] = fmt.Errorf("%s: %w", id, err)
 			}
 		}(ti, tc.ID, t)
 	}
@@ -133,11 +133,11 @@ func consensusLabel(ctx context.Context, cfgPath, in, out, disagreementsPath, sc
 		}
 		f.Close()
 	}
-	log.Printf("consensus : %d exemples gardés, %d désaccords à relire%s", len(kept), len(disputes), map[bool]string{true: " → " + disagreementsPath, false: ""}[disagreementsPath != ""])
+	log.Printf("consensus: %d examples kept, %d disagreements to review%s", len(kept), len(disputes), map[bool]string{true: " -> " + disagreementsPath, false: ""}[disagreementsPath != ""])
 	return errors.Join(errs...)
 }
 
-// harnessTeacher construit le teacher id du fichier de configuration.
+// harnessTeacher builds the teacher named id from the configuration file.
 func harnessTeacher(cfgPath, id string, cache *teacher.Cache, maxCalls int, cacheOnly bool) (*teacher.Teacher, error) {
 	b, err := os.ReadFile(cfgPath)
 	if err != nil {
@@ -145,7 +145,7 @@ func harnessTeacher(cfgPath, id string, cache *teacher.Cache, maxCalls int, cach
 	}
 	var cfg teachersConfig
 	if err := yaml.Unmarshal(b, &cfg); err != nil {
-		return nil, fmt.Errorf("%s : %w", cfgPath, err)
+		return nil, fmt.Errorf("%s: %w", cfgPath, err)
 	}
 	for _, tc := range cfg.Teachers {
 		if tc.ID != id {
@@ -165,5 +165,5 @@ func harnessTeacher(cfgPath, id string, cache *teacher.Cache, maxCalls int, cach
 			MaxChars:    tc.MaxChars,
 		}, nil
 	}
-	return nil, fmt.Errorf("%s : pas de teacher %q", cfgPath, id)
+	return nil, fmt.Errorf("%s: no teacher %q", cfgPath, id)
 }

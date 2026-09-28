@@ -6,24 +6,23 @@ import (
 	"github.com/bornholm/indecis/tokenizer"
 )
 
-// PruneStats décrit un élagage du vocabulaire.
+// PruneStats describes a vocabulary pruning.
 type PruneStats struct {
-	Before, After int // tokens avant et après
+	Before, After int // tokens before and after
 }
 
-// PruneVocabulary réduit le vocabulaire aux tokens que le découpage de
-// corpus utilise, intermédiaires du BPE compris, vus au moins minCount fois
-// (1 : tous ceux qui apparaissent). La table d'embeddings, 93 % des poids
-// des petits modèles, rétrécit d'autant : pour un usage en quelques
-// langues, un vocabulaire multilingue de 256 000 tokens se réduit à
-// quelques dizaines de milliers.
+// PruneVocabulary reduces the vocabulary to the tokens that the corpus
+// tokenization uses, including BPE intermediates, seen at least minCount
+// times (1: all that appear). The embedding table, 93% of a small model's
+// weights, shrinks accordingly: for use in a few languages, a multilingual
+// vocabulary of 256,000 tokens reduces to a few tens of thousands.
 //
-// Un texte du corpus se découpe ensuite exactement comme avant ; un texte
-// qui aurait eu besoin d'un token retiré se découpe en morceaux plus
-// petits, au pire en octets. Le corpus doit donc représenter les textes
-// que le modèle jugera (langues, domaines), et l'effet se mesure sur des
-// textes hors corpus (Evaluate avant et après). Le modèle est modifié en
-// place ; Save écrit le tokenizer réduit.
+// A corpus text then tokenizes exactly as before; a text that would have
+// needed a removed token tokenizes into smaller pieces, at worst into bytes.
+// The corpus must therefore represent the texts the model will judge
+// (languages, domains), and the effect is measured on texts outside the
+// corpus (Evaluate before and after). The model is modified in place; Save
+// writes the reduced tokenizer.
 func (m *Model) PruneVocabulary(corpus []Input, minCount int) (PruneStats, error) {
 	src, err := m.tokenizerSource()
 	if err != nil {
@@ -46,7 +45,7 @@ func (m *Model) PruneVocabulary(corpus []Input, minCount int) (PruneStats, error
 		return PruneStats{}, err
 	}
 	if len(newID) != m.enc.Cfg.Vocab {
-		return PruneStats{}, fmt.Errorf("indecis: le tokenizer (%d ids) ne correspond pas au modèle (%d)", len(newID), m.enc.Cfg.Vocab)
+		return PruneStats{}, fmt.Errorf("indecis: tokenizer (%d ids) does not match model (%d)", len(newID), m.enc.Cfg.Vocab)
 	}
 	st := PruneStats{Before: m.enc.Cfg.Vocab, After: tok.VocabSize()}
 	if err := m.enc.RemapVocabulary(newID, tok.VocabSize()); err != nil {

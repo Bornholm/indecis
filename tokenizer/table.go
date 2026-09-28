@@ -5,23 +5,23 @@ import (
 	"slices"
 )
 
-// Le vocabulaire compte 256 000 chaînes et autant de fusions. En
-// map[string]int32 et map[uint64]merge, il occupait 34 Mo de tas ; les
-// tables ci-dessous en occupent 8.
+// The vocabulary holds 256,000 strings and as many merges. As
+// map[string]int32 and map[uint64]merge, it occupied 34 MB of heap; the
+// tables below occupy 8.
 
 var tableSeed = maphash.MakeSeed()
 
-// strTable associe des chaînes à des ids : les chaînes sont concaténées dans
-// un seul bloc, et une table à adressage ouvert retrouve l'id d'une chaîne.
+// strTable maps strings to ids: the strings are concatenated into a
+// single block, and an open-addressing table finds the id of a string.
 type strTable struct {
 	blob  string
-	off   []uint32 // chaîne de l'id i : blob[off[i]:off[i+1]]
-	slots []int32  // id + 1, 0 si libre
+	off   []uint32 // string of id i: blob[off[i]:off[i+1]]
+	slots []int32  // id + 1, 0 if free
 	mask  uint64
 }
 
-// newStrTable indexe byID (id → chaîne) ; les chaînes vides sont des ids
-// absents, que lookup ne retrouve pas.
+// newStrTable indexes byID (id -> string); empty strings are absent ids,
+// which lookup never finds.
 func newStrTable(byID []string) *strTable {
 	t := &strTable{off: make([]uint32, len(byID)+1)}
 	size := 0
@@ -73,7 +73,7 @@ func (t *strTable) lookup(s string) (int32, bool) {
 	}
 }
 
-// lookupBytes est lookup sans convertir b en chaîne.
+// lookupBytes is lookup without converting b to a string.
 func (t *strTable) lookupBytes(b []byte) (int32, bool) {
 	if len(b) == 0 {
 		return 0, false
@@ -89,8 +89,8 @@ func (t *strTable) lookupBytes(b []byte) (int32, bool) {
 	}
 }
 
-// mergeTable retrouve la fusion d'une paire d'ids par recherche dichotomique
-// dans les paires triées.
+// mergeTable finds the merge of a pair of ids by binary search in the
+// sorted pairs.
 type mergeTable struct {
 	keys []uint64
 	vals []merge
@@ -101,8 +101,8 @@ type mergeEntry struct {
 	m   merge
 }
 
-// newMergeTable garde, pour une paire présente plusieurs fois, la fusion de
-// plus petit rang.
+// newMergeTable keeps, for a pair present several times, the merge with
+// the smallest rank.
 func newMergeTable(entries []mergeEntry) mergeTable {
 	slices.SortStableFunc(entries, func(a, b mergeEntry) int {
 		if a.key != b.key {

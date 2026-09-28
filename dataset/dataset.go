@@ -25,24 +25,24 @@ import (
 	"sort"
 )
 
-// Example est un exemple annoté.
+// Example is an annotated example.
 type Example struct {
-	// Context éclaire le texte sans être jugé : le prompt système d'un
-	// assistant, la question à laquelle répond un passage. Vide sinon. Seuls
-	// les modèles construits avec indecis.WithPairs le lisent.
+	// Context sheds light on the text without being judged: an
+	// assistant's system prompt, the question a passage answers. Empty
+	// otherwise. Only models built with indecis.WithPairs read it.
 	Context string         `json:"context,omitempty"`
 	Text    string         `json:"text"`
 	Labels  map[string]any `json:"labels"`
-	// Family regroupe les exemples issus d'une même source ou d'un même
-	// gabarit. Les découpages par famille gardent une famille entière du même
-	// côté : c'est ce qui distingue la généralisation de la mémorisation.
+	// Family groups examples from the same source or the same template.
+	// Splits by family keep a whole family on the same side: that is
+	// what distinguishes generalization from memorization.
 	Family string `json:"family,omitempty"`
-	// Split est un découpage imposé par la source (train, test…), vide sinon.
+	// Split is a split imposed by the source (train, test, ...), empty otherwise.
 	Split string            `json:"split,omitempty"`
 	Meta  map[string]string `json:"meta,omitempty"`
 }
 
-// ReadJSONL lit des exemples, un par ligne.
+// ReadJSONL reads examples, one per line.
 func ReadJSONL(r io.Reader) ([]Example, error) {
 	var out []Example
 	sc := bufio.NewScanner(r)
@@ -55,14 +55,14 @@ func ReadJSONL(r io.Reader) ([]Example, error) {
 		}
 		var e Example
 		if err := json.Unmarshal(sc.Bytes(), &e); err != nil {
-			return nil, fmt.Errorf("dataset: ligne %d : %w", line, err)
+			return nil, fmt.Errorf("dataset: line %d: %w", line, err)
 		}
 		out = append(out, e)
 	}
 	return out, sc.Err()
 }
 
-// ReadFile lit un fichier JSONL.
+// ReadFile reads a JSONL file.
 func ReadFile(path string) ([]Example, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -72,7 +72,7 @@ func ReadFile(path string) ([]Example, error) {
 	return ReadJSONL(f)
 }
 
-// WriteJSONL écrit des exemples, un par ligne.
+// WriteJSONL writes examples, one per line.
 func WriteJSONL(w io.Writer, examples []Example) error {
 	bw := bufio.NewWriter(w)
 	enc := json.NewEncoder(bw)
@@ -85,7 +85,7 @@ func WriteJSONL(w io.Writer, examples []Example) error {
 	return bw.Flush()
 }
 
-// WriteFile écrit un fichier JSONL.
+// WriteFile writes a JSONL file.
 func WriteFile(path string, examples []Example) error {
 	f, err := os.Create(path)
 	if err != nil {
@@ -98,7 +98,7 @@ func WriteFile(path string, examples []Example) error {
 	return f.Close()
 }
 
-// BySplit retourne les exemples dont le champ Split vaut split.
+// BySplit returns the examples whose Split field equals split.
 func BySplit(examples []Example, split string) []Example {
 	var out []Example
 	for _, e := range examples {
@@ -109,12 +109,12 @@ func BySplit(examples []Example, split string) []Example {
 	return out
 }
 
-// HoldOut sépare une fraction des exemples, de façon déterministe.
+// HoldOut deterministically sets aside a fraction of the examples.
 //
-// Si les exemples ont une famille, ce sont des familles entières qui sont
-// mises de côté : un exemple et sa variante ne se retrouvent jamais de part
-// et d'autre. Sinon, le tirage se fait exemple par exemple, selon le hash de
-// son texte, pour qu'un ajout d'exemples ne déplace pas les existants.
+// If the examples have a family, whole families are set aside: an
+// example and its variant never end up on opposite sides. Otherwise, the
+// draw is done example by example, based on the hash of its text, so
+// that adding examples does not move the existing ones.
 func HoldOut(examples []Example, fraction float64, seed uint64) (kept, held []Example) {
 	key := func(e Example) string {
 		if e.Family != "" {
@@ -134,14 +134,14 @@ func HoldOut(examples []Example, fraction float64, seed uint64) (kept, held []Ex
 	return kept, held
 }
 
-// Shuffle mélange une copie des exemples avec une graine donnée.
+// Shuffle shuffles a copy of the examples with a given seed.
 func Shuffle(examples []Example, seed int64) []Example {
 	out := append([]Example(nil), examples...)
 	rand.New(rand.NewSource(seed)).Shuffle(len(out), func(i, j int) { out[i], out[j] = out[j], out[i] })
 	return out
 }
 
-// Families retourne le nombre d'exemples par famille, trié par nom.
+// Families returns the number of examples per family, sorted by name.
 func Families(examples []Example) []struct {
 	Name  string
 	Count int

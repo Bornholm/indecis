@@ -35,7 +35,7 @@ func TestParseBF16AndF16(t *testing.T) {
 	binary.Write(&b, binary.LittleEndian, uint16(0xc040)) // bf16 -3.0
 	binary.Write(&b, binary.LittleEndian, uint16(0x3c00)) // f16 1.0
 	binary.Write(&b, binary.LittleEndian, uint16(0xb800)) // f16 -0.5
-	binary.Write(&b, binary.LittleEndian, uint16(0x0001)) // f16 plus petit sous-normal
+	binary.Write(&b, binary.LittleEndian, uint16(0x0001)) // f16 smallest subnormal
 	out, _, err := Parse(b.Bytes())
 	if err != nil {
 		t.Fatal(err)
@@ -51,17 +51,17 @@ func TestParseBF16AndF16(t *testing.T) {
 
 func TestParseRejectsCorruption(t *testing.T) {
 	cases := map[string][]byte{
-		"court":         {1, 2, 3},
-		"en-tête géant": append(binary.LittleEndian.AppendUint64(nil, 1<<40), '{', '}'),
+		"short":        {1, 2, 3},
+		"giant header": append(binary.LittleEndian.AppendUint64(nil, 1<<40), '{', '}'),
 	}
 	header := `{"x":{"dtype":"F32","shape":[4],"data_offsets":[0,8]}}`
 	bad := binary.LittleEndian.AppendUint64(nil, uint64(len(header)))
 	bad = append(bad, header...)
 	bad = append(bad, make([]byte, 8)...)
-	cases["taille incohérente"] = bad
+	cases["inconsistent size"] = bad
 	for name, b := range cases {
 		if _, _, err := Parse(b); err == nil {
-			t.Errorf("%s : erreur attendue", name)
+			t.Errorf("%s: expected an error", name)
 		}
 	}
 }

@@ -7,11 +7,12 @@ import (
 	"github.com/bornholm/indecis"
 )
 
-// fewShot mesure le classement quand chaque catégorie est définie, en plus
-// de son nom, par k courriels d'exemple : le prototype de la catégorie est
-// la moyenne du plongement du nom et de ceux des exemples. Les exemples sont
-// retirés du jeu de test. La liste reste modifiable à l'inférence : ajouter
-// une catégorie, c'est donner son nom et quelques courriels.
+// fewShot measures classification when each category is defined, in
+// addition to its name, by k example emails: the category prototype is
+// the average of the embedding of the name and those of the examples.
+// The examples are removed from the test set. The list stays editable
+// at inference time: adding a category means giving its name and a few
+// emails.
 func fewShot(ctx context.Context, label string, m *indecis.Model, s evalSet, k int) error {
 	byCat := map[string][]int{}
 	for i, e := range s.ex {
@@ -30,7 +31,7 @@ func fewShot(ctx context.Context, label string, m *indecis.Model, s evalSet, k i
 		}
 		cands[j] = c
 	}
-	test := evalSet{name: fmt.Sprintf("%s, + %d exemples", s.name, k), cands: cands, gold: s.gold}
+	test := evalSet{name: fmt.Sprintf("%s, + %d examples", s.name, k), cands: cands, gold: s.gold}
 	for i, e := range s.ex {
 		if !shots[i] {
 			test.ex = append(test.ex, e)
@@ -52,7 +53,7 @@ func evaluateFewShot(ctx context.Context, dir, model, backbone string, k int) er
 		label string
 		m     *indecis.Model
 	}{{"backbone", base}}
-	if model != "-" { // "-" : backbone seul
+	if model != "-" { // "-": backbone only
 		tuned, err := indecis.Load(model, indecis.WithInt8())
 		if err != nil {
 			return err
@@ -60,7 +61,7 @@ func evaluateFewShot(ctx context.Context, dir, model, backbone string, k int) er
 		models = append(models, struct {
 			label string
 			m     *indecis.Model
-		}{"affiné", tuned})
+		}{"fine-tuned", tuned})
 	}
 	for _, s := range evalSets(tickets, imnim, enron) {
 		for _, x := range models {

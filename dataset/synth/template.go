@@ -50,19 +50,19 @@ import (
 	"unicode/utf8"
 )
 
-// Template est un gabarit analysé.
+// Template is a parsed template.
 type Template struct {
 	Name   string
 	Family string
 	Lang   string
 	Weight float64
-	// Labels sont les étiquettes de départ, déclarées dans l'en-tête.
+	// Labels are the starting labels, declared in the header.
 	Labels map[string]any
 	Blocks map[string][]Node
 	Body   []Node
 }
 
-// Node est un élément de l'AST.
+// Node is an element of the AST.
 type Node interface{ node() }
 
 type (
@@ -78,7 +78,7 @@ type (
 	}
 	Optional struct {
 		Name string
-		P    float64 // < 0 : probabilité par défaut du générateur
+		P    float64 // < 0: generator's default probability
 		Body []Node
 	}
 	Transform struct {
@@ -94,7 +94,7 @@ type (
 		Name  string
 		Value any
 	}
-	// UserMark sépare le contexte (avant) du texte jugé (après).
+	// UserMark separates the context (before) from the judged text (after).
 	UserMark struct{}
 )
 
@@ -111,7 +111,7 @@ func (Include) node()   {}
 func (SetLabel) node()  {}
 func (UserMark) node()  {}
 
-// Parse analyse un gabarit complet.
+// Parse parses a complete template.
 func Parse(name, src string) (*Template, error) {
 	t := &Template{Name: name, Weight: 1, Labels: map[string]any{}, Blocks: map[string][]Node{}}
 	head, body, err := splitHeader(src)
@@ -145,7 +145,7 @@ func splitHeader(src string) (head, body string, err error) {
 			return strings.Join(lines[:i], "\n"), strings.Join(lines[i+1:], "\n"), nil
 		}
 	}
-	return "", "", fmt.Errorf("en-tête non terminé (ligne « --- » attendue)")
+	return "", "", fmt.Errorf("unterminated header (expected \"---\" line)")
 }
 
 func (t *Template) parseHeader(head string) error {
@@ -156,7 +156,7 @@ func (t *Template) parseHeader(head string) error {
 		}
 		k, v, ok := strings.Cut(l, ":")
 		if !ok {
-			return fmt.Errorf("en-tête : ligne %q sans « : »", l)
+			return fmt.Errorf("header: line %q without \":\"", l)
 		}
 		k, v = strings.TrimSpace(k), strings.TrimSpace(v)
 		switch {
@@ -167,26 +167,26 @@ func (t *Template) parseHeader(head string) error {
 		case k == "weight":
 			f, err := strconv.ParseFloat(v, 64)
 			if err != nil || f < 0 {
-				return fmt.Errorf("en-tête : weight invalide %q", v)
+				return fmt.Errorf("header: invalid weight %q", v)
 			}
 			t.Weight = f
 		case strings.HasPrefix(k, "label."):
 			name := strings.TrimPrefix(k, "label.")
 			if name == "" {
-				return fmt.Errorf("en-tête : étiquette sans nom")
+				return fmt.Errorf("header: label without name")
 			}
 			t.Labels[name] = parseValue(v)
 		default:
-			return fmt.Errorf("en-tête : clé inconnue %q", k)
+			return fmt.Errorf("header: unknown key %q", k)
 		}
 	}
 	if t.Family == "" {
-		return fmt.Errorf("en-tête : « family » est obligatoire")
+		return fmt.Errorf("header: \"family\" is required")
 	}
 	return nil
 }
 
-// parseValue lit une valeur d'étiquette : booléen, nombre, sinon chaîne.
+// parseValue reads a label value: boolean, number, otherwise string.
 func parseValue(v string) any {
 	switch v {
 	case "true":
@@ -209,20 +209,20 @@ func (t *Template) extractBlocks(body string) (string, error) {
 		switch {
 		case strings.HasPrefix(trimmed, "@block "):
 			if in {
-				return "", fmt.Errorf("@block imbriqué dans %q", name)
+				return "", fmt.Errorf("@block nested in %q", name)
 			}
 			in, name, cur = true, strings.TrimSpace(strings.TrimPrefix(trimmed, "@block ")), nil
 			if _, dup := t.Blocks[name]; dup || name == "" {
-				return "", fmt.Errorf("@block %q sans nom ou en double", name)
+				return "", fmt.Errorf("@block %q without name or duplicated", name)
 			}
 		case trimmed == "@end":
 			if !in {
-				return "", fmt.Errorf("@end sans @block")
+				return "", fmt.Errorf("@end without @block")
 			}
 			p := &parser{src: strings.Join(cur, "\n")}
 			nodes, err := p.nodes("")
 			if err != nil {
-				return "", fmt.Errorf("bloc %q : %w", name, err)
+				return "", fmt.Errorf("block %q: %w", name, err)
 			}
 			t.Blocks[name] = nodes
 			in = false
@@ -233,7 +233,7 @@ func (t *Template) extractBlocks(body string) (string, error) {
 		}
 	}
 	if in {
-		return "", fmt.Errorf("@block %q non fermé", name)
+		return "", fmt.Errorf("@block %q not closed", name)
 	}
 	return strings.Join(out, "\n"), nil
 }
@@ -244,7 +244,7 @@ func (t *Template) checkBlocks(nodes []Node) error {
 		switch v := n.(type) {
 		case Repeat:
 			if _, ok := t.Blocks[v.Block]; !ok {
-				err = fmt.Errorf("bloc %q référencé mais non déclaré", v.Block)
+				err = fmt.Errorf("block %q referenced but not declared", v.Block)
 			}
 		case Optional:
 			err = t.checkBlocks(v.Body)
@@ -269,8 +269,8 @@ type parser struct {
 	err error
 }
 
-// nodes analyse jusqu'à l'un des terminateurs (séparés par « , »), vide au
-// niveau racine. Le terminateur rencontré est consommé et mémorisé dans end.
+// nodes parses up to one of the terminators (separated by ","), empty
+// at the root level. The terminator encountered is consumed and recorded in end.
 func (p *parser) nodes(terminators string) ([]Node, error) {
 	nodes, _, err := p.nodesUntil(splitTerms(terminators))
 	if err == nil {
@@ -296,11 +296,11 @@ func (p *parser) nodesUntil(terms []string) ([]Node, string, error) {
 		}
 	}
 	defer func() {
-		// Un « }} » littéral trahit une directive mal formée : elle aurait
-		// produit son propre texte dans le corpus.
+		// A literal "}}" betrays a malformed directive: it would have
+		// produced its own text in the corpus.
 		for _, n := range nodes {
 			if t, ok := n.(Text); ok && strings.Contains(t.S, "}}") {
-				p.err = fmt.Errorf("« }} » isolé dans %q", t.S)
+				p.err = fmt.Errorf("isolated \"}}\" in %q", t.S)
 			}
 		}
 	}()
@@ -316,7 +316,7 @@ func (p *parser) nodesUntil(terms []string) ([]Node, string, error) {
 		case strings.HasPrefix(p.src, "{{"):
 			end := matchingClose(p.src)
 			if end < 0 {
-				return nil, "", fmt.Errorf("« {{ » non fermé")
+				return nil, "", fmt.Errorf("unclosed \"{{\"")
 			}
 			inner := p.src[2:end]
 			p.src = p.src[end+2:]
@@ -329,7 +329,7 @@ func (p *parser) nodesUntil(terms []string) ([]Node, string, error) {
 		case strings.HasPrefix(p.src, "[?"):
 			end := strings.Index(p.src, "]")
 			if end < 0 {
-				return nil, "", fmt.Errorf("« [? » non fermé")
+				return nil, "", fmt.Errorf("unclosed \"[?\"")
 			}
 			spec := p.src[2:end]
 			p.src = p.src[end+1:]
@@ -337,7 +337,7 @@ func (p *parser) nodesUntil(terms []string) ([]Node, string, error) {
 			if name, prob, ok := strings.Cut(spec, ":"); ok {
 				f, err := strconv.ParseFloat(prob, 64)
 				if err != nil || f < 0 || f > 1 {
-					return nil, "", fmt.Errorf("[?%s] : probabilité invalide", spec)
+					return nil, "", fmt.Errorf("[?%s]: invalid probability", spec)
 				}
 				o.Name, o.P = name, f
 			}
@@ -355,15 +355,15 @@ func (p *parser) nodesUntil(terms []string) ([]Node, string, error) {
 		}
 	}
 	if len(terms) > 0 {
-		return nil, "", fmt.Errorf("section non fermée (%s attendu)", strings.Join(terms, " ou "))
+		return nil, "", fmt.Errorf("unclosed section (%s expected)", strings.Join(terms, " or "))
 	}
 	flush()
 	return nodes, "", nil
 }
 
-// matchingClose retourne l'indice du « }} » qui ferme le « {{ » initial de
-// s, en tenant compte des directives imbriquées ({{one:a|{{pick:x}}}}),
-// -1 s'il n'y en a pas.
+// matchingClose returns the index of the "}}" that closes the initial
+// "{{" of s, accounting for nested directives ({{one:a|{{pick:x}}}}),
+// -1 if there is none.
 func matchingClose(s string) int {
 	depth := 0
 	for i := 0; i+1 < len(s); i++ {
@@ -382,7 +382,7 @@ func matchingClose(s string) int {
 	return -1
 }
 
-// splitTop découpe s sur sep, hors des directives imbriquées.
+// splitTop splits s on sep, outside of nested directives.
 func splitTop(s string, sep byte) []string {
 	var out []string
 	depth, start := 0, 0
@@ -404,10 +404,10 @@ func splitTop(s string, sep byte) []string {
 
 func (p *parser) directive(inner string) (Node, error) {
 	if inner == "" {
-		return nil, fmt.Errorf("directive vide {{}}")
+		return nil, fmt.Errorf("empty directive {{}}")
 	}
 	if strings.HasPrefix(inner, "/") || inner == "|" {
-		return nil, fmt.Errorf("{{%s}} inattendu", inner)
+		return nil, fmt.Errorf("unexpected {{%s}}", inner)
 	}
 	head, argStr, _ := strings.Cut(inner, "|")
 	kind, spec, hasSpec := strings.Cut(head, ":")
@@ -421,7 +421,7 @@ func (p *parser) directive(inner string) (Node, error) {
 			}
 			k, v, ok := strings.Cut(a, "=")
 			if !ok {
-				return fmt.Errorf("{{%s}} : argument %q sans « = »", inner, a)
+				return fmt.Errorf("{{%s}}: argument %q without \"=\"", inner, a)
 			}
 			args[strings.TrimSpace(k)] = strings.TrimSpace(v)
 		}
@@ -434,7 +434,7 @@ func (p *parser) directive(inner string) (Node, error) {
 		}
 		f, err := strconv.ParseFloat(s, 64)
 		if err != nil || f < 0 || f > 1 {
-			return 0, fmt.Errorf("{{%s}} : p invalide", inner)
+			return 0, fmt.Errorf("{{%s}}: invalid p", inner)
 		}
 		return f, nil
 	}
@@ -442,12 +442,12 @@ func (p *parser) directive(inner string) (Node, error) {
 	switch kind {
 	case "one":
 		if hasSpec {
-			// Forme en ligne : les alternatives peuvent contenir des
-			// directives, mais pas de section ouverte.
+			// Inline form: alternatives can contain directives, but no
+			// open section.
 			var alts [][]Node
 			for _, a := range splitTop(strings.TrimPrefix(inner, "one:"), '|') {
-				// Une directive tient sur une ligne : \n y note le saut
-				// de ligne.
+				// A directive fits on one line: \n marks the line
+				// break in it.
 				sub := &parser{src: strings.ReplaceAll(a, `\n`, "\n")}
 				nodes, err := sub.nodes("")
 				if err != nil {
@@ -470,13 +470,13 @@ func (p *parser) directive(inner string) (Node, error) {
 		}
 	case "pick":
 		if !hasSpec {
-			return nil, fmt.Errorf("{{pick}} sans gazetteer")
+			return nil, fmt.Errorf("{{pick}} without gazetteer")
 		}
 		set, slot, _ := strings.Cut(spec, ":")
 		return Pick{Set: set, Slot: slot}, nil
 	case "int", "pad":
 		if !hasSpec {
-			return nil, fmt.Errorf("{{%s}} sans bornes", kind)
+			return nil, fmt.Errorf("{{%s}} without bounds", kind)
 		}
 		lo, hi, err := parseRange(spec)
 		if err != nil {
@@ -489,13 +489,13 @@ func (p *parser) directive(inner string) (Node, error) {
 	case "digits":
 		n, err := strconv.Atoi(spec)
 		if err != nil || n <= 0 || n > 64 {
-			return nil, fmt.Errorf("{{%s}} : longueur invalide", inner)
+			return nil, fmt.Errorf("{{%s}}: invalid length", inner)
 		}
 		return Digits{N: n}, nil
 	case "LINES":
 		block, rng, ok := strings.Cut(spec, ":")
 		if !ok {
-			return nil, fmt.Errorf("{{%s}} : forme attendue {{LINES:bloc:n-m}}", inner)
+			return nil, fmt.Errorf("{{%s}}: expected form {{LINES:block:n-m}}", inner)
 		}
 		lo, hi, err := parseRange(rng)
 		if err != nil {
@@ -507,7 +507,7 @@ func (p *parser) directive(inner string) (Node, error) {
 			return nil, err
 		}
 		if _, ok := Transforms[spec]; !ok {
-			return nil, fmt.Errorf("{{%s}} : transformation %q inconnue", inner, spec)
+			return nil, fmt.Errorf("{{%s}}: unknown transformation %q", inner, spec)
 		}
 		pr, err := prob(1)
 		if err != nil {
@@ -523,7 +523,7 @@ func (p *parser) directive(inner string) (Node, error) {
 			return nil, err
 		}
 		if _, err := path.Match(spec, ""); err != nil || spec == "" {
-			return nil, fmt.Errorf("{{%s}} : motif invalide", inner)
+			return nil, fmt.Errorf("{{%s}}: invalid pattern", inner)
 		}
 		pr, err := prob(1)
 		if err != nil {
@@ -532,17 +532,17 @@ func (p *parser) directive(inner string) (Node, error) {
 		return Include{Pattern: spec, P: pr}, nil
 	case "user":
 		if hasSpec || argStr != "" {
-			return nil, fmt.Errorf("{{%s}} : {{user}} ne prend pas d'argument", inner)
+			return nil, fmt.Errorf("{{%s}}: {{user}} takes no argument", inner)
 		}
 		return UserMark{}, nil
 	case "label":
 		name, value, ok := strings.Cut(spec, "=")
 		if !ok || name == "" {
-			return nil, fmt.Errorf("{{%s}} : forme attendue {{label:nom=valeur}}", inner)
+			return nil, fmt.Errorf("{{%s}}: expected form {{label:name=value}}", inner)
 		}
 		return SetLabel{Name: name, Value: parseValue(value)}, nil
 	}
-	return nil, fmt.Errorf("directive inconnue {{%s}}", inner)
+	return nil, fmt.Errorf("unknown directive {{%s}}", inner)
 }
 
 func parseRange(s string) (int, int, error) {
@@ -550,14 +550,14 @@ func parseRange(s string) (int, int, error) {
 	if !ok {
 		n, err := strconv.Atoi(strings.TrimSpace(s))
 		if err != nil {
-			return 0, 0, fmt.Errorf("borne invalide %q", s)
+			return 0, 0, fmt.Errorf("invalid bound %q", s)
 		}
 		return n, n, nil
 	}
 	lo, err1 := strconv.Atoi(strings.TrimSpace(a))
 	hi, err2 := strconv.Atoi(strings.TrimSpace(b))
 	if err1 != nil || err2 != nil || lo > hi {
-		return 0, 0, fmt.Errorf("bornes invalides %q", s)
+		return 0, 0, fmt.Errorf("invalid bounds %q", s)
 	}
 	return lo, hi, nil
 }

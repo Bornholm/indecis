@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-// Reprend l'exemple de la fiche de bekko : la requête retrouve le document
-// sur les sushis, et les plongements sont normalisés.
+// Reuses the example from bekko's model card: the query retrieves the
+// document about sushi, and the embeddings are normalized.
 func TestEmbedMatchesModelCard(t *testing.T) {
 	m, err := New(bekkoDir(t), Schema{NewNoul("match", "")}, 1, WithPairs())
 	if err != nil {
@@ -23,7 +23,7 @@ func TestEmbedMatchesModelCard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Scores de la fiche (sentence-transformers) : 0.3085, 0.2716, 0.2750, 0.4738.
+	// Scores from the model card (sentence-transformers): 0.3085, 0.2716, 0.2750, 0.4738.
 	want := []float64{0.3085, 0.2716, 0.2750, 0.4738}
 	for i := range docs {
 		var dot, n float64
@@ -32,10 +32,10 @@ func TestEmbedMatchesModelCard(t *testing.T) {
 			n += float64(e[i+1][j]) * float64(e[i+1][j])
 		}
 		if math.Abs(n-1) > 1e-5 {
-			t.Fatalf("norme %v", n)
+			t.Fatalf("norm %v", n)
 		}
 		if math.Abs(dot-want[i]) > 2e-3 {
-			t.Errorf("document %d : cosinus %.4f, attendu %.4f", i, dot, want[i])
+			t.Errorf("document %d: cosine %.4f, expected %.4f", i, dot, want[i])
 		}
 	}
 }
@@ -57,14 +57,14 @@ func TestChooseAmong(t *testing.T) {
 			sum += p
 		}
 		if len(x.Probs) != 3 || math.Abs(sum-1) > 1e-9 || x.Probs[x.Choice] != x.Confidence || x.P <= 0 || x.P >= 1 {
-			t.Fatalf("réponse incohérente : %+v", x)
+			t.Fatalf("inconsistent answer: %+v", x)
 		}
 	}
 	if _, err := m.ChooseAmong(ctx, "match", []Candidate{{Name: "a"}, {Name: "a"}}, "x"); err == nil {
-		t.Fatal("options en double acceptées")
+		t.Fatal("duplicate options accepted")
 	}
 	unpaired, _ := New(bekkoDir(t), Schema{NewNoul("match", "")}, 1)
 	if _, err := unpaired.ChooseAmong(ctx, "match", cands, "x"); err == nil {
-		t.Fatal("modèle sans paires accepté")
+		t.Fatal("model without pairs accepted")
 	}
 }

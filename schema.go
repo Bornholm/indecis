@@ -34,7 +34,7 @@ import (
 	"regexp"
 )
 
-// Kind est le type d'une question.
+// Kind is the type of a question.
 type Kind string
 
 const (
@@ -43,22 +43,22 @@ const (
 	Score  Kind = "score"
 )
 
-// Question décrit une décision que le modèle apprend à prendre.
+// Question describes a decision that the model learns to make.
 type Question struct {
 	Name string `json:"name"`
 	Kind Kind   `json:"kind"`
-	// Instructions documente la question. Le modèle ne la lit pas : ses têtes
-	// sont apprises, la question est dans les données.
+	// Instructions documents the question. The model does not read it: its
+	// heads are learned, the question is in the data.
 	Instructions string `json:"instructions,omitempty"`
-	// Options liste les options d'un Choice, ou les niveaux d'un Score dans
-	// l'ordre croissant.
+	// Options lists the options of a Choice, or the levels of a Score in
+	// increasing order.
 	Options []string `json:"options,omitempty"`
 }
 
-// Schema est la liste des questions d'un modèle.
+// Schema is the list of a model's questions.
 type Schema []Question
 
-// NewNoul, NewChoice et NewScore construisent les questions.
+// NewNoul, NewChoice and NewScore build the questions.
 func NewNoul(name, instructions string) Question {
 	return Question{Name: name, Kind: Noul, Instructions: instructions}
 }
@@ -73,44 +73,44 @@ func NewScore(name, instructions string, levels ...string) Question {
 
 var nameRe = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
-// Validate vérifie le schéma.
+// Validate checks the schema.
 func (s Schema) Validate() error {
 	if len(s) == 0 {
-		return fmt.Errorf("indecis: schéma vide")
+		return fmt.Errorf("indecis: empty schema")
 	}
 	seen := map[string]bool{}
 	for _, q := range s {
 		if !nameRe.MatchString(q.Name) {
-			return fmt.Errorf("indecis: nom de question %q invalide (attendu [a-z][a-z0-9_]*)", q.Name)
+			return fmt.Errorf("indecis: invalid question name %q (expected [a-z][a-z0-9_]*)", q.Name)
 		}
 		if seen[q.Name] {
-			return fmt.Errorf("indecis: question %q en double", q.Name)
+			return fmt.Errorf("indecis: duplicate question %q", q.Name)
 		}
 		seen[q.Name] = true
 		switch q.Kind {
 		case Noul:
 			if len(q.Options) != 0 {
-				return fmt.Errorf("indecis: %s : une question noul n'a pas d'options", q.Name)
+				return fmt.Errorf("indecis: %s: a noul question has no options", q.Name)
 			}
 		case Choice, Score:
 			if len(q.Options) < 2 {
-				return fmt.Errorf("indecis: %s : au moins deux options", q.Name)
+				return fmt.Errorf("indecis: %s: at least two options", q.Name)
 			}
 			opts := map[string]bool{}
 			for _, o := range q.Options {
 				if o == "" || opts[o] {
-					return fmt.Errorf("indecis: %s : option %q vide ou en double", q.Name, o)
+					return fmt.Errorf("indecis: %s: option %q empty or duplicate", q.Name, o)
 				}
 				opts[o] = true
 			}
 		default:
-			return fmt.Errorf("indecis: %s : type %q inconnu", q.Name, q.Kind)
+			return fmt.Errorf("indecis: %s: unknown type %q", q.Name, q.Kind)
 		}
 	}
 	return nil
 }
 
-// Index retourne la position d'une question, -1 si absente.
+// Index returns the position of a question, -1 if absent.
 func (s Schema) Index(name string) int {
 	for i, q := range s {
 		if q.Name == name {
@@ -120,9 +120,9 @@ func (s Schema) Index(name string) int {
 	return -1
 }
 
-// target convertit une étiquette de dataset en cible d'entraînement :
-// une probabilité pour Noul, une distribution pour Choice, un niveau pour
-// Score. ok vaut false si l'étiquette est absente.
+// target converts a dataset label into a training target: a probability
+// for Noul, a distribution for Choice, a level for Score. ok is false if
+// the label is absent.
 func (q Question) target(v any) (t []float64, ok bool, err error) {
 	if v == nil {
 		return nil, false, nil
@@ -137,7 +137,7 @@ func (q Question) target(v any) (t []float64, ok bool, err error) {
 			return []float64{0}, true, nil
 		case float64:
 			if x < 0 || x > 1 {
-				return nil, false, fmt.Errorf("%s : probabilité %v hors de [0, 1]", q.Name, x)
+				return nil, false, fmt.Errorf("%s: probability %v out of [0, 1]", q.Name, x)
 			}
 			return []float64{x}, true, nil
 		}
@@ -151,7 +151,7 @@ func (q Question) target(v any) (t []float64, ok bool, err error) {
 					return t, true, nil
 				}
 			}
-			return nil, false, fmt.Errorf("%s : option %q inconnue", q.Name, x)
+			return nil, false, fmt.Errorf("%s: unknown option %q", q.Name, x)
 		case map[string]any:
 			t = make([]float64, len(q.Options))
 			var sum float64
@@ -159,13 +159,13 @@ func (q Question) target(v any) (t []float64, ok bool, err error) {
 				p, isNum := pv.(float64)
 				i := indexOf(q.Options, k)
 				if !isNum || i < 0 || p < 0 {
-					return nil, false, fmt.Errorf("%s : distribution invalide sur %q", q.Name, k)
+					return nil, false, fmt.Errorf("%s: invalid distribution on %q", q.Name, k)
 				}
 				t[i] = p
 				sum += p
 			}
 			if sum <= 0 {
-				return nil, false, fmt.Errorf("%s : distribution vide", q.Name)
+				return nil, false, fmt.Errorf("%s: empty distribution", q.Name)
 			}
 			for i := range t {
 				t[i] /= sum
@@ -175,7 +175,7 @@ func (q Question) target(v any) (t []float64, ok bool, err error) {
 	case Score:
 		if x, isNum := v.(float64); isNum {
 			if x < 0 || x > float64(len(q.Options)-1) || x != float64(int(x)) {
-				return nil, false, fmt.Errorf("%s : niveau %v invalide", q.Name, x)
+				return nil, false, fmt.Errorf("%s: invalid level %v", q.Name, x)
 			}
 			return []float64{x}, true, nil
 		}
@@ -183,10 +183,10 @@ func (q Question) target(v any) (t []float64, ok bool, err error) {
 			if i := indexOf(q.Options, x); i >= 0 {
 				return []float64{float64(i)}, true, nil
 			}
-			return nil, false, fmt.Errorf("%s : niveau %q inconnu", q.Name, x)
+			return nil, false, fmt.Errorf("%s: unknown level %q", q.Name, x)
 		}
 	}
-	return nil, false, fmt.Errorf("%s : étiquette %v (%T) incompatible avec le type %s", q.Name, v, v, q.Kind)
+	return nil, false, fmt.Errorf("%s: label %v (%T) incompatible with type %s", q.Name, v, v, q.Kind)
 }
 
 func indexOf(s []string, v string) int {

@@ -4,37 +4,36 @@ import (
 	"math"
 )
 
-// Produit matriciel quantifié en int8, pour l'inférence.
+// int8-quantized matrix product, for inference.
 //
-// Les poids (B) sont quantifiés une fois, par colonne de op(B) (un canal de
-// sortie) : b ≈ sb[j]·qb, qb ∈ [-127, 127]. Les activations (A) le sont à
-// chaque appel, par ligne : a ≈ sa[i]·(qa − 128), qa ∈ [1, 255], le
-// décalage de 128 rendant qa non signé comme l'exige VPDPBUSD. Alors
+// Weights (B) are quantized once, per column of op(B) (an output
+// channel): b ~ sb[j]·qb, qb in [-127, 127]. Activations (A) are
+// quantized on each call, per row: a ~ sa[i]·(qa - 128), qa in [1, 255],
+// the 128 offset making qa unsigned as VPDPBUSD requires. Then
 //
-//	C[i][j] ≈ sa[i]·sb[j]·(Σ qa·qb − 128·Σ qb)
+//	C[i][j] ~ sa[i]·sb[j]·(sum qa·qb - 128·sum qb)
 //
-// et la somme entière est exacte : k ≤ 16 000 ne peut pas déborder un int32.
-// Sur un encodeur de phrases, l'écart est de l'ordre de 1e-3 en relatif,
-// sans effet mesurable sur les décisions (tools/infbench -int8 -eval).
+// and the integer sum is exact: k <= 16,000 cannot overflow an int32. On
+// a sentence encoder, the gap is on the order of 1e-3 relative, with no
+// measurable effect on decisions (tools/infbench -int8 -eval).
 
 const (
-	mr8 = 6  // lignes d'une tuile
-	nr8 = 16 // colonnes d'une tuile
+	mr8 = 6  // rows of a tile
+	nr8 = 16 // columns of a tile
 )
 
-// PackedB8 est un opérande B quantifié et empaqueté : panneaux de 16
-// colonnes, chaque colonne portant 4 profondeurs consécutives par mot de 32
-// bits.
+// PackedB8 is a quantized and packed B operand: panels of 16 columns,
+// each column carrying 4 consecutive depths per 32-bit word.
 type PackedB8 struct {
 	k, n   int
-	kq     int    // profondeur en quadruplets, k arrondi au-dessus
-	data   []int8 // panneau p, quadruplet q, colonne c, octet t → [p·kq·64 + q·64 + c·4 + t]
+	kq     int    // depth in quadruplets, k rounded up
+	data   []int8 // panel p, quadruplet q, column c, byte t -> [p·kq·64 + q·64 + c·4 + t]
 	scale  []float32
 	colsum []int32
-	zc     []float32 // 128·colsum, retranché des sommes entières
+	zc     []float32 // 128·colsum, subtracted from the integer sums
 }
 
-// PackB8 quantifie et empaquette op(B), k×n : B est stockée k×n, ou n×k si
+// PackB8 quantizes and packs op(B), k×n: B is stored k×n, or n×k if
 // transB.
 func PackB8(b []float32, k, n int, transB bool) *PackedB8 {
 	if len(b) < k*n {
@@ -77,16 +76,16 @@ func PackB8(b []float32, k, n int, transB bool) *PackedB8 {
 	return p
 }
 
-// Size est le nombre d'octets occupés.
+// Size is the number of bytes used.
 func (p *PackedB8) Size() int { return len(p.data) + 8*p.n }
 
-// MatMul8 calcule C = A·op(B) (ou C += si accumulate), A étant m×k, avec la
-// quantification int8 décrite plus haut.
+// MatMul8 computes C = A·op(B) (or C += if accumulate), A being m×k,
+// using the int8 quantization described above.
 func MatMul8(c, a []float32, b *PackedB8, m int, accumulate bool) {
 	MatMul8N(c, a, b, m, accumulate, Workers())
 }
 
-// MatMul8N est MatMul8 avec au plus limit workers.
+// MatMul8N is MatMul8 with at most limit workers.
 func MatMul8N(c, a []float32, b *PackedB8, m int, accumulate bool, limit int) {
 	k, n := b.k, b.n
 	if m == 0 || n == 0 {
@@ -105,10 +104,9 @@ func MatMul8N(c, a []float32, b *PackedB8, m int, accumulate bool, limit int) {
 	quantizeA(apack, sa, a, m, k, lda)
 
 	colPanels := (n + nr8 - 1) / nr8
-	// Chaque worker traite une tranche de panneaux de colonnes [lo, hi) pour
-	// tous les panneaux de lignes : les tuiles d'un panneau de lignes
-	// s'accumulent dans acc, puis chaque ligne est remise à l'échelle en une
-	// fois (un appel vectoriel par ligne, pas par tuile).
+	// Each worker handles a slice of column panels [lo, hi) for all row
+	// panels: the tiles of a row panel accumulate into acc, then each row
+	// is rescaled in one go (one vector call per row, not per tile).
 	work := func(lo, hi int) {
 		var tile [mr8 * nr8]int32
 		j0, j1 := lo*nr8, min(n, hi*nr8)
@@ -132,7 +130,7 @@ func MatMul8N(c, a []float32, b *PackedB8, m int, accumulate bool, limit int) {
 			}
 		}
 	}
-	// Même règle que MatMul : un worker par tranche de calcul suffisante.
+	// Same rule as MatMul: one worker per sufficient slice of work.
 	active := min(max(1, min(limit, Workers())), max(1, m*n*k/(4*macsPerWorker)))
 	if active == 1 {
 		work(0, colPanels)
@@ -141,9 +139,9 @@ func MatMul8N(c, a []float32, b *PackedB8, m int, accumulate bool, limit int) {
 	ParallelN(active, colPanels, max(1, colPanels/(4*active)), work)
 }
 
-// quantizeA quantifie chaque ligne de A en uint8 (zéro quantifié : 128), une
-// ligne de lda octets par ligne de A. Les profondeurs de complément et les
-// lignes au-delà de m valent 128.
+// quantizeA quantizes each row of A to uint8 (quantized zero: 128), one
+// row of lda bytes per row of A. Padding depths and rows beyond m are
+// set to 128.
 func quantizeA(apack []uint8, sa, a []float32, m, k, lda int) {
 	for i := 0; i < len(apack)/lda; i++ {
 		row := apack[i*lda : (i+1)*lda]
@@ -173,15 +171,15 @@ func fill128(b []uint8) {
 
 func abs32(v float32) float32 { return math.Float32frombits(math.Float32bits(v) &^ (1 << 31)) }
 
-// roundHalfEven arrondit au plus proche, à égalité vers le pair, pour
-// |v| < 2²² : ajouter puis retrancher 1,5·2²³ fait arrondir le matériel.
+// roundHalfEven rounds to nearest, ties to even, for |v| < 2^22: adding
+// then subtracting 1.5·2^23 makes the hardware do the rounding.
 func roundHalfEven(v float32) float32 {
 	const magic = 12582912
 	return (v + magic) - magic
 }
 
-// microKernel8Go est la référence portable du micro-noyau int8 : 6 lignes
-// de A espacées de lda octets, un panneau de B de 16 colonnes.
+// microKernel8Go is the portable reference for the int8 micro-kernel: 6
+// rows of A spaced lda bytes apart, a B panel of 16 columns.
 func microKernel8Go(kq int, ap []uint8, lda int, bp []int8, tile *[mr8 * nr8]int32) {
 	*tile = [mr8 * nr8]int32{}
 	for r := 0; r < mr8; r++ {

@@ -1,8 +1,8 @@
-"""Fixtures de parité d'un pas d'entraînement : gradients, écrêtage et pas
-AdamW selon PyTorch.
+"""Training-step parity fixtures: gradients, clipping, and AdamW step
+according to PyTorch.
 
-Perte : L = Σ_b ⟨moyenne des états cachés de b, w_b⟩, w tiré au hasard.
-Chaque séquence passe seule (pas de padding), les gradients s'additionnent.
+Loss: L = Sum_b <mean of hidden states of b, w_b>, w drawn at random.
+Each sequence passes alone (no padding), gradients accumulate.
 
     tools/oracle/.venv/bin/python tools/oracle/train_step_fixtures.py \
         --model ~/.cache/indecis/models/bekko-embedding-v1-a8m --out testdata/bekko

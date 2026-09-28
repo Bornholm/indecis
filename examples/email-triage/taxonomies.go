@@ -2,9 +2,9 @@ package main
 
 import "github.com/bornholm/indecis"
 
-// classic est la liste de catégories de la preuve de concept : un tri
-// classique de boîte de réception d'organisation. Elle ne sert jamais à
-// l'entraînement, pour mesurer ce que vaut une liste inconnue du modèle.
+// classic is the proof of concept's category list: a classic
+// organization inbox sort. It is never used for training, to measure
+// how well the model handles a list it has not seen.
 var classic = []indecis.Candidate{
 	{Name: "Support technique", Description: "Panne, bug, problème d'accès ou demande d'aide sur un outil, un logiciel ou un service informatique."},
 	{Name: "Facturation et paiement", Description: "Factures, paiements, relances, remboursements, questions de tarif sur une prestation déjà vendue."},
@@ -21,13 +21,13 @@ var classic = []indecis.Candidate{
 	{Name: "Spam et hameçonnage", Description: "Message non sollicité, publicité abusive ou tentative de fraude."},
 }
 
-// taxonomy est une liste de catégories d'entraînement. Les listes varient
-// par le point de vue (action attendue, domaine, relation, genre, ton), la
-// langue et le niveau de détail : le modèle doit apprendre à lire une liste,
-// pas à en retenir une. Aucune ne reprend la liste classique, réservée au
-// test.
+// taxonomy is a list of training categories. The lists vary by
+// viewpoint (expected action, domain, relation, genre, tone), language
+// and level of detail: the model must learn to read a list, not to
+// memorize one. None of them repeats the classic list, reserved for
+// testing.
 type taxonomy struct {
-	Name     string // nom de question : [a-z][a-z0-9_]*
+	Name     string // question name: [a-z][a-z0-9_]*
 	Question string
 	Options  []indecis.Candidate
 }
@@ -77,8 +77,8 @@ var training = []taxonomy{
 	}},
 }
 
-// teacherSchema écrit le schéma et les consignes des teachers pour les
-// listes d'entraînement.
+// teacherSchema writes the schema and teacher instructions for the
+// training lists.
 func teacherSchema() (indecis.Schema, string) {
 	var s indecis.Schema
 	g := "# Classement de courriels selon plusieurs listes\n\nPour chaque liste, choisis UNE catégorie : celle qui décrit le mieux le courriel, du point de vue de la personne qui le reçoit. Les courriels viennent d'Enron, une entreprise d'énergie (2000-2002).\n"
@@ -98,9 +98,9 @@ func teacherSchema() (indecis.Schema, string) {
 	return s, g
 }
 
-// templated sont les listes des courriels synthétiques en français
-// (synth/courriel) : leurs étiquettes viennent des gabarits. Aucun nom ne
-// reprend la liste classique.
+// templated are the lists for the synthetic French emails
+// (synth/courriel): their labels come from the templates. No name
+// repeats the classic list.
 var templated = []taxonomy{
 	{"service", "Quel service est concerné ?", names("Comptabilité", "Paie et personnel", "Informatique interne", "Achats",
 		"Service juridique", "Logistique", "Relation client", "Direction", "Communication", "Vie d'équipe")},

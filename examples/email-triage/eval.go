@@ -15,9 +15,9 @@ import (
 	"github.com/bornholm/indecis/dataset"
 )
 
-// evalSet est un jeu de test : des courriels, la liste de catégories
-// proposée au modèle, et les catégories justes de chaque courriel (souvent
-// une seule).
+// evalSet is a test set: emails, the list of categories offered to
+// the model, and the correct categories for each email (often only
+// one).
 type evalSet struct {
 	name  string
 	ex    []dataset.Example
@@ -25,11 +25,11 @@ type evalSet struct {
 	gold  func(dataset.Example) []string
 }
 
-// chooser classe des textes parmi des catégories.
+// chooser classifies texts among categories.
 type chooser func(ctx context.Context, cands []indecis.Candidate, texts []string) ([]indecis.Answer, error)
 
-// report mesure l'exactitude (la catégorie retenue est juste) et le F1
-// macro, catégorie par catégorie.
+// report measures accuracy (the chosen category is correct) and the
+// macro F1, category by category.
 func report(ctx context.Context, name string, choose chooser, s evalSet) error {
 	texts := make([]string, len(s.ex))
 	for i, e := range s.ex {
@@ -70,7 +70,7 @@ func report(ctx context.Context, name string, choose chooser, s evalSet) error {
 	}
 	f1 /= float64(len(s.cands))
 	n := float64(len(answers))
-	fmt.Printf("%-10s %-38s n=%-5d catégories=%-3d exactitude=%5.1f%%  top-3=%5.1f%%  F1 macro=%.3f  %5.1f ms/courriel\n",
+	fmt.Printf("%-10s %-38s n=%-5d categories=%-3d acc=%5.1f%%  top-3=%5.1f%%  macroF1=%.3f  %5.1f ms/email\n",
 		name, s.name, len(answers), len(s.cands), 100*float64(correct)/n, 100*float64(top3)/n, f1,
 		float64(elapsed.Microseconds())/1000/n)
 	return nil
@@ -94,8 +94,8 @@ func topK(p map[string]float64, k int) []string {
 	return names[:min(k, len(names))]
 }
 
-// embedChooser compare les plongements du courriel et des catégories :
-// la méthode sans entraînement, avec le backbone tel quel.
+// embedChooser compares the embeddings of the email and the
+// categories: the training-free method, with the backbone as is.
 func embedChooser(m *indecis.Model, temperature float64) chooser {
 	return func(ctx context.Context, cands []indecis.Candidate, texts []string) ([]indecis.Answer, error) {
 		ctxs := make([]string, len(cands))
@@ -149,9 +149,9 @@ func pairChooser(m *indecis.Model) chooser {
 
 const question = "match"
 
-// Découpage des tickets. Une partie des files (queues) est tenue entièrement
-// à l'écart de l'entraînement : leurs tickets mesurent le classement vers
-// des catégories inconnues du modèle, dans le domaine connu.
+// Ticket split. Part of the queues is kept entirely out of training:
+// their tickets measure classification toward categories unknown to
+// the model, within a known domain.
 func heldOutQueue(q string) bool { return hash(q)%4 == 0 }
 
 func testTicket(e dataset.Example) bool { return hash(e.Text)%10 == 0 }
@@ -162,10 +162,10 @@ func hash(s string) uint64 {
 	return h.Sum64()
 }
 
-// dataDir est le répertoire des données, pour les jeux de test facultatifs.
+// dataDir is the data directory, for optional test sets.
 var dataDir string
 
-// evalSets construit les jeux de test à partir des données préparées.
+// evalSets builds the test sets from the prepared data.
 func evalSets(tickets, imnim, enron []dataset.Example) []evalSet {
 	var sets []evalSet
 	queues := map[string]bool{}
@@ -188,10 +188,10 @@ func evalSets(tickets, imnim, enron []dataset.Example) []evalSet {
 	}
 	queueGold := func(e dataset.Example) []string { return []string{e.Meta["queue"]} }
 	sets = append(sets,
-		evalSet{"tickets, files vues (nouveaux tickets)", cap500(seen), allQueues, queueGold},
-		evalSet{"tickets, files jamais vues", cap500(unseen), allQueues, queueGold})
+		evalSet{"tickets, seen queues (new tickets)", cap500(seen), allQueues, queueGold},
+		evalSet{"tickets, never-seen queues", cap500(unseen), allQueues, queueGold})
 
-	// imnim : les courriels à une seule catégorie, parmi ses 10 catégories.
+	// imnim: emails with a single category, among its 10 categories.
 	var single []dataset.Example
 	labels := map[string]bool{}
 	for _, e := range imnim {
@@ -208,10 +208,10 @@ func evalSets(tickets, imnim, enron []dataset.Example) []evalSet {
 		imnimCands = append(imnimCands, indecis.Candidate{Name: l})
 	}
 	sort.Slice(imnimCands, func(i, j int) bool { return imnimCands[i].Name < imnimCands[j].Name })
-	sets = append(sets, evalSet{"imnim (catégories jamais vues)", cap500(single), imnimCands,
+	sets = append(sets, evalSet{"imnim (never-seen categories)", cap500(single), imnimCands,
 		func(e dataset.Example) []string { return strings.Split(e.Meta["labels"], "|") }})
 
-	// ASN : vraies lettres en français, thème d'inspection à retrouver.
+	// ASN: real letters in French, inspection theme to identify.
 	if asn, err := dataset.ReadFile(filepath.Join(dataDir, "asn.jsonl")); err == nil && len(asn) > 0 {
 		themes := map[string]bool{}
 		for _, e := range asn {
@@ -224,16 +224,16 @@ func evalSets(tickets, imnim, enron []dataset.Example) []evalSet {
 		sort.Slice(cands, func(i, j int) bool { return cands[i].Name < cands[j].Name })
 		rng := rand.New(rand.NewSource(5))
 		rng.Shuffle(len(asn), func(i, j int) { asn[i], asn[j] = asn[j], asn[i] })
-		sets = append(sets, evalSet{"ASN, lettres FR, thème", cap500(asn), cands,
+		sets = append(sets, evalSet{"ASN, FR letters, theme", cap500(asn), cands,
 			func(e dataset.Example) []string { return []string{e.Meta["theme"]} }})
 	}
-	// Enron traduit en français, même liste et mêmes étiquettes.
+	// Enron translated to French, same list and same labels.
 	if fr, err := dataset.ReadFile(filepath.Join(dataDir, "enron_labeled_fr.jsonl")); err == nil && len(fr) > 0 {
-		sets = append(sets, evalSet{"Enron traduit (FR), liste classique", fr, classic,
+		sets = append(sets, evalSet{"Enron translated (FR), classic list", fr, classic,
 			func(e dataset.Example) []string { return []string{topLabel(e.Labels["categorie"])} }})
 	}
 
-	// Enron, étiqueté par les teachers selon la liste classique.
+	// Enron, labeled by the teachers according to the classic list.
 	var labeled []dataset.Example
 	for _, e := range enron {
 		if _, ok := e.Labels["categorie"]; ok {
@@ -241,13 +241,13 @@ func evalSets(tickets, imnim, enron []dataset.Example) []evalSet {
 		}
 	}
 	if len(labeled) > 0 {
-		sets = append(sets, evalSet{"Enron, liste classique (FR)", labeled, classic,
+		sets = append(sets, evalSet{"Enron, classic list (FR)", labeled, classic,
 			func(e dataset.Example) []string { return []string{topLabel(e.Labels["categorie"])} }})
 	}
 	return sets
 }
 
-// topLabel lit une étiquette choice : une option, ou une distribution.
+// topLabel reads a choice label: an option, or a distribution.
 func topLabel(v any) string {
 	switch x := v.(type) {
 	case string:

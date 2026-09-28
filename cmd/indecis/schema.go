@@ -8,13 +8,13 @@ import (
 	"github.com/bornholm/indecis"
 )
 
-// schemaFile est le fichier de schéma de la commande : une liste de
-// questions, ou le indecis.json d'un modèle. Une option peut être un nom, ou
-// un objet {"name", "description", "examples"} : description et exemples
-// servent au mode ouvert (train -open, predict et eval avec -schema).
+// schemaFile is the command's schema file: a list of questions, or a
+// model's indecis.json. An option can be a name, or an object
+// {"name", "description", "examples"}: description and examples serve
+// open mode (train -open, predict and eval with -schema).
 type schemaFile struct {
 	schema     indecis.Schema
-	candidates map[string][]indecis.Candidate // question → options décrites
+	candidates map[string][]indecis.Candidate // question -> described options
 }
 
 type fileQuestion struct {
@@ -35,7 +35,7 @@ func readSchema(path string) (*schemaFile, error) {
 			Schema []fileQuestion `json:"schema"`
 		}
 		if err2 := json.Unmarshal(b, &meta); err2 != nil || len(meta.Schema) == 0 {
-			return nil, fmt.Errorf("%s : liste de questions ou indecis.json attendu : %w", path, err)
+			return nil, fmt.Errorf("%s: expected list of questions or indecis.json: %w", path, err)
 		}
 		list = meta.Schema
 	}
@@ -47,7 +47,7 @@ func readSchema(path string) (*schemaFile, error) {
 			var c indecis.Candidate
 			if json.Unmarshal(raw, &c.Name) != nil {
 				if err := json.Unmarshal(raw, &c); err != nil {
-					return nil, fmt.Errorf("%s : option de %s illisible : %w", path, q.Name, err)
+					return nil, fmt.Errorf("%s: unreadable option of %s: %w", path, q.Name, err)
 				}
 			}
 			names = append(names, c.Name)
@@ -62,7 +62,7 @@ func readSchema(path string) (*schemaFile, error) {
 	return sf, nil
 }
 
-// open traduit le schéma en questions ouvertes (voir Model.DecideOpen).
+// open translates the schema into open questions (see Model.DecideOpen).
 func (sf *schemaFile) open() []indecis.OpenQuestion {
 	var out []indecis.OpenQuestion
 	for _, q := range sf.schema {

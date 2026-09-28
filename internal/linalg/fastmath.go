@@ -2,10 +2,10 @@ package linalg
 
 import "math"
 
-// Approximations float32 communes aux versions SIMD et scalaires.
+// float32 approximations shared by the SIMD and scalar versions.
 
-// erf32 est l'approximation rationnelle d'Eigen et de XLA : erreur absolue
-// inférieure à 2e-7 sur tout l'axe réel.
+// erf32 is the rational approximation from Eigen and XLA: absolute error
+// below 2e-7 over the whole real axis.
 func erf32(x float32) float32 {
 	x = min(max(x, -4), 4)
 	x2 := x * x
@@ -25,7 +25,7 @@ func erf32(x float32) float32 {
 
 func geluScalar(x float32) float32 { return 0.5 * x * (1 + erf32(x*0.7071067811865476)) }
 
-// exp32 est l'expf de Cephes (erreur relative ≈ 2e-7) ; 0 sous −87,3.
+// exp32 is Cephes' expf (relative error ~ 2e-7); 0 below -87.3.
 func exp32(x float32) float32 {
 	if x < -87.3 {
 		return 0

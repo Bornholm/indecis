@@ -2,13 +2,13 @@
 
 package linalg
 
-// Accelerated indique si les noyaux SIMD sont compilés.
+// Accelerated reports whether the SIMD kernels are compiled in.
 const Accelerated = false
 
 func nrGo() int { return 8 }
 
-// microKernelGo est la version scalaire : même contrat que la version SIMD,
-// pour que tout le reste du package soit partagé.
+// microKernelGo is the scalar version: same contract as the SIMD
+// version, so that the rest of the package can be shared.
 //
 //go:noinline
 func microKernelGo(kb int, ap, bp, tile []float32, nr int) {

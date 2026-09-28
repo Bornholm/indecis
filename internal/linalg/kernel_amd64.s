@@ -2,10 +2,10 @@
 
 // func microKernelAVX2(kb int, ap, bp, tile *float32)
 //
-// Tuile 6×16 : Y0..Y11 accumulent C (ligne r dans Y(2r), Y(2r+1)), Y12 et
-// Y13 portent les 16 valeurs de B de la profondeur courante, Y14 et Y15
-// les diffusions de A. Les 16 registres YMM sont utilisés, aucun ne passe
-// par la pile. VFMADD231PS accumule en place (dst += a·b).
+// 6x16 tile: Y0..Y11 accumulate C (row r in Y(2r), Y(2r+1)), Y12 and Y13
+// carry the 16 values of B at the current depth, Y14 and Y15 the
+// broadcasts of A. All 16 YMM registers are used, none spills to the
+// stack. VFMADD231PS accumulates in place (dst += a·b).
 TEXT ·microKernelAVX2(SB), NOSPLIT, $0-32
 	MOVQ kb+0(FP), CX
 	MOVQ ap+8(FP), SI

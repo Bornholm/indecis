@@ -7,9 +7,9 @@ import (
 	"testing"
 )
 
-// Un tokenizer élagué sur un corpus découpe ce corpus exactement comme
-// l'original (aux ids près), et découpe tout autre texte en ids valides
-// qui décrivent le même texte.
+// A tokenizer pruned on a corpus splits that corpus exactly like the
+// original (aside from the ids), and splits any other text into valid ids
+// that describe the same text.
 func TestPrune(t *testing.T) {
 	tok := bekko(t)
 	src, err := os.ReadFile(filepath.Join(bekkoDir(t), "tokenizer.json"))
@@ -40,14 +40,14 @@ func TestPrune(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("%d tokens gardés sur %d (%d vus dans le corpus)", pruned.VocabSize(), tok.VocabSize(), len(used))
+	t.Logf("%d tokens kept out of %d (%d seen in the corpus)", pruned.VocabSize(), tok.VocabSize(), len(used))
 	for _, s := range corpus {
 		want := tok.Encode(s)
 		for i, id := range want {
 			want[i] = newID[id]
 		}
 		if got := pruned.Encode(s); !slices.Equal(got, want) {
-			t.Fatalf("%.40q : découpage changé", s)
+			t.Fatalf("%.40q: split changed", s)
 		}
 	}
 	changed := 0
@@ -56,7 +56,7 @@ func TestPrune(t *testing.T) {
 		var text, ref string
 		for _, id := range ids {
 			if id < 0 || int(id) >= pruned.VocabSize() {
-				t.Fatalf("id %d hors vocabulaire", id)
+				t.Fatalf("id %d out of vocabulary", id)
 			}
 			text += pruned.Token(id)
 		}
@@ -64,15 +64,15 @@ func TestPrune(t *testing.T) {
 			ref += tok.Token(id)
 		}
 		if text != ref && !hasByteTokens(pruned, ids) {
-			t.Fatalf("%.40q : le découpage ne décrit plus le même texte", s)
+			t.Fatalf("%.40q: split no longer describes the same text", s)
 		}
 		if len(ids) != len(tok.Encode(s)) {
 			changed++
 		}
 	}
-	t.Logf("%d textes hors corpus sur %d découpés autrement", changed, len(other))
+	t.Logf("%d texts out of corpus split differently out of %d", changed, len(other))
 	if pruned.BosID() != newID[tok.BosID()] || pruned.EosID() != newID[tok.EosID()] {
-		t.Fatal("tokens spéciaux mal renumérotés")
+		t.Fatal("special tokens mis-renumbered")
 	}
 }
 
@@ -99,6 +99,6 @@ func TestLoadShared(t *testing.T) {
 		t.Fatal(err)
 	}
 	if a != c {
-		t.Fatal("deux fichiers identiques devraient donner le même tokenizer")
+		t.Fatal("two identical files should give the same tokenizer")
 	}
 }

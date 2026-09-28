@@ -6,14 +6,14 @@ import (
 	"testing"
 )
 
-// Le noyau matériel et le noyau portable donnent les mêmes entiers.
+// The hardware kernel and the portable kernel produce the same integers.
 func TestMicroKernel8MatchesGo(t *testing.T) {
 	if !Int8Fast() {
-		t.Skip("pas d'AVX-VNNI")
+		t.Skip("no AVX-VNNI")
 	}
 	r := rand.New(rand.NewSource(1))
 	for _, kq := range []int{1, 3, 96, 288} {
-		lda := kq*4 + 12 // pas plus large que la ligne : le noyau doit le respecter
+		lda := kq*4 + 12 // not just the width of the row: the kernel must respect it
 		ap := make([]uint8, mr8*lda)
 		bp := make([]int8, kq*nr8*4)
 		for i := range ap {
@@ -26,13 +26,13 @@ func TestMicroKernel8MatchesGo(t *testing.T) {
 		microKernel8(kq, ap, lda, bp, &got)
 		microKernel8Go(kq, ap, lda, bp, &want)
 		if got != want {
-			t.Fatalf("kq=%d : %v\nattendu %v", kq, got[:8], want[:8])
+			t.Fatalf("kq=%d: %v\nwant %v", kq, got[:8], want[:8])
 		}
 	}
 }
 
-// Le produit quantifié reste proche du produit float32 : l'erreur tient
-// aux arrondis int8, pas à l'empaquetage.
+// The quantized product stays close to the float32 product: the error
+// comes from int8 rounding, not from packing.
 func TestMatMul8(t *testing.T) {
 	r := rand.New(rand.NewSource(2))
 	for _, s := range [][3]int{{1, 1, 1}, {7, 384, 1152}, {15, 1152, 384}, {33, 301, 17}} {
@@ -52,13 +52,13 @@ func TestMatMul8(t *testing.T) {
 				den += float64(want[i]) * float64(want[i])
 			}
 			if rel := math.Sqrt(num / den); rel > 0.02 {
-				t.Fatalf("%v transB=%v : erreur relative %.3g", s, transB, rel)
+				t.Fatalf("%v transB=%v: relative error %.3g", s, transB, rel)
 			}
 			before := append([]float32(nil), got...)
 			MatMul8(got, a, p, m, true)
 			for i := range got {
 				if math.Abs(float64(got[i]-2*before[i])) > 1e-4*math.Abs(float64(before[i]))+1e-6 {
-					t.Fatalf("%v accumulate : [%d] %v, attendu %v", s, i, got[i], 2*before[i])
+					t.Fatalf("%v accumulate: [%d] %v, want %v", s, i, got[i], 2*before[i])
 				}
 			}
 		}

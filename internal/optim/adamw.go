@@ -1,25 +1,25 @@
-// Package optim implémente AdamW, à l'identique de torch.optim.AdamW, et sa
-// variante creuse pour les tables d'embeddings.
+// Package optim implements AdamW, identical to torch.optim.AdamW, and its
+// sparse variant for embedding tables.
 package optim
 
 import "math"
 
-// Dense est un paramètre dense et son gradient.
+// Dense is a dense parameter and its gradient.
 type Dense struct {
 	W, G []float32
-	// Decay applique le weight decay découplé. Il est d'usage de l'exclure
-	// des normalisations et des embeddings.
+	// Decay applies decoupled weight decay. It is customary to exclude it
+	// from normalizations and embeddings.
 	Decay bool
 }
 
-// Sparse est une table dont seules certaines lignes ont un gradient.
+// Sparse is a table where only some rows have a gradient.
 type Sparse struct {
 	W     []float32
 	Width int
-	Rows  map[int32][]float32 // gradient par ligne
+	Rows  map[int32][]float32 // gradient per row
 }
 
-// Config reprend les hyperparamètres de torch.optim.AdamW.
+// Config mirrors the hyperparameters of torch.optim.AdamW.
 type Config struct {
 	LR          float64
 	Beta1       float64
@@ -28,32 +28,32 @@ type Config struct {
 	WeightDecay float64
 }
 
-// DefaultConfig est la configuration par défaut de PyTorch, avec le weight
-// decay usuel du fine-tuning.
+// DefaultConfig is PyTorch's default configuration, with the weight decay
+// usual for fine-tuning.
 func DefaultConfig(lr float64) Config {
 	return Config{LR: lr, Beta1: 0.9, Beta2: 0.999, Eps: 1e-8, WeightDecay: 0.01}
 }
 
-// AdamW garde les moments de chaque paramètre. Les paramètres doivent être
-// passés dans le même ordre à chaque Step.
+// AdamW keeps the moments of each parameter. The parameters must be passed
+// in the same order at each Step.
 type AdamW struct {
 	Cfg  Config
 	step int
 	m, v [][]float32
-	// Moments des lignes d'embedding déjà vues : Adam « paresseux », comme
-	// torch.optim.SparseAdam. Une ligne absente du lot garde ses moments et
-	// ses poids.
+	// Moments of embedding rows already seen: "lazy" Adam, as in
+	// torch.optim.SparseAdam. A row absent from the batch keeps its moments
+	// and its weights.
 	sm, sv []map[int32][]float32
 }
 
-// New crée un optimiseur.
+// New creates an optimizer.
 func New(cfg Config) *AdamW { return &AdamW{Cfg: cfg} }
 
-// Steps retourne le nombre de pas effectués.
+// Steps returns the number of steps taken.
 func (o *AdamW) Steps() int { return o.step }
 
-// Step applique un pas à tous les paramètres, au taux lr (qui remplace
-// Cfg.LR, pour les calendriers de taux).
+// Step applies a step to all parameters, at rate lr (which overrides
+// Cfg.LR, for rate schedules).
 func (o *AdamW) Step(lr float64, dense []Dense, sparse []Sparse) {
 	if o.m == nil {
 		o.m = make([][]float32, len(dense))
@@ -97,8 +97,8 @@ func (o *AdamW) Step(lr float64, dense []Dense, sparse []Sparse) {
 	}
 }
 
-// update suit l'ordre des opérations de l'implémentation « for-loop » de
-// PyTorch, pour que les arrondis soient les mêmes.
+// update follows the operation order of PyTorch's "for-loop"
+// implementation, so that rounding matches.
 func update(w, g, m, v []float32, decay, stepSize, sqrtBC2 float64, c Config) {
 	b1, b2 := float32(c.Beta1), float32(c.Beta2)
 	for j := range w {
@@ -113,8 +113,8 @@ func update(w, g, m, v []float32, decay, stepSize, sqrtBC2 float64, c Config) {
 	}
 }
 
-// ClipGradNorm ramène la norme L2 globale des gradients à maxNorm si elle la
-// dépasse, et retourne la norme avant écrêtage.
+// ClipGradNorm scales the global L2 norm of the gradients down to maxNorm if
+// it exceeds it, and returns the norm before clipping.
 func ClipGradNorm(maxNorm float64, dense []Dense, sparse []Sparse) float64 {
 	var sq float64
 	for _, p := range dense {

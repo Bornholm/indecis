@@ -22,7 +22,7 @@ func bekkoDir(t testing.TB) string {
 		dir = filepath.Join(home, ".cache/indecis/models/bekko-embedding-v1-a8m")
 	}
 	if _, err := os.Stat(filepath.Join(dir, "model.safetensors")); err != nil {
-		t.Skipf("modèle bekko absent (%s) : définir INDECIS_BEKKO_DIR", dir)
+		t.Skipf("bekko model missing (%s): set INDECIS_BEKKO_DIR", dir)
 	}
 	return dir
 }
@@ -95,11 +95,11 @@ func maxAbsDiff(a, b []float32) float64 {
 	return d
 }
 
-// Tolérance : les poids sont en bf16 mais le calcul est en float32 des deux
-// côtés ; les écarts viennent de l'ordre des sommes.
+// Tolerance: the weights are in bf16 but the computation is in float32 on
+// both sides; the discrepancies come from summation order.
 const forwardTol = 2e-4
 
-// Parité avec transformers, séquence par séquence.
+// Parity with transformers, sequence by sequence.
 func TestForwardParity(t *testing.T) {
 	m, tok := loadBekko(t)
 	fx := readForwardFixtures(t)
@@ -109,7 +109,7 @@ func TestForwardParity(t *testing.T) {
 		name := fmt.Sprintf("%d:%.30q", i, c.Text)
 		ids := tok.Encode(c.Text)
 		if !slices.Equal(ids, c.IDs) {
-			t.Fatalf("%s: tokens %v, attendu %v", name, ids, c.IDs)
+			t.Fatalf("%s: tokens %v, expected %v", name, ids, c.IDs)
 		}
 		b := NewBatch([][]int32{ids}, m.Cfg.PadID)
 		s, err := m.Forward(b)
@@ -130,14 +130,14 @@ func TestForwardParity(t *testing.T) {
 			d := maxAbsDiff(s.Hidden, want)
 			t.Logf("%s: hidden |Δ|max = %.2g", name, d)
 			if d > forwardTol*5 {
-				t.Errorf("%s: hidden |Δ|max = %g sur %d tokens", name, d, h.Rows)
+				t.Errorf("%s: hidden |Δ|max = %g over %d tokens", name, d, h.Rows)
 			}
 		}
 	}
 }
 
-// Un lot complété doit donner, pour chaque séquence, le même résultat que la
-// séquence seule : le padding ne doit rien changer.
+// A padded batch must give, for each sequence, the same result as the
+// sequence alone: padding must not change anything.
 func TestForwardBatchMatchesSingle(t *testing.T) {
 	m, tok := loadBekko(t)
 	fx := readForwardFixtures(t)
@@ -154,7 +154,7 @@ func TestForwardBatchMatchesSingle(t *testing.T) {
 	pooled := MeanPool(s.Hidden, b, H)
 	for i, c := range fx.Cases {
 		if d := maxAbsDiff(pooled[i*H:(i+1)*H], c.Pooled); d > forwardTol {
-			t.Errorf("cas %d en lot : |Δ|max = %g", i, d)
+			t.Errorf("batched case %d: |Δ|max = %g", i, d)
 		}
 	}
 }

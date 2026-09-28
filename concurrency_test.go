@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-// Des requêtes simultanées sur un même modèle donnent les mêmes réponses
-// qu'une à une : à lancer avec -race.
+// Simultaneous requests on the same model give the same answers as one at
+// a time: run with -race.
 func TestConcurrentInference(t *testing.T) {
 	for _, batching := range []bool{false, true} {
 		t.Run(fmt.Sprint("batching=", batching), func(t *testing.T) { concurrentInference(t, batching) })
@@ -49,7 +49,7 @@ func concurrentInference(t *testing.T, batching bool) {
 					return
 				}
 				if d[0]["match"].P != want[i]["match"].P {
-					errs <- fmt.Errorf("Decide %d : %v ≠ %v", i, d[0]["match"].P, want[i]["match"].P)
+					errs <- fmt.Errorf("Decide %d: %v != %v", i, d[0]["match"].P, want[i]["match"].P)
 				}
 				a, err := m.ChooseNearest(ctx, cands, texts[i])
 				if err != nil {
@@ -57,7 +57,7 @@ func concurrentInference(t *testing.T, batching bool) {
 					return
 				}
 				if a[0].Confidence != wantOpen[i].Confidence {
-					errs <- fmt.Errorf("ChooseNearest %d : %v ≠ %v", i, a[0].Confidence, wantOpen[i].Confidence)
+					errs <- fmt.Errorf("ChooseNearest %d: %v != %v", i, a[0].Confidence, wantOpen[i].Confidence)
 				}
 			}
 		}(g)

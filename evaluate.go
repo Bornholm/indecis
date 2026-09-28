@@ -10,32 +10,32 @@ import (
 	"github.com/bornholm/indecis/dataset"
 )
 
-// Metrics mesure une question sur un jeu d'exemples.
+// Metrics measures a question over a set of examples.
 type Metrics struct {
 	Question string `json:"question"`
 	Kind     Kind   `json:"kind"`
 	N        int    `json:"n"`
-	// Accuracy : réponse la plus probable = étiquette. Pour Noul, seuil 0,5 ;
-	// pour une étiquette souple, c'est son arrondi.
+	// Accuracy: most probable answer = label. For Noul, threshold 0.5;
+	// for a soft label, it is its rounding.
 	Accuracy float64 `json:"accuracy"`
-	// Noul : précision, rappel et F1 de la classe « vrai », aire sous la
-	// courbe ROC.
+	// Noul: precision, recall and F1 of the "true" class, area under the
+	// ROC curve.
 	Precision float64 `json:"precision,omitempty"`
 	Recall    float64 `json:"recall,omitempty"`
 	F1        float64 `json:"f1,omitempty"`
 	AUC       float64 `json:"auc,omitempty"`
-	// Choice : F1 moyen sur les options présentes.
+	// Choice: average F1 over the options present.
 	MacroF1 float64 `json:"macro_f1,omitempty"`
-	// Score : écart absolu moyen entre niveau attendu et niveau réel.
+	// Score: mean absolute deviation between expected level and actual level.
 	MAE float64 `json:"mae,omitempty"`
-	// NLL est la log-vraisemblance négative moyenne, Brier le score de
-	// Brier (Noul), ECE l'erreur de calibration sur 10 classes de confiance.
+	// NLL is the mean negative log-likelihood, Brier the Brier score
+	// (Noul), ECE the calibration error over 10 confidence bins.
 	NLL   float64 `json:"nll"`
 	Brier float64 `json:"brier,omitempty"`
 	ECE   float64 `json:"ece"`
 }
 
-// Evaluate mesure le modèle, températures comprises.
+// Evaluate measures the model, including temperatures.
 func (m *Model) Evaluate(ctx context.Context, examples []dataset.Example) ([]Metrics, error) {
 	data, err := m.encode(examples)
 	if err != nil {
@@ -123,8 +123,8 @@ func (h *head) metrics(answers []Answer, targets, zs [][]float64) Metrics {
 			case y && !pred:
 				fn++
 			}
-			// Le classement se fait sur le logit : la probabilité sature à
-			// 1 en float64 dès z > 37, et les ex aequo fausseraient l'AUC.
+			// Ranking is done on the logit: the probability saturates to
+			// 1 in float64 as soon as z > 37, and ties would skew the AUC.
 			scores[i], labels[i] = zs[i][0], y
 		}
 		mt.Precision = safeDiv(tp, tp+fp)
@@ -162,8 +162,8 @@ func (h *head) metrics(answers []Answer, targets, zs [][]float64) Metrics {
 	return mt
 }
 
-// ece est l'erreur de calibration attendue : l'écart moyen, pondéré par
-// effectif, entre confiance et exactitude dans chaque classe de confiance.
+// ece is the expected calibration error: the average gap, weighted by
+// count, between confidence and accuracy in each confidence bin.
 func ece(conf []float64, correct []bool, bins int) float64 {
 	sumC := make([]float64, bins)
 	sumA := make([]float64, bins)
@@ -185,8 +185,8 @@ func ece(conf []float64, correct []bool, bins int) float64 {
 	return e
 }
 
-// auc calcule l'aire sous la courbe ROC par les rangs (Mann-Whitney), ex
-// aequo comptés pour moitié.
+// auc computes the area under the ROC curve by ranks (Mann-Whitney), ties
+// counted for half.
 func auc(scores []float64, labels []bool) float64 {
 	idx := make([]int, len(scores))
 	for i := range idx {
@@ -231,7 +231,7 @@ func maxOf(v []float64) float64 {
 	return m
 }
 
-// String présente les métriques sur une ligne.
+// String presents the metrics on one line.
 func (mt Metrics) String() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%-12s n=%-5d acc=%.3f", mt.Question, mt.N, mt.Accuracy)

@@ -8,8 +8,8 @@ import (
 	"unsafe"
 )
 
-// mapFile projette le fichier en lecture seule. La projection vit autant
-// que le processus : les tenseurs bruts qui en sont tirés la référencent.
+// mapFile maps the file read-only. The mapping lives as long as the
+// process: the raw tensors drawn from it reference it.
 func mapFile(path string) ([]byte, bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -25,15 +25,15 @@ func mapFile(path string) ([]byte, bool, error) {
 	}
 	b, err := syscall.Mmap(int(f.Fd()), 0, int(st.Size()), syscall.PROT_READ, syscall.MAP_SHARED)
 	if err != nil {
-		b, err := os.ReadFile(path) // système de fichiers sans projection
+		b, err := os.ReadFile(path) // filesystem without mmap support
 		return b, false, err
 	}
 	return b, true, nil
 }
 
-// evict signale au noyau que les pages de b ne seront plus lues : elles
-// quittent la mémoire du processus, et seront relues dans le fichier si on
-// y revient. Seules les pages entièrement couvertes par b sont concernées.
+// evict tells the kernel that the pages of b will no longer be read: they
+// leave the process's memory, and will be reread from the file if it is
+// accessed again. Only pages fully covered by b are affected.
 func evict(b []byte) {
 	page := uintptr(os.Getpagesize())
 	if len(b) == 0 {

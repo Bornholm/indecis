@@ -1,8 +1,8 @@
-// Package safetensors lit et écrit le format safetensors : un en-tête JSON
-// décrivant chaque tenseur, suivi des données brutes en little-endian.
+// Package safetensors reads and writes the safetensors format: a JSON
+// header describing each tensor, followed by raw little-endian data.
 //
-// Les tenseurs sont toujours rendus en float32 : c'est la précision de
-// calcul d'indecis. BF16 et F16 sont convertis à la lecture.
+// Tensors are always returned as float32: that is indecis's compute
+// precision. BF16 and F16 are converted on read.
 package safetensors
 
 import (
@@ -15,17 +15,17 @@ import (
 	"sort"
 )
 
-// Tensor est un tenseur décodé.
+// Tensor is a decoded tensor.
 type Tensor struct {
 	Shape []int
 	Data  []float32
-	// DType est le format d'écriture : "F32" (défaut), "BF16" (arrondi au
-	// plus proche) ou "I8" (Data porte des entiers déjà quantifiés). À la
-	// lecture, il vaut toujours "".
+	// DType is the write format: "F32" (default), "BF16" (rounded to
+	// nearest), or "I8" (Data holds already-quantized integers). On read,
+	// it is always "".
 	DType string
 }
 
-// Len retourne le nombre d'éléments attendu d'après la forme.
+// Len returns the number of elements expected from the shape.
 func (t Tensor) Len() int {
 	n := 1
 	for _, d := range t.Shape {
@@ -40,11 +40,11 @@ type entry struct {
 	Offsets [2]int `json:"data_offsets"`
 }
 
-// maxHeader borne l'en-tête : un fichier corrompu ne doit pas provoquer une
-// allocation de plusieurs gigaoctets.
+// maxHeader bounds the header: a corrupted file must not trigger a
+// multi-gigabyte allocation.
 const maxHeader = 100 << 20
 
-// ReadFile lit tous les tenseurs d'un fichier.
+// ReadFile reads all tensors of a file.
 func ReadFile(path string) (map[string]Tensor, map[string]string, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -53,7 +53,7 @@ func ReadFile(path string) (map[string]Tensor, map[string]string, error) {
 	return Parse(b)
 }
 
-// Parse décode un contenu safetensors complet.
+// Parse decodes complete safetensors content.
 func Parse(b []byte) (map[string]Tensor, map[string]string, error) {
 	f, err := parseHeader(b)
 	if err != nil {
@@ -63,28 +63,28 @@ func Parse(b []byte) (map[string]Tensor, map[string]string, error) {
 	for name, e := range f.entries {
 		t, err := decode(e, f.data)
 		if err != nil {
-			return nil, nil, fmt.Errorf("safetensors: %s : %w", name, err)
+			return nil, nil, fmt.Errorf("safetensors: %s: %w", name, err)
 		}
 		out[name] = t
 	}
 	return out, f.meta, nil
 }
 
-// File est un fichier safetensors dont les tenseurs sont décodés à la
-// demande. Ouvert par Open, son contenu est projeté en mémoire quand le
-// système le permet : les tenseurs laissés bruts (Raw) ne coûtent alors que
-// les pages effectivement lues, partagées entre processus.
+// File is a safetensors file whose tensors are decoded on demand. Opened by
+// Open, its content is mapped into memory when the system allows it: the
+// tensors left raw (Raw) then cost only the pages actually read, shared
+// between processes.
 //
-// Le fichier ne doit pas être modifié en place tant que File est utilisé :
-// le remplacer par un renommage est sans danger.
+// The file must not be modified in place while File is in use: replacing it
+// via a rename is safe.
 type File struct {
 	entries map[string]entry
 	meta    map[string]string
 	data    []byte
-	mapped  bool // data est une projection du fichier
+	mapped  bool // data is a mapping of the file
 }
 
-// Open ouvre un fichier safetensors sans décoder ses tenseurs.
+// Open opens a safetensors file without decoding its tensors.
 func Open(path string) (*File, error) {
 	b, mapped, err := mapFile(path)
 	if err != nil {
@@ -98,9 +98,9 @@ func Open(path string) (*File, error) {
 	return f, nil
 }
 
-// Evict libère les pages d'un tenseur déjà décodé (Tensor en a fait une
-// copie) : sans effet sur le contenu, qui sera relu dans le fichier si
-// besoin. N'agit que sur un fichier projeté en mémoire.
+// Evict releases the pages of a tensor already decoded (Tensor made a copy
+// of it): no effect on the content, which will be reread from the file if
+// needed. Only affects a file mapped into memory.
 func (f *File) Evict(name string) {
 	if !f.mapped {
 		return
@@ -114,37 +114,37 @@ func (f *File) Evict(name string) {
 
 func parseHeader(b []byte) (*File, error) {
 	if len(b) < 8 {
-		return nil, fmt.Errorf("safetensors: fichier tronqué")
+		return nil, fmt.Errorf("safetensors: truncated file")
 	}
 	n := binary.LittleEndian.Uint64(b[:8])
 	if n > maxHeader || 8+n > uint64(len(b)) {
-		return nil, fmt.Errorf("safetensors: en-tête de %d octets invalide", n)
+		return nil, fmt.Errorf("safetensors: invalid %d-byte header", n)
 	}
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(b[8:8+n], &raw); err != nil {
-		return nil, fmt.Errorf("safetensors: en-tête : %w", err)
+		return nil, fmt.Errorf("safetensors: header: %w", err)
 	}
 	f := &File{entries: make(map[string]entry, len(raw)), data: b[8+n:]}
 	for name, msg := range raw {
 		if name == "__metadata__" {
 			if err := json.Unmarshal(msg, &f.meta); err != nil {
-				return nil, fmt.Errorf("safetensors: métadonnées : %w", err)
+				return nil, fmt.Errorf("safetensors: metadata: %w", err)
 			}
 			continue
 		}
 		var e entry
 		if err := json.Unmarshal(msg, &e); err != nil {
-			return nil, fmt.Errorf("safetensors: %s : %w", name, err)
+			return nil, fmt.Errorf("safetensors: %s: %w", name, err)
 		}
 		if _, _, err := e.bytes(f.data); err != nil {
-			return nil, fmt.Errorf("safetensors: %s : %w", name, err)
+			return nil, fmt.Errorf("safetensors: %s: %w", name, err)
 		}
 		f.entries[name] = e
 	}
 	return f, nil
 }
 
-// Names liste les tenseurs du fichier, triés.
+// Names lists the tensors of the file, sorted.
 func (f *File) Names() []string {
 	names := make([]string, 0, len(f.entries))
 	for name := range f.entries {
@@ -154,10 +154,10 @@ func (f *File) Names() []string {
 	return names
 }
 
-// Meta retourne les métadonnées du fichier.
+// Meta returns the metadata of the file.
 func (f *File) Meta() map[string]string { return f.meta }
 
-// Tensor décode un tenseur en float32.
+// Tensor decodes a tensor as float32.
 func (f *File) Tensor(name string) (Tensor, bool, error) {
 	e, ok := f.entries[name]
 	if !ok {
@@ -165,13 +165,13 @@ func (f *File) Tensor(name string) (Tensor, bool, error) {
 	}
 	t, err := decode(e, f.data)
 	if err != nil {
-		return t, true, fmt.Errorf("safetensors: %s : %w", name, err)
+		return t, true, fmt.Errorf("safetensors: %s: %w", name, err)
 	}
 	return t, true, nil
 }
 
-// Raw retourne un tenseur sans le décoder : son dtype, sa forme et ses
-// octets en little-endian, à ne pas modifier.
+// Raw returns a tensor without decoding it: its dtype, its shape, and its
+// little-endian bytes, not to be modified.
 func (f *File) Raw(name string) (dtype string, shape []int, data []byte, ok bool) {
 	e, ok := f.entries[name]
 	if !ok {
@@ -181,19 +181,19 @@ func (f *File) Raw(name string) (dtype string, shape []int, data []byte, ok bool
 	return e.DType, e.Shape, raw, true
 }
 
-// bytes retourne la taille d'un élément et les octets du tenseur, après
-// avoir vérifié qu'ils correspondent à la forme.
+// bytes returns the size of an element and the bytes of the tensor, after
+// checking that they match the shape.
 func (e entry) bytes(data []byte) (int, []byte, error) {
 	n := 1
 	for _, d := range e.Shape {
 		if d < 0 {
-			return 0, nil, fmt.Errorf("forme %v invalide", e.Shape)
+			return 0, nil, fmt.Errorf("invalid shape %v", e.Shape)
 		}
 		n *= d
 	}
 	start, end := e.Offsets[0], e.Offsets[1]
 	if start < 0 || end < start || end > len(data) {
-		return 0, nil, fmt.Errorf("offsets [%d, %d) hors des données (%d octets)", start, end, len(data))
+		return 0, nil, fmt.Errorf("offsets [%d, %d) out of data bounds (%d bytes)", start, end, len(data))
 	}
 	var size int
 	switch e.DType {
@@ -204,11 +204,11 @@ func (e entry) bytes(data []byte) (int, []byte, error) {
 	case "I8":
 		size = 1
 	default:
-		return 0, nil, fmt.Errorf("dtype %s non pris en charge", e.DType)
+		return 0, nil, fmt.Errorf("unsupported dtype %s", e.DType)
 	}
 	raw := data[start:end]
 	if len(raw) != n*size {
-		return 0, nil, fmt.Errorf("%d octets pour %d éléments %s", len(raw), n, e.DType)
+		return 0, nil, fmt.Errorf("%d bytes for %d %s elements", len(raw), n, e.DType)
 	}
 	return size, raw, nil
 }
@@ -248,7 +248,7 @@ func halfToFloat(h uint16) float32 {
 	switch {
 	case exp == 0 && mant == 0:
 		return math.Float32frombits(sign)
-	case exp == 0: // sous-normal
+	case exp == 0: // subnormal
 		f := float32(mant) / 1024 / 16384
 		if sign != 0 {
 			return -f
@@ -260,8 +260,8 @@ func halfToFloat(h uint16) float32 {
 	return math.Float32frombits(sign | (exp+112)<<23 | mant<<13)
 }
 
-// Write écrit des tenseurs float32. Les noms sont triés : même contenu, même
-// fichier.
+// Write writes float32 tensors. Names are sorted: same content, same
+// file.
 func Write(w io.Writer, tensors map[string]Tensor, meta map[string]string) error {
 	names := make([]string, 0, len(tensors))
 	for name := range tensors {
@@ -277,7 +277,7 @@ func Write(w io.Writer, tensors map[string]Tensor, meta map[string]string) error
 	for _, name := range names {
 		t := tensors[name]
 		if len(t.Data) != t.Len() {
-			return fmt.Errorf("safetensors: %s : %d éléments pour la forme %v", name, len(t.Data), t.Shape)
+			return fmt.Errorf("safetensors: %s: %d elements for shape %v", name, len(t.Data), t.Shape)
 		}
 		size, dtype := 4, "F32"
 		switch t.DType {
@@ -287,7 +287,7 @@ func Write(w io.Writer, tensors map[string]Tensor, meta map[string]string) error
 		case "I8":
 			size, dtype = 1, "I8"
 		default:
-			return fmt.Errorf("safetensors: %s : dtype d'écriture %q non pris en charge", name, t.DType)
+			return fmt.Errorf("safetensors: %s: unsupported write dtype %q", name, t.DType)
 		}
 		header[name] = entry{DType: dtype, Shape: t.Shape, Offsets: [2]int{offset, offset + size*len(t.Data)}}
 		offset += size * len(t.Data)
@@ -296,7 +296,7 @@ func Write(w io.Writer, tensors map[string]Tensor, meta map[string]string) error
 	if err != nil {
 		return err
 	}
-	// L'en-tête est complété par des espaces pour aligner les données sur 8.
+	// The header is padded with spaces to align the data on 8 bytes.
 	for len(hb)%8 != 0 {
 		hb = append(hb, ' ')
 	}
@@ -332,15 +332,15 @@ func Write(w io.Writer, tensors map[string]Tensor, meta map[string]string) error
 	return err
 }
 
-// ToBF16 arrondit un float32 au bfloat16 le plus proche (égalité : pair).
+// ToBF16 rounds a float32 to the nearest bfloat16 (ties to even).
 func ToBF16(v float32) uint16 {
 	b := math.Float32bits(v)
-	if v != v { // NaN reste NaN
+	if v != v { // NaN stays NaN
 		return uint16(b>>16) | 0x40
 	}
 	b += 0x7fff + ((b >> 16) & 1)
 	return uint16(b >> 16)
 }
 
-// FromBF16 est l'inverse exact de ToBF16 sur les valeurs représentables.
+// FromBF16 is the exact inverse of ToBF16 on representable values.
 func FromBF16(h uint16) float32 { return math.Float32frombits(uint32(h) << 16) }

@@ -12,16 +12,16 @@ import (
 	"github.com/bornholm/indecis/dataset"
 )
 
-// prepare collecte les trois sources de la preuve de concept :
+// prepare collects the proof of concept's three sources:
 //
-//   - tickets.jsonl : Tobi-Bueck/customer-support-tickets (CC-BY-NC-4.0),
-//     tickets de support en anglais et en allemand, avec leur file (queue),
-//     leur type et des mots-clés (tags). Licence non commerciale : jeu de
-//     preuve de concept, jamais versionné.
-//   - imnim.jsonl : imnim/multiclass-email-classification (MIT), courriels
-//     avec des catégories que le modèle ne voit jamais à l'entraînement.
-//   - enron.jsonl : courriels réels d'Enron (corbt/enron-emails), sans
-//     étiquettes, que les teachers classent selon la liste classique.
+//   - tickets.jsonl: Tobi-Bueck/customer-support-tickets (CC-BY-NC-4.0),
+//     support tickets in English and German, with their queue, their
+//     type and keywords (tags). Non-commercial license: proof of
+//     concept dataset, never versioned.
+//   - imnim.jsonl: imnim/multiclass-email-classification (MIT), emails
+//     with categories the model never sees during training.
+//   - enron.jsonl: real Enron emails (corbt/enron-emails), unlabeled,
+//     that the teachers classify according to the classic list.
 func prepare(ctx context.Context, dir string, ticketPages, enronPages int) error {
 	var tickets []dataset.Example
 	err := rows(ctx, "Tobi-Bueck/customer-support-tickets", "train", 61765, ticketPages, "poc", func(r map[string]any) {
@@ -85,11 +85,11 @@ func prepare(ctx context.Context, dir string, ticketPages, enronPages int) error
 	return write(dir, "enron", dedupe(enron))
 }
 
-// quoted repère le début d'un message cité ou transféré dans une réponse.
+// quoted spots the start of a quoted or forwarded message in a reply.
 var quoted = regexp.MustCompile(`(?m)^\s*-{3,}\s*(Original Message|Forwarded by)`)
 
 func emailText(subject, body string) string {
-	body = strings.ReplaceAll(body, `\n`, "\n") // tickets : sauts de ligne échappés
+	body = strings.ReplaceAll(body, `\n`, "\n") // tickets: escaped line breaks
 	subject, body = strings.TrimSpace(subject), strings.TrimSpace(body)
 	switch {
 	case body == "":
@@ -110,7 +110,7 @@ func write(dir, name string, ex []dataset.Example) error {
 	if err := dataset.WriteFile(path, ex); err != nil {
 		return err
 	}
-	log.Printf("%s : %d exemples → %s", name, len(ex), path)
+	log.Printf("%s: %d examples -> %s", name, len(ex), path)
 	return nil
 }
 
@@ -126,8 +126,8 @@ func dedupe(ex []dataset.Example) []dataset.Example {
 	return out
 }
 
-// moreEnron collecte d'autres courriels Enron pour l'entraînement, sans
-// recouvrement avec ceux déjà collectés (dont la référence).
+// moreEnron collects more Enron emails for training, without overlap
+// with those already collected (including the reference set).
 func moreEnron(ctx context.Context, dir string, pages int, seed string) error {
 	known := map[string]bool{}
 	if old, err := dataset.ReadFile(filepath.Join(dir, "enron.jsonl")); err == nil {
@@ -153,11 +153,11 @@ func moreEnron(ctx context.Context, dir string, pages int, seed string) error {
 	return write(dir, "enron_train_unlabeled", out)
 }
 
-// prepareASN collecte des lettres de suite d'inspection de l'Autorité de
-// sûreté nucléaire (AdrienB134/ASN_Lettres_De_Suivi) : de vraies lettres
-// professionnelles en français, dont l'objet donne le thème de
-// l'inspection. Le texte gardé est la synthèse de l'inspection, sans les
-// phrases qui nomment le thème ; le thème est l'étiquette à retrouver.
+// prepareASN collects follow-up inspection letters from the French
+// nuclear safety authority (AdrienB134/ASN_Lettres_De_Suivi): real
+// professional letters in French, whose subject gives the inspection
+// theme. The text kept is the inspection summary, without the
+// sentences that name the theme; the theme is the label to recover.
 func prepareASN(ctx context.Context, dir string, pages, themes int) error {
 	var all []dataset.Example
 	err := rows(ctx, "AdrienB134/ASN_Lettres_De_Suivi", "train", 14408, pages, "poc", func(r map[string]any) {
@@ -173,7 +173,7 @@ func prepareASN(ctx context.Context, dir string, pages, themes int) error {
 		}
 		body := raw[i:]
 		if j := strings.IndexByte(body, '\n'); j > 0 {
-			body = body[j+1:] // titre de la section
+			body = body[j+1:] // section title
 		}
 		var kept []string
 		for _, s := range sentence.Split(body, -1) {
@@ -220,7 +220,7 @@ var (
 	sentence = regexp.MustCompile(`\.\s+`)
 )
 
-// normTheme unifie la casse et les variantes d'un même thème.
+// normTheme unifies the case and variants of the same theme.
 func normTheme(t string) string {
 	t = strings.ToLower(strings.Join(strings.Fields(t), " "))
 	t = strings.TrimPrefix(t, "gestion des ")

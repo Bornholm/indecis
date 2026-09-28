@@ -11,11 +11,11 @@ import (
 
 func runSynth(args []string) error {
 	fs := flag.NewFlagSet("synth", flag.ExitOnError)
-	dir := fs.String("templates", "", "répertoire des gabarits (*.tmpl) et gazetteers (*.tsv)")
-	n := fs.Int("n", 1000, "nombre d'exemples")
-	seed := fs.Uint64("seed", 1, "graine")
-	out := fs.String("out", "-", "fichier JSONL de sortie (- : sortie standard)")
-	dedupe := fs.Bool("dedupe", true, "écarter les doublons")
+	dir := fs.String("templates", "", "directory of templates (*.tmpl) and gazetteers (*.tsv)")
+	n := fs.Int("n", 1000, "number of examples")
+	seed := fs.Uint64("seed", 1, "seed")
+	out := fs.String("out", "-", "output JSONL file (- : standard output)")
+	dedupe := fs.Bool("dedupe", true, "discard duplicates")
 	fs.Parse(args)
 	if err := required(fs, "templates"); err != nil {
 		return err
@@ -34,6 +34,6 @@ func runSynth(args []string) error {
 	if err := dataset.WriteFile(*out, ex); err != nil {
 		return err
 	}
-	log.Printf("%d exemples → %s", len(ex), *out)
+	log.Printf("%d examples -> %s", len(ex), *out)
 	return nil
 }

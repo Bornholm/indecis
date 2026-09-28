@@ -12,8 +12,9 @@ import (
 	"time"
 )
 
-// rows lit des pages de 100 lignes d'un jeu Hugging Face (datasets-server).
-// pages = 0 : tout le jeu ; sinon des pages tirées au hasard, selon seed.
+// rows reads pages of 100 rows from a Hugging Face dataset
+// (datasets-server). pages = 0: the whole dataset; otherwise pages
+// drawn at random, based on seed.
 func rows(ctx context.Context, name, split string, total, pages int, seed string, fn func(map[string]any)) error {
 	n := (total + 99) / 100
 	offsets := make([]int, 0, n)
@@ -42,7 +43,7 @@ func rows(ctx context.Context, name, split string, total, pages int, seed string
 		for _, r := range page.Rows {
 			fn(r.Row)
 		}
-		time.Sleep(time.Second) // ménage le datasets-server
+		time.Sleep(time.Second) // goes easy on the datasets-server
 	}
 	return nil
 }
@@ -62,9 +63,9 @@ func getJSON(ctx context.Context, u string, v any) error {
 		}
 		res.Body.Close()
 		if (res.StatusCode != http.StatusTooManyRequests && res.StatusCode < 500) || attempt == 6 {
-			return fmt.Errorf("%s : HTTP %d", u, res.StatusCode)
+			return fmt.Errorf("%s: HTTP %d", u, res.StatusCode)
 		}
-		log.Printf("HTTP %d, nouvel essai dans %s", res.StatusCode, delay)
+		log.Printf("HTTP %d, retrying in %s", res.StatusCode, delay)
 		time.Sleep(delay)
 		delay *= 2
 	}

@@ -5,24 +5,24 @@ import (
 	"math/rand"
 )
 
-// head est la couche de sortie d'une question, posée sur le vecteur poolé.
+// head is the output layer of a question, applied to the pooled vector.
 //
-//   - Noul : un logit z = w·x + b ;
-//   - Choice : K logits z = W·x + b ;
-//   - Score : K−1 logits ordinaux z_k = w_k·x + b_k, avec P(niveau > k) =
-//     σ(z_k) (décomposition de Frank et Hall). Chaque seuil a son propre
-//     vecteur : avec un vecteur partagé (CORAL), séparer un niveau
-//     intermédiaire exige d'écarter les biais, ce qu'Adam fait au rythme
-//     d'environ lr par pas. La cohérence entre seuils est rétablie à la
-//     lecture (voir answer).
+//   - Noul: one logit z = w.x + b;
+//   - Choice: K logits z = W.x + b;
+//   - Score: K-1 ordinal logits z_k = w_k.x + b_k, with P(level > k) =
+//     sigma(z_k) (Frank and Hall decomposition). Each threshold has its own
+//     vector: with a shared vector (CORAL), separating an intermediate level
+//     requires pulling the biases apart, which Adam does at a rate of
+//     about lr per step. Consistency between thresholds is restored on
+//     read (see answer).
 type head struct {
 	q    Question
 	w    []float32 // [rows, H]
 	b    []float32 // [outs]
 	gw   []float32
 	gb   []float32
-	rows int // lignes de w : 1, ou K pour Choice
-	outs int // nombre de logits
+	rows int // rows of w: 1, or K for Choice
+	outs int // number of logits
 }
 
 func newHead(q Question, hidden int, rng *rand.Rand) *head {
@@ -55,7 +55,7 @@ func (h *head) zeroGrad() {
 	clear(h.gb)
 }
 
-// logits calcule les logits d'un vecteur poolé x.
+// logits computes the logits of a pooled vector x.
 func (h *head) logits(x []float32) []float64 {
 	H := len(x)
 	z := make([]float64, h.outs)
@@ -69,14 +69,14 @@ func (h *head) logits(x []float32) []float64 {
 	return z
 }
 
-// lossGrad retourne la perte pour la cible t (voir Question.target), et le
-// gradient de la perte par rapport aux logits.
+// lossGrad returns the loss for target t (see Question.target), and the
+// gradient of the loss with respect to the logits.
 func (h *head) lossGrad(z, t []float64) (float64, []float64) {
 	dz := make([]float64, len(z))
 	var loss float64
 	switch h.q.Kind {
 	case Noul:
-		// BCE avec logits : softplus(z) − y·z
+		// BCE with logits: softplus(z) - y*z
 		loss = softplus(z[0]) - t[0]*z[0]
 		dz[0] = sigmoid(z[0]) - t[0]
 	case Choice:
@@ -101,8 +101,8 @@ func (h *head) lossGrad(z, t []float64) (float64, []float64) {
 	return loss, dz
 }
 
-// backward accumule les gradients des poids et retourne dL/dx, pour un
-// gradient dz sur les logits de l'entrée x.
+// backward accumulates the weight gradients and returns dL/dx, for a
+// gradient dz on the logits of input x.
 func (h *head) backward(x []float32, dz []float64, dx []float32) {
 	H := len(x)
 	for r := 0; r < h.rows; r++ {
@@ -117,7 +117,7 @@ func (h *head) backward(x []float32, dz []float64, dx []float32) {
 	}
 }
 
-// answer transforme les logits, divisés par la température, en réponse.
+// answer turns the logits, divided by the temperature, into an answer.
 func (h *head) answer(z []float64, temperature float64) Answer {
 	if temperature <= 0 {
 		temperature = 1
@@ -145,8 +145,8 @@ func (h *head) answer(z []float64, temperature float64) Answer {
 		a.Confidence = p[best]
 		a.Margin = margin(p, best)
 	case Score:
-		// P(niveau > k), rendu monotone : un modèle ordinal peut produire
-		// de légères inversions entre seuils.
+		// P(level > k), made monotone: an ordinal model can produce
+		// slight inversions between thresholds.
 		gt := make([]float64, len(zt))
 		for k, v := range zt {
 			gt[k] = sigmoid(v)
@@ -190,7 +190,7 @@ func sigmoid(z float64) float64 {
 	return e / (1 + e)
 }
 
-// softplus(z) = log(1 + e^z), stable pour les grands |z|.
+// softplus(z) = log(1 + e^z), stable for large |z|.
 func softplus(z float64) float64 {
 	if z > 30 {
 		return z
@@ -218,7 +218,7 @@ func softmax(z []float64) []float64 {
 	return p
 }
 
-// margin retourne p[best] moins la moyenne des autres probabilités.
+// margin returns p[best] minus the average of the other probabilities.
 func margin(p []float64, best int) float64 {
 	if len(p) < 2 {
 		return p[best]

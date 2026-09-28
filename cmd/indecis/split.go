@@ -7,17 +7,17 @@ import (
 	"github.com/bornholm/indecis/dataset"
 )
 
-// runSplit met de côté une part d'un jeu d'exemples, de façon
-// reproductible : par famille (des familles entières, pour mesurer la
-// généralisation à des familles jamais vues) ou exemple par exemple.
+// runSplit sets aside a part of a set of examples, reproducibly: by
+// family (whole families, to measure generalization to families never
+// seen) or example by example.
 func runSplit(args []string) error {
 	fs := flag.NewFlagSet("split", flag.ExitOnError)
-	in := fs.String("in", "", "exemples (JSONL, motifs séparés par des virgules)")
-	fraction := fs.Float64("fraction", 0.1, "part mise de côté")
+	in := fs.String("in", "", "examples (JSONL, comma-separated patterns)")
+	fraction := fs.Float64("fraction", 0.1, "fraction set aside")
 	by := fs.String("by", "example", "example ou family")
-	seed := fs.Uint64("seed", 1, "graine")
-	kept := fs.String("kept", "", "fichier des exemples gardés")
-	held := fs.String("held", "", "fichier des exemples mis de côté")
+	seed := fs.Uint64("seed", 1, "seed")
+	kept := fs.String("kept", "", "file of kept examples")
+	held := fs.String("held", "", "file of held-out examples")
 	fs.Parse(args)
 	if err := required(fs, "in", "kept", "held"); err != nil {
 		return err
@@ -28,7 +28,7 @@ func runSplit(args []string) error {
 	}
 	k, h := holdOut(ex, *fraction, *seed, *by)
 	if *by != "family" {
-		// holdOut a vidé les familles pour découper : on les rend.
+		// holdOut cleared the families to split: we restore them.
 		k, h = restoreFamilies(ex, k), restoreFamilies(ex, h)
 	}
 	if err := dataset.WriteFile(*kept, k); err != nil {
@@ -37,7 +37,7 @@ func runSplit(args []string) error {
 	if err := dataset.WriteFile(*held, h); err != nil {
 		return err
 	}
-	log.Printf("%d gardés → %s, %d mis de côté → %s", len(k), *kept, len(h), *held)
+	log.Printf("%d kept -> %s, %d held out -> %s", len(k), *kept, len(h), *held)
 	return nil
 }
 

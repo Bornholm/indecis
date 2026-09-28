@@ -15,7 +15,7 @@ func randSlice(r *rand.Rand, n int) []float32 {
 	return s
 }
 
-// naive calcule la référence en float64.
+// naive computes the reference in float64.
 func naive(a, b []float32, m, k, n int, transA, transB bool) []float64 {
 	out := make([]float64, m*n)
 	for i := 0; i < m; i++ {
@@ -40,9 +40,9 @@ func naive(a, b []float32, m, k, n int, transA, transB bool) []float64 {
 
 func TestMatMul_AllLayoutsAndEdges(t *testing.T) {
 	r := rand.New(rand.NewSource(1))
-	// Tailles choisies pour tomber sur les bords : m non multiple de mr,
-	// n non multiple de nr, k qui franchit un bloc kc, et assez grandes
-	// pour déclencher le parallélisme.
+	// Sizes chosen to hit the edges: m not a multiple of mr,
+	// n not a multiple of nr, k crossing a kc block, and large enough
+	// to trigger parallelism.
 	shapes := [][3]int{
 		{1, 1, 1}, {5, 3, 7}, {6, 16, 16}, {7, 17, 33},
 		{13, 300, 29}, {73, 257, 259}, {150, 520, 300},
@@ -56,7 +56,7 @@ func TestMatMul_AllLayoutsAndEdges(t *testing.T) {
 					a, b := randSlice(r, m*k), randSlice(r, k*n)
 					want := naive(a, b, m, k, n, tA, tB)
 
-					c := randSlice(r, m*n) // valeurs parasites : doivent être écrasées
+					c := randSlice(r, m*n) // garbage values: must be overwritten
 					MatMul(c, a, b, m, k, n, tA, tB, false)
 					check(t, c, want, nil, k)
 
@@ -72,8 +72,8 @@ func TestMatMul_AllLayoutsAndEdges(t *testing.T) {
 
 func check(t *testing.T, got []float32, want []float64, init []float32, k int) {
 	t.Helper()
-	// Erreur d'arrondi float32 : proportionnelle à √k pour des termes de
-	// l'ordre de 1.
+	// float32 rounding error: proportional to sqrt(k) for terms on the
+	// order of 1.
 	tol := 1e-5 * math.Sqrt(float64(k)) * 4
 	for i := range want {
 		w := want[i]
@@ -101,7 +101,7 @@ func TestMatMul_ZeroK(t *testing.T) {
 	}
 }
 
-// Formes tirées de bekko-a8m : batch de 16 × 96 tokens, dimension 384,
+// Shapes taken from bekko-a8m: batch of 16 × 96 tokens, dimension 384,
 // MLP 2×1152.
 func BenchmarkMatMul(b *testing.B) {
 	cases := []struct {
@@ -140,24 +140,24 @@ func TestMatMulPacked_MatchesMatMul(t *testing.T) {
 			MatMul(want, a, b, m, k, n, false, transB, false)
 			p := PackB(b, k, n, transB)
 			orig := append([]float32(nil), b...)
-			clear(b) // le paquet ne dépend plus de b
+			clear(b) // the pack no longer depends on b
 			p.Unpack(b, transB)
 			for i := range b {
 				if b[i] != orig[i] {
-					t.Fatalf("%v transB=%v : Unpack [%d] %v, attendu %v", s, transB, i, b[i], orig[i])
+					t.Fatalf("%v transB=%v: Unpack [%d] %v, want %v", s, transB, i, b[i], orig[i])
 				}
 			}
 			got := make([]float32, m*n)
 			MatMulPacked(got, a, p, m, false)
 			for i := range got {
 				if got[i] != want[i] {
-					t.Fatalf("%v transB=%v : [%d] %v, attendu %v", s, transB, i, got[i], want[i])
+					t.Fatalf("%v transB=%v: [%d] %v, want %v", s, transB, i, got[i], want[i])
 				}
 			}
 			MatMulPacked(got, a, p, m, true)
 			for i := range got {
 				if got[i] != 2*want[i] && math.Abs(float64(got[i]-2*want[i])) > 1e-4 {
-					t.Fatalf("%v accumulate : [%d] %v, attendu %v", s, i, got[i], 2*want[i])
+					t.Fatalf("%v accumulate: [%d] %v, want %v", s, i, got[i], 2*want[i])
 				}
 			}
 		}

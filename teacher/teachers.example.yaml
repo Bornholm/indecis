@@ -1,13 +1,13 @@
-# Exemple de teachers pour indecis-teach label -teachers : des harnais de code en ligne
-# de commande, à la manière des agents de Conclave.
+# Example teachers for indecis-teach label -teachers: command-line coding
+# harnesses, in the style of Conclave's agents.
 #
-# Les textes à étiqueter sont des injections par construction : chaque
-# harnais tourne SANS AUCUN OUTIL, dans un répertoire temporaire vide, avec
-# notre prompt système à la place du sien. Pour pi-json, un appel d'outil
-# fait rejeter la réponse.
+# The texts to label are injections by construction: each harness runs WITH
+# NO TOOLS AT ALL, in an empty temporary directory, with our system prompt in
+# place of its own. For pi-json, a tool call causes the response to be
+# rejected.
 teachers:
   - id: claude-sonnet
-    model: sonnet            # identifie le modèle dans le cache
+    model: sonnet            # identifies the model in the cache
     command:
       - claude
       - --print
@@ -16,14 +16,14 @@ teachers:
       - --model
       - sonnet
       - --tools
-      - ""                   # aucun outil
-      - --strict-mcp-config  # aucun serveur MCP
+      - ""                   # no tools
+      - --strict-mcp-config  # no MCP server
       - --no-session-persistence
     system_flag: --system-prompt
     input: stdin
     output: claude-json
     batch: 20
-    max_chars: 1500          # le modèle ne lit que ~256 tokens
+    max_chars: 1500          # the model only reads ~256 tokens
     concurrency: 1
     interval: 5s
     timeout: 10m
@@ -36,9 +36,9 @@ teachers:
       - --no-session
       - --mode
       - json
-      - --no-tools           # couvre aussi les outils des extensions
-      # pas de --no-extensions : le fournisseur cadoles-xolo est déclaré
-      # par une extension
+      - --no-tools           # also covers extension tools
+      # no --no-extensions: the cadoles-xolo provider is declared by an
+      # extension
       - --no-skills
       - --no-context-files
       - --no-prompt-templates
@@ -47,10 +47,10 @@ teachers:
       - --model
       - cadoles/minimax-m3
     system_flag: --system-prompt
-    input: file             # « @prompt.md » : un lot dépasse la limite d'un argument
+    input: file             # "@prompt.md": a batch exceeds an argument's limit
     output: pi-json
     batch: 20
-    max_chars: 1500          # le modèle ne lit que ~256 tokens
+    max_chars: 1500          # the model only reads ~256 tokens
     concurrency: 1
-    interval: 5s             # même quota que la passerelle Xolo : rester sobre
+    interval: 5s             # same quota as the Xolo gateway: stay conservative
     timeout: 10m

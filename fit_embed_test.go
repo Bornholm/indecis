@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-// Le gradient de la perte de choix, rétropropagé à travers la
-// normalisation et les deux passes, suit les différences finies.
+// The gradient of the choice loss, backpropagated through the
+// normalization and the two passes, follows the finite differences.
 func TestChoiceStepGradient(t *testing.T) {
 	m, err := New(bekkoDir(t), Schema{NewNoul("match", "")}, 1)
 	if err != nil {
@@ -16,7 +16,7 @@ func TestChoiceStepGradient(t *testing.T) {
 	b := ChoiceBatch{
 		Texts:      []string{"Ma facture de mars est fausse", "Le serveur ne répond plus", "Réunion jeudi à 10 h ?", "Facture payée deux fois"},
 		Candidates: []Candidate{{Name: "Facturation"}, {Name: "Support technique", Description: "pannes"}, {Name: "Agenda"}, {Name: "Juridique"}},
-		Correct:    [][]int{{0}, {1}, {2, 3}, {0}}, // deux textes pour Facturation
+		Correct:    [][]int{{0}, {1}, {2, 3}, {0}}, // two texts for Facturation
 	}
 	for _, symmetric := range []bool{false, true} {
 		checkChoiceGradient(t, m, b, symmetric)
@@ -49,14 +49,14 @@ func checkChoiceGradient(t *testing.T, m *Model, b ChoiceBatch, symmetric bool) 
 		w[i] = old
 		num := (up - down) / (2 * eps)
 		if math.Abs(num-float64(g[i])) > 0.05*math.Abs(num)+2e-4 {
-			t.Errorf("symétrique=%v, γ[%d] : analytique %.5f, numérique %.5f", symmetric, i, g[i], num)
+			t.Errorf("symmetric=%v, gamma[%d]: analytic %.5f, numeric %.5f", symmetric, i, g[i], num)
 		}
 		if checked++; checked == 8 {
 			break
 		}
 	}
 	if checked == 0 {
-		t.Fatal("aucun gradient assez grand pour être vérifié")
+		t.Fatal("no gradient large enough to check")
 	}
 }
 
@@ -79,12 +79,12 @@ func TestFitEmbeddingsLearns(t *testing.T) {
 		t.Fatal(err)
 	}
 	if a[0].Choice != "zorblax" || a[1].Choice != "quimpo" {
-		t.Fatalf("associations arbitraires non apprises : %v, %v", a[0].Probs, a[1].Probs)
+		t.Fatalf("arbitrary associations not learned: %v, %v", a[0].Probs, a[1].Probs)
 	}
 }
 
-// Des exemples déplacent le prototype d'une option : une option au nom
-// arbitraire devient la bonne réponse grâce à ses exemples.
+// Examples move the prototype of an option: an option with an arbitrary
+// name becomes the right answer thanks to its examples.
 func TestChooseNearestExamples(t *testing.T) {
 	ctx := context.Background()
 	m, err := New(bekkoDir(t), Schema{NewNoul("match", "")}, 1)
@@ -104,10 +104,10 @@ func TestChooseNearestExamples(t *testing.T) {
 		t.Fatal(err)
 	}
 	if a[0].Choice != "K1" || a[1].Choice != "K2" {
-		t.Fatalf("exemples ignorés : %v / %v", a[0].Probs, a[1].Probs)
+		t.Fatalf("examples ignored: %v / %v", a[0].Probs, a[1].Probs)
 	}
 	if a[0].Score <= 0 || a[0].Score > 1 {
-		t.Fatalf("cosinus %v", a[0].Score)
+		t.Fatalf("cosine %v", a[0].Score)
 	}
 }
 
@@ -118,12 +118,12 @@ func TestEmbedCacheAndMargin(t *testing.T) {
 		t.Fatal(err)
 	}
 	a, _ := m.Embed(ctx, "un", "deux")
-	b, _ := m.Embed(ctx, "deux", "trois") // « un » sort du cache
+	b, _ := m.Embed(ctx, "deux", "trois") // "un" falls out of the cache
 	if &a[1][0] != &b[0][0] {
-		t.Fatal("« deux » aurait dû venir du cache")
+		t.Fatal("\"deux\" should have come from the cache")
 	}
 	if _, ok := m.embedCache.get("un"); ok {
-		t.Fatal("le cache dépasse sa taille")
+		t.Fatal("the cache exceeds its size")
 	}
 	ans, _ := m.ChooseNearest(ctx, []Candidate{{Name: "facture"}, {Name: "panne"}, {Name: "réunion"}}, "Ma facture est fausse")
 	p := ans[0].Probs
@@ -134,7 +134,7 @@ func TestEmbedCacheAndMargin(t *testing.T) {
 		}
 	}
 	if math.Abs(ans[0].Margin-(ans[0].Confidence-others/2)) > 1e-12 {
-		t.Fatalf("marge %v", ans[0].Margin)
+		t.Fatalf("margin %v", ans[0].Margin)
 	}
 }
 
@@ -157,15 +157,15 @@ func TestDecideOpen(t *testing.T) {
 		t.Fatal(err)
 	}
 	if d[0]["facture"].P <= d[1]["facture"].P {
-		t.Errorf("noul : %v puis %v", d[0]["facture"].P, d[1]["facture"].P)
+		t.Errorf("noul: %v then %v", d[0]["facture"].P, d[1]["facture"].P)
 	}
 	if s := d[0]["urgence"].Score; s < 0 || s > 2 {
-		t.Errorf("score hors échelle : %v", s)
+		t.Errorf("score out of scale: %v", s)
 	}
 	if d[0]["service"].Choice != "comptabilité" || d[1]["service"].Choice != "informatique" {
-		t.Errorf("choice : %v / %v", d[0]["service"].Probs, d[1]["service"].Probs)
+		t.Errorf("choice: %v / %v", d[0]["service"].Probs, d[1]["service"].Probs)
 	}
 	if _, err := m.DecideOpen(ctx, []OpenQuestion{{Name: "x", Kind: Noul, Options: []Candidate{{Name: "a"}}}}, "t"); err == nil {
-		t.Error("noul à un critère accepté")
+		t.Error("noul with one criterion accepted")
 	}
 }

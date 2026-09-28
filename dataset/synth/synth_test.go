@@ -49,45 +49,45 @@ func TestLabelsPropagateFromIncludes(t *testing.T) {
 	var withAttack, benign int
 	for _, e := range ex {
 		if e.Family != "benign/ticket" {
-			t.Fatalf("un fragment de poids nul a été tiré à la racine : %s", e.Family)
+			t.Fatalf("a zero-weight fragment was drawn at the root: %s", e.Family)
 		}
-		// Slot : le même produit dans les deux occurrences.
+		// Slot: the same product in both occurrences.
 		words := strings.Fields(e.Text)
 		if words[1] != words[6] {
-			t.Fatalf("slot incohérent : %q", e.Text)
+			t.Fatalf("inconsistent slot: %q", e.Text)
 		}
 		attacked := strings.Contains(e.Text, "Ignore") || strings.Contains(e.Text, "Révèle")
 		if attacked != (e.Labels["injection"] == true) {
-			t.Fatalf("étiquette injection fausse : %q → %v", e.Text, e.Labels)
+			t.Fatalf("wrong injection label: %q -> %v", e.Text, e.Labels)
 		}
 		switch {
 		case strings.Contains(e.Text, "Ignore"):
 			withAttack++
 			if e.Labels["category"] != "override" {
-				t.Fatalf("catégorie de la branche perdue : %v", e.Labels)
+				t.Fatalf("branch category lost: %v", e.Labels)
 			}
 		case strings.Contains(e.Text, "Révèle"):
 			withAttack++
 			if e.Labels["category"] != "leak" {
-				t.Fatalf("catégorie de la branche perdue : %v", e.Labels)
+				t.Fatalf("branch category lost: %v", e.Labels)
 			}
 		default:
 			benign++
 			if e.Labels["category"] != "none" {
-				t.Fatalf("catégorie de l'en-tête perdue : %v", e.Labels)
+				t.Fatalf("header category lost: %v", e.Labels)
 			}
 		}
 		if attacked && e.Meta["includes"] != "attack/override" {
-			t.Fatalf("inclusion non tracée : %v", e.Meta)
+			t.Fatalf("include not tracked: %v", e.Meta)
 		}
 	}
 	if withAttack < 50 || benign < 50 {
-		t.Fatalf("p=0.5 non respecté : %d attaques, %d bénins", withAttack, benign)
+		t.Fatalf("p=0.5 not respected: %d attacks, %d benign", withAttack, benign)
 	}
 }
 
-// Vrai l'emporte : une directive d'un gabarit inclus ne peut pas rendre
-// bénin un document déjà marqué comme attaque.
+// True wins: a directive from an included template cannot make a
+// document already marked as an attack benign.
 func TestTrueWinsOnMerge(t *testing.T) {
 	files := map[string]string{
 		"a.tmpl":    "family: host\nlabel.injection: true\n---\nx{{include:frag}}",
@@ -107,11 +107,11 @@ func TestDeterministic(t *testing.T) {
 	a, _ := c.Generate(50, Options{Seed: 9})
 	b, _ := c.Generate(50, Options{Seed: 9})
 	if !reflect.DeepEqual(a, b) {
-		t.Fatal("même graine, corpus différents")
+		t.Fatal("same seed, different corpora")
 	}
 	d, _ := c.Generate(50, Options{Seed: 10})
 	if reflect.DeepEqual(a, d) {
-		t.Fatal("graines différentes, corpus identiques")
+		t.Fatal("different seeds, identical corpora")
 	}
 }
 
@@ -132,13 +132,13 @@ func TestTransformsAndBlocks(t *testing.T) {
 
 func TestLoadRejectsMistakes(t *testing.T) {
 	cases := map[string]map[string]string{
-		"gazetteer absent":   {"a.tmpl": "family: a\n---\n{{pick:nope}}"},
-		"include sans cible": {"a.tmpl": "family: a\n---\n{{include:zzz/*}}"},
-		"directive inconnue": {"a.tmpl": "family: a\n---\n{{bogus}}"},
-		"transformation":     {"a.tmpl": "family: a\n---\n{{x:rot47}}a{{/x}}"},
-		"one non fermé":      {"a.tmpl": "family: a\n---\n{{one}}a{{|}}b"},
-		"sans famille":       {"a.tmpl": "lang: fr\n---\nx"},
-		"bloc inconnu":       {"a.tmpl": "family: a\n---\n{{LINES:b:1-2}}"},
+		"missing gazetteer":      {"a.tmpl": "family: a\n---\n{{pick:nope}}"},
+		"include without target": {"a.tmpl": "family: a\n---\n{{include:zzz/*}}"},
+		"unknown directive":      {"a.tmpl": "family: a\n---\n{{bogus}}"},
+		"transformation":         {"a.tmpl": "family: a\n---\n{{x:rot47}}a{{/x}}"},
+		"unclosed one":           {"a.tmpl": "family: a\n---\n{{one}}a{{|}}b"},
+		"without family":         {"a.tmpl": "lang: fr\n---\nx"},
+		"unknown block":          {"a.tmpl": "family: a\n---\n{{LINES:b:1-2}}"},
 	}
 	for name, files := range cases {
 		fsys := fstest.MapFS{}
@@ -146,7 +146,7 @@ func TestLoadRejectsMistakes(t *testing.T) {
 			fsys[n] = &fstest.MapFile{Data: []byte(content)}
 		}
 		if _, err := LoadFS(fsys, DefaultGazetteerOptions()); err == nil {
-			t.Errorf("%s : erreur attendue", name)
+			t.Errorf("%s: expected error", name)
 		}
 	}
 }
@@ -154,7 +154,7 @@ func TestLoadRejectsMistakes(t *testing.T) {
 func TestDedupeReportsLackOfVariety(t *testing.T) {
 	files := map[string]string{"a.tmpl": "family: a\n---\n{{one:x|y}}"}
 	if _, err := corpus(t, files).Generate(5, Options{Seed: 1, Dedupe: true}); err == nil {
-		t.Fatal("5 textes distincts demandés à un gabarit qui n'en produit que 2")
+		t.Fatal("5 distinct texts requested from a template that only produces 2")
 	}
 }
 
@@ -176,7 +176,7 @@ func TestStrayBracesRejected(t *testing.T) {
 	fsys := map[string]string{"a.tmpl": "family: a\n---\nbonjour }} monde"}
 	m := fstestFS(fsys)
 	if _, err := LoadFS(m, DefaultGazetteerOptions()); err == nil {
-		t.Fatal("« }} » isolé accepté")
+		t.Fatal("isolated \"}}\" accepted")
 	}
 }
 
@@ -194,7 +194,7 @@ func TestUserMarkSplitsContext(t *testing.T) {
 	if e.Context != "You are a support bot for Acme." || e.Text != "Where is my order?" {
 		t.Fatalf("got %q / %q", e.Context, e.Text)
 	}
-	// Inclus, le gabarit perd son contexte : seul « y » arrive dans l'hôte.
+	// Included, the template loses its context: only "y" reaches the host.
 	h, err := c.Render(c.Templates[2], 1, Options{})
 	if err != nil || h.Text != "y" || h.Context != "" {
 		t.Fatalf("got %+v, %v", h, err)

@@ -1,12 +1,12 @@
-// Package modernbert implémente l'encodeur ModernBERT en Go pur, en
-// inférence comme en entraînement.
+// Package modernbert implements the ModernBERT encoder in pure Go, for
+// both inference and training.
 //
-// L'implémentation de référence est celle de transformers
-// (modeling_modernbert.py) : pré-normalisation sans biais, attention
-// alternant fenêtre globale et fenêtre locale, RoPE, MLP à porte GELU.
-// Chaque opération a son forward, qui conserve ce que la rétropropagation
-// lira, et son backward écrit à la main : l'architecture est fixe, un
-// autograd générique n'apporterait que des allocations.
+// The reference implementation is that of transformers
+// (modeling_modernbert.py): bias-free pre-normalization, attention
+// alternating global and local windows, RoPE, gated GELU MLP. Each
+// operation has its forward pass, which keeps what the backward pass will
+// read, and its hand-written backward pass: the architecture is fixed, a
+// generic autograd would only add allocations.
 package modernbert
 
 import (
@@ -20,7 +20,7 @@ import (
 	"github.com/bornholm/indecis/internal/safetensors"
 )
 
-// Config reprend les champs de config.json qui déterminent le calcul.
+// Config holds the fields of config.json that determine the computation.
 type Config struct {
 	Hidden       int     `json:"hidden_size"`
 	Layers       int     `json:"num_hidden_layers"`
@@ -29,8 +29,8 @@ type Config struct {
 	Vocab        int     `json:"vocab_size"`
 	NormEps      float64 `json:"norm_eps"`
 	GlobalEvery  int     `json:"global_attn_every_n_layers"`
-	// LocalAttention est la largeur totale de la fenêtre locale ; un token
-	// voit ses voisins jusqu'à LocalAttention/2 positions de distance.
+	// LocalAttention is the total width of the local window; a token sees
+	// its neighbors up to LocalAttention/2 positions away.
 	LocalAttention int     `json:"local_attention"`
 	GlobalTheta    float64 `json:"global_rope_theta"`
 	LocalTheta     float64 `json:"local_rope_theta"`
@@ -42,50 +42,50 @@ type Config struct {
 	NormBias      bool   `json:"norm_bias"`
 }
 
-// HeadDim est la dimension d'une tête d'attention.
+// HeadDim is the dimension of an attention head.
 func (c Config) HeadDim() int { return c.Hidden / c.Heads }
 
-// IsGlobal indique si la couche l voit toute la séquence.
+// IsGlobal reports whether layer l sees the whole sequence.
 func (c Config) IsGlobal(l int) bool { return l%c.GlobalEvery == 0 }
 
-// Window est la demi-fenêtre des couches locales.
+// Window is the half-window of the local layers.
 func (c Config) Window() int { return c.LocalAttention / 2 }
 
 func (c Config) validate() error {
 	switch {
 	case c.Hidden <= 0 || c.Layers <= 0 || c.Heads <= 0 || c.Intermediate <= 0 || c.Vocab <= 0:
-		return fmt.Errorf("modernbert: dimensions invalides")
+		return fmt.Errorf("modernbert: invalid dimensions")
 	case c.Hidden%c.Heads != 0 || c.HeadDim()%2 != 0:
-		return fmt.Errorf("modernbert: hidden_size %d incompatible avec %d têtes", c.Hidden, c.Heads)
+		return fmt.Errorf("modernbert: hidden_size %d incompatible with %d heads", c.Hidden, c.Heads)
 	case c.GlobalEvery <= 0 || c.LocalAttention <= 0:
-		return fmt.Errorf("modernbert: fenêtres d'attention invalides")
+		return fmt.Errorf("modernbert: invalid attention windows")
 	case c.Activation != "gelu":
-		return fmt.Errorf("modernbert: activation %q non prise en charge", c.Activation)
+		return fmt.Errorf("modernbert: activation %q not supported", c.Activation)
 	case c.AttentionBias || c.MLPBias || c.NormBias:
-		return fmt.Errorf("modernbert: les biais ne sont pas pris en charge")
+		return fmt.Errorf("modernbert: biases are not supported")
 	}
 	return nil
 }
 
-// Param est un tenseur de poids et, en entraînement, son gradient.
+// Param is a weight tensor and, during training, its gradient.
 type Param struct {
 	Name  string
 	Shape []int
 	W     []float32
-	G     []float32 // nil hors entraînement
+	G     []float32 // nil outside training
 }
 
-// Layer regroupe les poids d'une couche de l'encodeur.
+// Layer groups the weights of an encoder layer.
 type Layer struct {
-	AttnNorm *Param // nil pour la couche 0, comme dans la référence
+	AttnNorm *Param // nil for layer 0, as in the reference
 	Wqkv     *Param // [3·H, H]
 	Wo       *Param // [H, H]
 	MLPNorm  *Param // [H]
-	Wi       *Param // [2·I, H] : entrée puis porte
+	Wi       *Param // [2·I, H]: input then gate
 	WoMLP    *Param // [H, I]
 }
 
-// Model est un encodeur ModernBERT.
+// Model is a ModernBERT encoder.
 type Model struct {
 	Cfg       Config
 	Emb       *Param // [V, H]
@@ -96,18 +96,18 @@ type Model struct {
 	ropeMu sync.Mutex
 	rope   map[float64]*ropeTable
 
-	// embTable remplace Emb.W quand la table est lue à la demande.
+	// embTable replaces Emb.W when the table is read on demand.
 	embTable EmbeddingTable
-	// packed contient les poids empaquetés pour Encode, nil s'ils sont à
-	// refaire.
+	// packed holds the weights packed for Encode, nil if they need to be
+	// redone.
 	packMu  sync.Mutex
 	packed  []packedLayer
-	compact bool         // voir SetCompact
-	source  WeightSource // voir SetCompact
-	int8    bool         // voir SetInt8
+	compact bool         // see SetCompact
+	source  WeightSource // see SetCompact
+	int8    bool         // see SetInt8
 }
 
-// Load lit config.json et model.safetensors dans dir.
+// Load reads config.json and model.safetensors from dir.
 func Load(dir string) (*Model, error) {
 	b, err := os.ReadFile(filepath.Join(dir, "config.json"))
 	if err != nil {
@@ -115,7 +115,7 @@ func Load(dir string) (*Model, error) {
 	}
 	var cfg Config
 	if err := json.Unmarshal(b, &cfg); err != nil {
-		return nil, fmt.Errorf("modernbert: config.json : %w", err)
+		return nil, fmt.Errorf("modernbert: config.json: %w", err)
 	}
 	if err := cfg.validate(); err != nil {
 		return nil, err
@@ -127,8 +127,8 @@ func Load(dir string) (*Model, error) {
 	return FromTensors(cfg, tensors)
 }
 
-// FromTensors assemble un modèle à partir de tenseurs nommés comme dans
-// transformers (préfixe « model. » accepté).
+// FromTensors assembles a model from tensors named as in transformers
+// (the "model." prefix is accepted).
 func FromTensors(cfg Config, tensors map[string]safetensors.Tensor) (*Model, error) {
 	H, I, V := cfg.Hidden, cfg.Intermediate, cfg.Vocab
 	get := func(name string, shape ...int) (*Param, error) {
@@ -137,10 +137,10 @@ func FromTensors(cfg Config, tensors map[string]safetensors.Tensor) (*Model, err
 			t, ok = tensors["model."+name]
 		}
 		if !ok {
-			return nil, fmt.Errorf("modernbert: tenseur %s absent", name)
+			return nil, fmt.Errorf("modernbert: tensor %s missing", name)
 		}
 		if fmt.Sprint(t.Shape) != fmt.Sprint(shape) {
-			return nil, fmt.Errorf("modernbert: %s : forme %v, attendu %v", name, t.Shape, shape)
+			return nil, fmt.Errorf("modernbert: %s: shape %v, expected %v", name, t.Shape, shape)
 		}
 		return &Param{Name: name, Shape: shape, W: t.Data}, nil
 	}
@@ -184,7 +184,7 @@ func FromTensors(cfg Config, tensors map[string]safetensors.Tensor) (*Model, err
 	return m, nil
 }
 
-// Params liste tous les paramètres, dans un ordre stable.
+// Params lists all parameters, in a stable order.
 func (m *Model) Params() []*Param {
 	m.restoreWeights()
 	ps := []*Param{m.Emb, m.EmbNorm}
@@ -197,13 +197,13 @@ func (m *Model) Params() []*Param {
 	return append(ps, m.FinalNorm)
 }
 
-// ropeTable contient cos et sin pour chaque position et chaque demi-dimension.
+// ropeTable holds cos and sin for each position and each half-dimension.
 type ropeTable struct {
 	n        int
 	cos, sin []float32 // [n, D/2]
 }
 
-// ropeFor retourne une table couvrant au moins n positions.
+// ropeFor returns a table covering at least n positions.
 func (m *Model) ropeFor(theta float64, n int) *ropeTable {
 	m.ropeMu.Lock()
 	defer m.ropeMu.Unlock()
@@ -215,7 +215,7 @@ func (m *Model) ropeFor(theta float64, n int) *ropeTable {
 	size := max(n, 512)
 	t := &ropeTable{n: size, cos: make([]float32, size*half), sin: make([]float32, size*half)}
 	for i := 0; i < half; i++ {
-		// Même arrondi que la référence : fréquences et positions en float32.
+		// Same rounding as the reference: frequencies and positions in float32.
 		inv := float32(1 / math.Pow(theta, float64(2*i)/float64(D)))
 		for p := 0; p < size; p++ {
 			f := float64(float32(p) * inv)

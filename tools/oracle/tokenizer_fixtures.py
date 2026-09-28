@@ -1,5 +1,5 @@
-"""Fixtures de parité du tokenizer : texte → ids selon la bibliothèque
-`tokenizers` de Hugging Face, l'implémentation de référence.
+"""Tokenizer parity fixtures: text -> ids according to Hugging Face's
+`tokenizers` library, the reference implementation.
 
     tools/oracle/.venv/bin/python tools/oracle/tokenizer_fixtures.py \
         --model ~/.cache/indecis/models/bekko-embedding-v1-a8m \
@@ -26,8 +26,8 @@ HANDCRAFTED = [
 ]
 
 def random_texts(n, seed=7):
-    """Chaînes hostiles : écritures mélangées, blancs répétés, tokens ajoutés
-    collés au texte, caractères rares (repli sur les octets)."""
+    """Adversarial strings: mixed scripts, repeated whitespace, added tokens
+    glued to text, rare characters (byte-level fallback)."""
     rng = random.Random(seed)
     pieces = [" ", "  ", "   ", "\n", "\n\n", "\t", "\t\t", "▁", "▁▁", "<eos>", "<mask>", "<b>", "</b>",
               "<table>", "<start_of_turn>", "[@BOS@]", "<unused3>", "<", ">", "<0x41>",
@@ -60,7 +60,7 @@ def main():
         random.Random(42).shuffle(rows)
         texts += [r["text"] for r in rows[: args.sample]]
 
-    # Paires (contexte, texte) : prompt système et message.
+    # Pairs (context, text): system prompt and message.
     pairs = [(texts[i], texts[(i * 7 + 3) % len(texts)]) for i in range(0, min(len(texts), 600))]
     pairs += [("", "x"), ("a", ""), ("", ""), ("You are a support bot for Acme.", "Suggest a movie")]
 

@@ -6,16 +6,16 @@ import (
 	"github.com/bornholm/indecis/internal/linalg"
 )
 
-// SparseGrad est le gradient d'une table d'embeddings : seules les lignes
-// des tokens présents dans le lot sont non nulles. Garder un gradient dense
-// de 256 000 × 384 valeurs pour en toucher quelques centaines coûterait
-// 400 Mo par copie.
+// SparseGrad is the gradient of an embedding table: only the rows for
+// tokens present in the batch are nonzero. Keeping a dense gradient of
+// 256,000 x 384 values to touch a few hundred of them would cost 400 MB
+// per copy.
 type SparseGrad struct {
 	Width int
 	Rows  map[int32][]float32
 }
 
-// IDs retourne les lignes non nulles, triées.
+// IDs returns the nonzero rows, sorted.
 func (g *SparseGrad) IDs() []int32 {
 	ids := make([]int32, 0, len(g.Rows))
 	for id := range g.Rows {
@@ -25,13 +25,13 @@ func (g *SparseGrad) IDs() []int32 {
 	return ids
 }
 
-// Grads accumule les gradients de tous les paramètres.
+// Grads accumulates the gradients of all parameters.
 type Grads struct {
 	Emb SparseGrad
 }
 
-// EnableGrad alloue les gradients des paramètres denses et prépare le
-// gradient creux des embeddings.
+// EnableGrad allocates gradients for the dense parameters and prepares the
+// sparse embedding gradient.
 func (m *Model) EnableGrad() *Grads {
 	for _, p := range m.Params() {
 		if p == m.Emb {
@@ -44,7 +44,7 @@ func (m *Model) EnableGrad() *Grads {
 	return &Grads{Emb: SparseGrad{Width: m.Cfg.Hidden, Rows: map[int32][]float32{}}}
 }
 
-// ZeroGrad remet les gradients à zéro.
+// ZeroGrad resets the gradients to zero.
 func (m *Model) ZeroGrad(g *Grads) {
 	for _, p := range m.Params() {
 		clear(p.G)
@@ -52,8 +52,8 @@ func (m *Model) ZeroGrad(g *Grads) {
 	clear(g.Emb.Rows)
 }
 
-// Backward rétropropage dHidden (gradient de la perte par rapport à
-// State.Hidden, [N, H]) et accumule les gradients des paramètres.
+// Backward backpropagates dHidden (gradient of the loss with respect to
+// State.Hidden, [N, H]) and accumulates the parameter gradients.
 func (m *Model) Backward(s *State, dHidden []float32, g *Grads) {
 	cfg := m.Cfg
 	H := cfg.Hidden
@@ -86,7 +86,7 @@ func (m *Model) Backward(s *State, dHidden []float32, g *Grads) {
 	}
 }
 
-// layerBackward retourne le gradient par rapport à l'entrée de la couche.
+// layerBackward returns the gradient with respect to the layer's input.
 func (m *Model) layerBackward(l int, s *State, dOut []float32) []float32 {
 	cfg := m.Cfg
 	L := m.Layers[l]
@@ -100,7 +100,7 @@ func (m *Model) layerBackward(l int, s *State, dOut []float32) []float32 {
 	linalg.MatMul(dg, dOut, L.WoMLP.W, N, H, I, false, false, false)
 	linalg.MatMul(L.WoMLP.G, dOut, ls.g, H, N, I, true, false, true)
 
-	// g = gelu(a) ⊙ porte, z = mlpIn · Wiᵀ
+	// g = gelu(a) ⊙ gate, z = mlpIn · Wiᵀ
 	dz := make([]float32, N*2*I)
 	gluBackward(dz, dg, ls.z, N, I)
 	dMLPIn := make([]float32, N*H)
@@ -134,8 +134,8 @@ func (m *Model) layerBackward(l int, s *State, dOut []float32) []float32 {
 	return dIn
 }
 
-// attentionBackward calcule le gradient par rapport à qkv à partir du
-// gradient des têtes concaténées.
+// attentionBackward computes the gradient with respect to qkv from the
+// gradient of the concatenated heads.
 func (m *Model) attentionBackward(l int, s *State, dCtx, dqkv []float32) {
 	cfg := m.Cfg
 	H, nh, D := cfg.Hidden, cfg.Heads, cfg.HeadDim()
@@ -171,7 +171,7 @@ func (m *Model) attentionBackward(l int, s *State, dCtx, dqkv []float32) {
 			linalg.MatMulSerial(dV, p, dO, n, n, D, true, false, false)
 			linalg.MatMulSerial(dP, dO, v, n, D, n, false, true, false)
 
-			// P = softmax(S) : dS = P ⊙ (dP - Σ_j dP·P), réécrit dans dP.
+			// P = softmax(S): dS = P ⊙ (dP - Σ_j dP·P), rewritten into dP.
 			for i := 0; i < n; i++ {
 				pr := p[i*n : (i+1)*n]
 				dr := dP[i*n : (i+1)*n]
@@ -184,7 +184,7 @@ func (m *Model) attentionBackward(l int, s *State, dCtx, dqkv []float32) {
 				}
 			}
 
-			// S = scale · Q·Kᵀ (le facteur scale est déjà dans dS)
+			// S = scale · Q·Kᵀ (the scale factor is already in dS)
 			linalg.MatMulSerial(dQ, dP, k, n, n, D, false, false, false)
 			linalg.MatMulSerial(dK, dP, q, n, n, D, true, false, false)
 
@@ -202,8 +202,8 @@ func (m *Model) attentionBackward(l int, s *State, dCtx, dqkv []float32) {
 	})
 }
 
-// MeanPoolBackward répartit le gradient de chaque vecteur poolé sur les
-// tokens réels de sa séquence.
+// MeanPoolBackward spreads the gradient of each pooled vector over the
+// real tokens of its sequence.
 func MeanPoolBackward(dPooled []float32, b Batch, h int) []float32 {
 	d := make([]float32, b.B()*b.T*h)
 	for bi, n := range b.Lens {

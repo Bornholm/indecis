@@ -21,99 +21,101 @@ import (
 	"github.com/bornholm/indecis/tokenizer"
 )
 
-// Answer est la réponse à une question.
+// Answer is the answer to a question.
 type Answer struct {
 	Question string `json:"question"`
 	Kind     Kind   `json:"kind"`
-	// P est la probabilité que la réponse soit « vrai » (Noul).
+	// P is the probability that the answer is "true" (Noul).
 	P float64 `json:"p,omitempty"`
-	// Choice est l'option la plus probable (Choice), ou le niveau le plus
-	// probable (Score).
+	// Choice is the most probable option (Choice), or the most probable
+	// level (Score).
 	Choice string `json:"choice,omitempty"`
-	// Score est le niveau attendu, entre 0 et le nombre de niveaux moins un.
+	// Score is the expected level, between 0 and the number of levels
+	// minus one.
 	Score float64 `json:"score,omitempty"`
-	// Probs est la distribution sur les options ou les niveaux.
+	// Probs is the distribution over the options or the levels.
 	Probs map[string]float64 `json:"probs,omitempty"`
-	// Confidence est la probabilité de la réponse retenue.
+	// Confidence is the probability of the chosen answer.
 	Confidence float64 `json:"confidence"`
-	// Margin (Choice) est l'écart entre la probabilité retenue et la
-	// moyenne des autres, la confiance de CLM : proche de 0 quand les
-	// options se valent, même si elles sont nombreuses.
+	// Margin (Choice) is the gap between the chosen probability and the
+	// average of the others, CLM's confidence: close to 0 when the
+	// options are equally likely, even if there are many of them.
 	Margin float64 `json:"margin,omitempty"`
 }
 
-// Decision regroupe les réponses d'un texte, par nom de question.
+// Decision groups a text's answers, by question name.
 type Decision map[string]Answer
 
-// Info décrit l'origine d'un modèle.
+// Info describes a model's origin.
 type Info struct {
 	Backbone string `json:"backbone,omitempty"`
-	// TrainPrior est, pour chaque question Noul, la proportion de réponses
-	// « vrai » dans le corpus d'entraînement. C'est ce qu'il faut pour
-	// corriger la probabilité quand la proportion diffère en production
-	// (voir calibrate.PriorShift).
+	// TrainPrior is, for each Noul question, the proportion of "true"
+	// answers in the training corpus. This is what is needed to correct
+	// the probability when the proportion differs in production (see
+	// calibrate.PriorShift).
 	TrainPrior map[string]float64 `json:"train_prior,omitempty"`
 	Steps      int                `json:"steps,omitempty"`
-	// EmbedScale multiplie les cosinus dans ChooseNearest (0 : la valeur
-	// par défaut).
+	// EmbedScale multiplies the cosines in ChooseNearest (0: the default
+	// value).
 	EmbedScale float64 `json:"embed_scale,omitempty"`
 }
 
-// Model est un modèle de décision : un encodeur et une tête par question.
+// Model is a decision model: an encoder and one head per question.
 type Model struct {
 	schema Schema
 	enc    *modernbert.Model
 	tok    *tokenizer.Tokenizer
-	// tokenizerPath est le tokenizer.json d'origine, recopié par Save. Le
-	// garder en mémoire coûterait 34 Mo pour un usage rare.
+	// tokenizerPath is the original tokenizer.json, copied by Save.
+	// Keeping it in memory would cost 34 MB for a rare use.
 	tokenizerPath string
-	// tokenizerJSON remplace tokenizerPath quand le tokenizer a été modifié
-	// (PruneVocabulary).
+	// tokenizerJSON replaces tokenizerPath when the tokenizer has been
+	// modified (PruneVocabulary).
 	tokenizerJSON []byte
 	heads         []*head
 	temps         []float64
 	maxLen        int
 	paired        bool
 	info          Info
-	embedCache    *lru     // voir WithEmbedCache
-	embedInt8     bool     // voir WithInt8Embeddings
-	batcher       *batcher // voir WithBatching
+	embedCache    *lru     // see WithEmbedCache
+	embedInt8     bool     // see WithInt8Embeddings
+	batcher       *batcher // see WithBatching
 }
 
-// Input est un texte à juger et son contexte éventuel.
+// Input is a text to judge and its optional context.
 type Input struct {
 	Context string
 	Text    string
 }
 
-// Options de construction.
+// Construction options.
 type Option func(*Model)
 
-// WithMaxLen fixe la longueur maximale en tokens ; les textes plus longs sont
-// tronqués. 256 par défaut.
+// WithMaxLen sets the maximum length in tokens; longer texts are
+// truncated. 256 by default.
 func WithMaxLen(n int) Option { return func(m *Model) { m.maxLen = n } }
 
-// WithThreads borne le nombre de cœurs utilisés par les calculs (0 : tous).
-// Le réglage vaut pour tout le processus. En inférence, un lot de moins de
-// 1024 positions se calcule de toute façon sur un seul cœur, le plus rapide
-// pour une phrase ; les longs textes et les gros lots se répartissent.
+// WithThreads bounds the number of cores used by the computations (0:
+// all). The setting applies to the whole process. At inference, a batch
+// of fewer than 1024 positions is computed on a single core anyway, the
+// fastest for one sentence; long texts and large batches spread out.
 func WithThreads(n int) Option { return func(*Model) { linalg.SetMaxWorkers(n) } }
 
-// WithInt8 fait calculer les couches de l'encodeur en int8 (poids par
-// canal, activations par token) quand le processeur dispose d'AVX-VNNI ;
-// sans lui, l'option est sans effet. L'inférence est environ deux fois plus
-// rapide et les poids des couches quatre fois plus petits ; les décisions
-// du détecteur d'injections (xolo-plugin-injection-guard) sont inchangées sur sa référence. L'écart reste
-// à vérifier pour chaque modèle (Evaluate avec et sans l'option).
+// WithInt8 makes the encoder's layers compute in int8 (per-channel
+// weights, per-token activations) when the processor has AVX-VNNI;
+// without it, the option has no effect. Inference is about twice as fast
+// and the layer weights four times smaller; the decisions of the
+// injection detector (xolo-plugin-injection-guard) are unchanged on its
+// reference set. The gap should still be checked for each model (Evaluate
+// with and without the option).
 func WithInt8() Option {
 	return func(m *Model) { m.enc.SetInt8(linalg.Int8Fast()) }
 }
 
-// WithEmbedCache garde en mémoire les plongements des n derniers textes
-// distincts passés à Embed, et des options préparées par PrepareCandidates
-// (donc ChooseNearest, DecideOpen) : une option réutilisée n'est pas
-// réencodée. Les textes jugés par ChooseIn ne sont pas gardés. Le cache est
-// vidé à chaque entraînement.
+// WithEmbedCache keeps in memory the embeddings of the n most recent
+// distinct texts passed to Embed, and of the options prepared by
+// PrepareCandidates (so ChooseNearest, DecideOpen): a reused option is not
+// re-encoded. Texts judged by ChooseIn are not kept. The cache is cleared
+// on every training run.
 func WithEmbedCache(n int) Option {
 	return func(m *Model) {
 		if n > 0 {
@@ -122,18 +124,19 @@ func WithEmbedCache(n int) Option {
 	}
 }
 
-// WithBatching regroupe les calculs de requêtes simultanées : workers
-// goroutines (0 : une par cœur) prennent chacune la première requête en
-// attente et toutes celles déjà en file, jusqu'à maxRows positions (0 :
-// 512), et les calculent en un seul passage. Sans charge, une requête part
-// aussitôt, sans attente ; sous charge, les lots grossissent d'eux-mêmes
-// et les produits matriciels, plus grands, sont plus efficaces. Les
-// séquences d'un lot sont mises bout à bout sans padding.
+// WithBatching groups the computations of simultaneous requests: workers
+// goroutines (0: one per core) each take the first pending request and all
+// those already queued, up to maxRows positions (0: 512), and compute
+// them in a single pass. Without load, a request leaves right away,
+// without waiting; under load, the batches grow on their own and the
+// larger matrix products are more efficient. The sequences of a batch are
+// laid end to end without padding.
 //
-// Sur CPU, le gain est faible : chaque requête occupe déjà un cœur, et des
-// requêtes de 100 à 256 tokens font des produits matriciels assez grands.
-// Mesuré sur le serveur de décision (32 clients) : quelques % de débit sur
-// des requêtes d'une phrase, rien au-delà, pour plus de mémoire.
+// On CPU, the gain is small: each request already occupies a core, and
+// requests of 100 to 256 tokens already make fairly large matrix
+// products. Measured on the decision server (32 clients): a few % of
+// throughput on single-sentence requests, nothing beyond that, for more
+// memory.
 func WithBatching(workers, maxRows int) Option {
 	return func(m *Model) {
 		if workers <= 0 {
@@ -146,42 +149,42 @@ func WithBatching(workers, maxRows int) Option {
 	}
 }
 
-// WithInt8Embeddings fait écrire par Save la table d'embeddings en int8,
-// une échelle par ligne : deux fois plus petite qu'en bf16, sur disque comme
-// dans les pages lues. Les lignes modifiées par l'entraînement perdent leur
-// valeur exacte ; l'écart se mesure avec Evaluate avant et après. Un modèle
-// sauvegardé ainsi est reconnu au chargement et le reste. Les outils de
-// Hugging Face ne lisent pas ce format.
+// WithInt8Embeddings makes Save write the embedding table in int8, one
+// scale per row: half the size of bf16, on disk as well as in the pages
+// read. Rows modified by training lose their exact value; the gap is
+// measured with Evaluate before and after. A model saved this way is
+// recognized on load and stays that way. Hugging Face tools do not read
+// this format.
 func WithInt8Embeddings() Option { return func(m *Model) { m.embedInt8 = true } }
 
-// WithPairs fait lire au modèle des paires (contexte, texte) : le prompt
-// système et le message, par exemple. Toutes les entrées sont alors encodées
-// en paire, contexte vide compris, pour que l'entraînement et l'inférence
-// voient la même forme. Voir tokenizer.EncodePair pour la troncature.
+// WithPairs makes the model read pairs (context, text): the system prompt
+// and the message, for example. All inputs are then encoded as a pair,
+// including an empty context, so that training and inference see the same
+// shape. See tokenizer.EncodePair for truncation.
 func WithPairs() Option { return func(m *Model) { m.paired = true } }
 
-// Paired indique si le modèle lit des paires (contexte, texte).
+// Paired indicates whether the model reads pairs (context, text).
 func (m *Model) Paired() bool { return m.paired }
 
-// tokenize encode une entrée selon le mode du modèle.
+// tokenize encodes an input according to the model's mode.
 func (m *Model) tokenize(context, text string) ([]int32, error) {
 	if m.paired {
 		return m.tok.EncodePair(context, text, m.maxLen), nil
 	}
 	if context != "" {
-		return nil, fmt.Errorf("indecis: contexte fourni à un modèle construit sans WithPairs")
+		return nil, fmt.Errorf("indecis: context given to a model built without WithPairs")
 	}
 	return m.tok.EncodeMax(text, m.maxLen), nil
 }
 
-// TokenIDs retourne les ids des tokens que le modèle lit pour une entrée,
-// troncature comprise.
+// TokenIDs returns the ids of the tokens the model reads for an input,
+// truncation included.
 func (m *Model) TokenIDs(in Input) ([]int32, error) {
 	return m.tokenize(in.Context, in.Text)
 }
 
-// Tokens retourne le nombre de tokens qu'une entrée occupe, troncature
-// comprise : ce que le modèle lit réellement.
+// Tokens returns the number of tokens an input occupies, truncation
+// included: what the model actually reads.
 func (m *Model) Tokens(in Input) (int, error) {
 	ids, err := m.tokenize(in.Context, in.Text)
 	return len(ids), err
@@ -203,9 +206,9 @@ func examplesToInputs(examples []dataset.Example) []Input {
 	return in
 }
 
-// New crée un modèle non entraîné à partir d'un backbone au format
-// transformers (config.json, model.safetensors, tokenizer.json). Les têtes
-// sont initialisées aléatoirement avec la graine seed.
+// New creates an untrained model from a backbone in transformers format
+// (config.json, model.safetensors, tokenizer.json). The heads are
+// randomly initialized with seed.
 func New(backboneDir string, schema Schema, seed int64, opts ...Option) (*Model, error) {
 	if err := schema.Validate(); err != nil {
 		return nil, err
@@ -234,13 +237,13 @@ func New(backboneDir string, schema Schema, seed int64, opts ...Option) (*Model,
 	return m, nil
 }
 
-// Schema retourne le schéma du modèle.
+// Schema returns the model's schema.
 func (m *Model) Schema() Schema { return m.schema }
 
-// Info retourne l'origine du modèle.
+// Info returns the model's origin.
 func (m *Model) Info() Info { return m.info }
 
-// Temperatures retourne la température de chaque question.
+// Temperatures returns the temperature of each question.
 func (m *Model) Temperatures() map[string]float64 {
 	out := map[string]float64{}
 	for i, q := range m.schema {
@@ -249,12 +252,12 @@ func (m *Model) Temperatures() map[string]float64 {
 	return out
 }
 
-// Decide répond à toutes les questions pour chaque texte, sans contexte.
+// Decide answers all the questions for each text, without context.
 func (m *Model) Decide(ctx context.Context, texts ...string) ([]Decision, error) {
 	return m.DecideInputs(ctx, textsToInputs(texts)...)
 }
 
-// DecideInputs répond à toutes les questions pour chaque entrée.
+// DecideInputs answers all the questions for each input.
 func (m *Model) DecideInputs(ctx context.Context, inputs ...Input) ([]Decision, error) {
 	logits, err := m.logits(ctx, inputs, 32)
 	if err != nil {
@@ -271,14 +274,14 @@ func (m *Model) DecideInputs(ctx context.Context, inputs ...Input) ([]Decision, 
 	return out, nil
 }
 
-// Logits retourne, pour chaque texte, les logits bruts de chaque question,
-// avant température : un appelant qui applique sa propre calibration ou sa
-// propre correction de prior part de là (voir Temperatures et Info).
+// Logits returns, for each text, the raw logits of each question, before
+// temperature: a caller that applies its own calibration or its own prior
+// correction starts from there (see Temperatures and Info).
 func (m *Model) Logits(ctx context.Context, texts ...string) ([]map[string][]float64, error) {
 	return m.LogitsInputs(ctx, textsToInputs(texts)...)
 }
 
-// LogitsInputs est Logits pour des entrées avec contexte.
+// LogitsInputs is Logits for inputs with context.
 func (m *Model) LogitsInputs(ctx context.Context, inputs ...Input) ([]map[string][]float64, error) {
 	raw, err := m.logits(ctx, inputs, 32)
 	if err != nil {
@@ -294,7 +297,7 @@ func (m *Model) LogitsInputs(ctx context.Context, inputs ...Input) ([]map[string
 	return out, nil
 }
 
-// logits retourne, pour chaque texte, les logits bruts de chaque question.
+// logits returns, for each text, the raw logits of each question.
 func (m *Model) logits(ctx context.Context, inputs []Input, batchSize int) ([][][]float64, error) {
 	ids, err := m.tokenizeAll(inputs)
 	if err != nil {
@@ -321,9 +324,9 @@ func (m *Model) tokenizeAll(inputs []Input) ([][]int32, error) {
 	return ids, nil
 }
 
-// forEachPooled encode des séquences de tokens et passe à fn le plongement
-// moyen de chacune (tampon réutilisé : fn le copie s'il le garde). Les
-// séquences sont regroupées par longueur pour limiter le padding.
+// forEachPooled encodes token sequences and passes fn the mean embedding
+// of each one (reused buffer: fn copies it if it keeps it). Sequences are
+// grouped by length to limit padding.
 func (m *Model) forEachPooled(ctx context.Context, ids [][]int32, batchSize int, fn func(i int, x []float32)) error {
 	order := make([]int, len(ids))
 	for i := range order {
@@ -352,8 +355,8 @@ func (m *Model) forEachPooled(ctx context.Context, ids [][]int32, batchSize int,
 	return nil
 }
 
-// encodeSeqs calcule les plongements moyens de séquences, directement ou par
-// le regroupement de WithBatching.
+// encodeSeqs computes the mean embeddings of sequences, either directly or
+// through WithBatching's grouping.
 func (m *Model) encodeSeqs(ctx context.Context, seqs [][]int32) ([]float32, error) {
 	if m.batcher != nil {
 		return m.batcher.encode(ctx, seqs)
@@ -361,7 +364,7 @@ func (m *Model) encodeSeqs(ctx context.Context, seqs [][]int32) ([]float32, erro
 	return m.enc.EncodeSeqs(seqs)
 }
 
-// Fichiers d'un modèle sauvegardé.
+// Files of a saved model.
 const (
 	fileWeights   = "model.safetensors"
 	fileConfig    = "config.json"
@@ -380,8 +383,8 @@ type metaJSON struct {
 
 const formatVersion = "indecis/1"
 
-// Tenseurs propres à indecis dans model.safetensors : les lignes
-// d'embeddings modifiées par l'entraînement, en float32.
+// Tensors specific to indecis in model.safetensors: the embedding rows
+// modified by training, in float32.
 const (
 	exactRows   = "indecis.embeddings.exact_rows"
 	exactValues = "indecis.embeddings.exact_values"
@@ -389,7 +392,7 @@ const (
 	embScale    = "indecis.embeddings.scale"
 )
 
-// lazyMatrix reconnaît les matrices des couches, lues à la demande.
+// lazyMatrix recognizes the layer matrices, read on demand.
 func lazyMatrix(name string) bool {
 	for _, suffix := range []string{".attn.Wqkv.weight", ".attn.Wo.weight", ".mlp.Wi.weight", ".mlp.Wo.weight"} {
 		if strings.HasSuffix(name, suffix) {
@@ -399,8 +402,8 @@ func lazyMatrix(name string) bool {
 	return false
 }
 
-// quantizeRows quantifie w (rows × h) en int8 par ligne : q = arrondi(w /
-// s), s = max |w| / 127. Les entiers sont rendus en float32 pour
+// quantizeRows quantizes w (rows x h) to int8 per row: q = round(w / s),
+// s = max |w| / 127. The integers are returned as float32 for
 // safetensors.Write.
 func quantizeRows(w []float32, rows, h int) (q, scale []float32) {
 	q = make([]float32, rows*h)
@@ -423,8 +426,8 @@ func quantizeRows(w []float32, rows, h int) (q, scale []float32) {
 	return q, scale
 }
 
-// Save écrit le modèle dans dir. Le répertoire reste lisible par
-// transformers : config.json et les poids de l'encodeur gardent leurs noms.
+// Save writes the model to dir. The directory stays readable by
+// transformers: config.json and the encoder's weights keep their names.
 func (m *Model) Save(dir string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -434,17 +437,17 @@ func (m *Model) Save(dir string) error {
 		tensors[p.Name] = safetensors.Tensor{Shape: p.Shape, Data: p.W}
 	}
 	H := m.enc.Cfg.Hidden
-	// La table d'embeddings (93 % des poids) est écrite en bf16, format
-	// d'origine du backbone. Les lignes que l'entraînement a modifiées ne
-	// sont plus représentables exactement : elles sont ajoutées en float32,
-	// pour que Load redonne le modèle au bit près.
+	// The embedding table (93% of the weights) is written in bf16, the
+	// backbone's original format. The rows that training modified are no
+	// longer exactly representable: they are added in float32, so that
+	// Load gives back the model bit for bit.
 	emb := m.enc.Emb
 	embW := m.enc.EmbeddingMatrix()
 	if m.embedInt8 {
 		q, scale := quantizeRows(embW, emb.Shape[0], H)
 		tensors[emb.Name] = safetensors.Tensor{Shape: emb.Shape, Data: q, DType: "I8"}
 		tensors[embScale] = safetensors.Tensor{Shape: []int{emb.Shape[0]}, Data: scale}
-		embW = nil // pas de lignes exactes : la table est quantifiée
+		embW = nil // no exact rows: the table is quantized
 	} else {
 		tensors[emb.Name] = safetensors.Tensor{Shape: emb.Shape, Data: embW, DType: "BF16"}
 	}
@@ -453,7 +456,7 @@ func (m *Model) Save(dir string) error {
 		row := embW[r*H : (r+1)*H]
 		for _, v := range row {
 			if safetensors.FromBF16(safetensors.ToBF16(v)) != v {
-				rows = append(rows, float32(r)) // exact : r < 2^24
+				rows = append(rows, float32(r)) // exact: r < 2^24
 				values = append(values, row...)
 				break
 			}
@@ -467,9 +470,9 @@ func (m *Model) Save(dir string) error {
 		tensors["heads."+h.q.Name+".weight"] = safetensors.Tensor{Shape: []int{h.rows, H}, Data: h.w}
 		tensors["heads."+h.q.Name+".bias"] = safetensors.Tensor{Shape: []int{h.outs}, Data: h.b}
 	}
-	// Chaque fichier est écrit à côté puis renommé : un modèle chargé depuis
-	// dir lit ses poids dans le fichier projeté en mémoire, qui ne doit pas
-	// être réécrit en place.
+	// Each file is written alongside then renamed: a model loaded from dir
+	// reads its weights in the memory-mapped file, which must not be
+	// rewritten in place.
 	err := writeFile(filepath.Join(dir, fileWeights), func(w io.Writer) error {
 		return safetensors.Write(w, tensors, map[string]string{"format": "pt"})
 	})
@@ -509,13 +512,13 @@ func (m *Model) Save(dir string) error {
 	return writeBytes(filepath.Join(dir, fileMeta), meta)
 }
 
-// writeFile écrit path par un fichier temporaire renommé ensuite.
+// writeFile writes path through a temporary file renamed afterward.
 func writeFile(path string, write func(io.Writer) error) error {
 	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
 	if err != nil {
 		return err
 	}
-	defer os.Remove(f.Name()) // sans effet après le renommage
+	defer os.Remove(f.Name()) // no effect after the rename
 	bw := bufio.NewWriterSize(f, 1<<20)
 	if err := write(bw); err != nil {
 		f.Close()
@@ -542,11 +545,10 @@ func writeBytes(path string, b []byte) error {
 	})
 }
 
-// Open charge un modèle écrit par Save, ou, si dir n'en contient pas
-// (pas de indecis.json), un backbone au format transformers : il ne répond
-// alors qu'aux questions ouvertes (ChooseNearest, DecideOpen), sans
-// entraînement. Sa question apprise, « match », n'est qu'un point
-// d'ancrage non entraîné.
+// Open loads a model written by Save, or, if dir does not contain one (no
+// indecis.json), a backbone in transformers format: it then only answers
+// open questions (ChooseNearest, DecideOpen), without training. Its
+// learned question, "match", is only an untrained anchor point.
 func Open(dir string, opts ...Option) (*Model, error) {
 	if _, err := os.Stat(filepath.Join(dir, fileMeta)); err == nil {
 		return Load(dir, opts...)
@@ -554,7 +556,7 @@ func Open(dir string, opts ...Option) (*Model, error) {
 	return New(dir, Schema{NewNoul("match", "")}, 1, opts...)
 }
 
-// Load lit un modèle écrit par Save.
+// Load reads a model written by Save.
 func Load(dir string, opts ...Option) (*Model, error) {
 	b, err := os.ReadFile(filepath.Join(dir, fileMeta))
 	if err != nil {
@@ -562,10 +564,10 @@ func Load(dir string, opts ...Option) (*Model, error) {
 	}
 	var meta metaJSON
 	if err := json.Unmarshal(b, &meta); err != nil {
-		return nil, fmt.Errorf("indecis: %s : %w", fileMeta, err)
+		return nil, fmt.Errorf("indecis: %s: %w", fileMeta, err)
 	}
 	if meta.Format != formatVersion {
-		return nil, fmt.Errorf("indecis: format %q non pris en charge", meta.Format)
+		return nil, fmt.Errorf("indecis: unsupported format %q", meta.Format)
 	}
 	if err := meta.Schema.Validate(); err != nil {
 		return nil, err
@@ -578,8 +580,8 @@ func Load(dir string, opts ...Option) (*Model, error) {
 	if err := json.Unmarshal(cb, &cfg); err != nil {
 		return nil, err
 	}
-	// Les poids sont projetés en mémoire. La table d'embeddings, écrite en
-	// bf16 par Save, est lue sur place ; le reste est décodé en float32.
+	// The weights are memory-mapped. The embedding table, written in bf16
+	// by Save, is read in place; the rest is decoded to float32.
 	f, err := safetensors.Open(filepath.Join(dir, fileWeights))
 	if err != nil {
 		return nil, err
@@ -594,7 +596,7 @@ func Load(dir string, opts ...Option) (*Model, error) {
 		if dtype, shape, raw, _ := f.Raw(name); name == embName && dtype == "I8" && len(shape) == 2 && shape[1] == cfg.Hidden {
 			sc, ok, err := f.Tensor(embScale)
 			if err != nil || !ok {
-				return nil, fmt.Errorf("indecis: table int8 sans échelles (%v)", err)
+				return nil, fmt.Errorf("indecis: int8 table without scales (%v)", err)
 			}
 			if table, err = newInt8Embeddings(cfg.Hidden, raw, sc.Data); err != nil {
 				return nil, err
@@ -616,8 +618,8 @@ func Load(dir string, opts ...Option) (*Model, error) {
 			continue
 		}
 		if lazyMatrix(name) {
-			// Les matrices des couches sont lues à la préparation de
-			// l'inférence, une à la fois (voir SetCompact ci-dessous).
+			// The layer matrices are read when preparing for inference,
+			// one at a time (see SetCompact below).
 			_, shape, _, _ := f.Raw(name)
 			tensors[name] = safetensors.Tensor{Shape: shape}
 			continue
@@ -627,18 +629,18 @@ func Load(dir string, opts ...Option) (*Model, error) {
 			return nil, err
 		}
 		tensors[name] = t
-		f.Evict(name) // la copie décodée suffit
+		f.Evict(name) // the decoded copy is enough
 	}
 	enc, err := modernbert.FromTensors(cfg, tensors)
 	if err != nil {
 		return nil, err
 	}
-	// Un modèle chargé sert d'abord à l'inférence : ses matrices ne sont
-	// gardées qu'empaquetées (voir modernbert.SetCompact).
+	// A loaded model is first used for inference: its matrices are only
+	// kept packed (see modernbert.SetCompact).
 	enc.SetCompact(func(name string) ([]float32, error) {
 		t, ok, err := f.Tensor(name)
 		if err == nil && !ok {
-			err = fmt.Errorf("tenseur %s absent", name)
+			err = fmt.Errorf("tensor %s missing", name)
 		}
 		f.Evict(name)
 		return t.Data, err
@@ -652,12 +654,12 @@ func Load(dir string, opts ...Option) (*Model, error) {
 		}
 		H := cfg.Hidden
 		if len(values.Data) != len(rows.Data)*H {
-			return nil, fmt.Errorf("indecis: lignes exactes mal formées")
+			return nil, fmt.Errorf("indecis: malformed exact rows")
 		}
 		for i, r := range rows.Data {
 			id := int(r)
 			if id < 0 || id >= cfg.Vocab {
-				return nil, fmt.Errorf("indecis: ligne exacte %d hors vocabulaire", id)
+				return nil, fmt.Errorf("indecis: exact row %d out of vocabulary", id)
 			}
 			copy(enc.Emb.W[id*H:(id+1)*H], values.Data[i*H:(i+1)*H])
 		}
@@ -674,7 +676,7 @@ func Load(dir string, opts ...Option) (*Model, error) {
 		w, okW := tensors["heads."+q.Name+".weight"]
 		bb, okB := tensors["heads."+q.Name+".bias"]
 		if !okW || !okB || len(w.Data) != len(h.w) || len(bb.Data) != len(h.b) {
-			return nil, fmt.Errorf("indecis: tête %s absente ou mal formée", q.Name)
+			return nil, fmt.Errorf("indecis: head %s missing or malformed", q.Name)
 		}
 		h.w, h.b = w.Data, bb.Data
 		m.heads = append(m.heads, h)
@@ -696,7 +698,7 @@ func (m *Model) tokenizerSource() ([]byte, error) {
 	}
 	b, err := os.ReadFile(m.tokenizerPath)
 	if err != nil {
-		return nil, fmt.Errorf("indecis: tokenizer d'origine : %w", err)
+		return nil, fmt.Errorf("indecis: original tokenizer: %w", err)
 	}
 	return b, nil
 }

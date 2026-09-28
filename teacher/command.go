@@ -14,43 +14,43 @@ import (
 	"github.com/bornholm/genai/llm"
 )
 
-// Command fait d'un harnais de code en ligne de commande (Claude Code, Pi…)
-// un client de chat pour le teacher, comme les agents de Conclave : la
-// commande reçoit le prompt, écrit sa réponse, et le client l'extrait.
+// Command turns a command-line coding harness (Claude Code, Pi...) into a
+// chat client for the teacher, like Conclave's agents: the command receives
+// the prompt, writes its answer, and the client extracts it.
 //
-// Les textes soumis au teacher sont des injections par construction. Un
-// harnais a des outils (shell, fichiers) : la commande doit les désactiver
-// entièrement, et elle s'exécute dans un répertoire temporaire vide. Le
-// format pi-json permet en plus de vérifier qu'aucun outil n'a été appelé.
+// Texts submitted to the teacher are injections by construction. A harness
+// has tools (shell, files): the command must disable them entirely, and it
+// runs in an empty temporary directory. The pi-json format additionally
+// allows checking that no tool was called.
 type Command struct {
-	// Args est la commande complète, sans le prompt.
+	// Args is the full command, without the prompt.
 	Args []string
-	// SystemFlag est l'option qui reçoit le prompt système
-	// (« --system-prompt »). Vide : le prompt système est placé en tête du
+	// SystemFlag is the option that receives the system prompt
+	// ("--system-prompt"). Empty: the system prompt is prepended to the
 	// message.
 	SystemFlag string
-	// Input est « stdin » (défaut), « argument » (le message en dernier
-	// argument) ou « file » : le message est écrit dans prompt.md, dans le
-	// répertoire temporaire, et passé comme « @prompt.md » (convention de
-	// Pi). Un argument est limité à 128 Kio sous Linux : un lot de longs
-	// textes ne tient pas en « argument ».
+	// Input is "stdin" (default), "argument" (the message as the last
+	// argument) or "file": the message is written to prompt.md, in the
+	// temporary directory, and passed as "@prompt.md" (Pi's convention). An
+	// argument is limited to 128 KiB on Linux: a batch of long texts does
+	// not fit in "argument".
 	Input string
-	// Output est « claude-json » (enveloppe de claude --output-format json),
-	// « pi-json » (événements de pi --mode json) ou « text ».
+	// Output is "claude-json" (claude --output-format json envelope),
+	// "pi-json" (pi --mode json events) or "text".
 	Output string
-	// Env complète l'environnement du processus.
+	// Env extends the process environment.
 	Env []string
-	// Timeout borne chaque appel ; 5 minutes par défaut.
+	// Timeout bounds each call; 5 minutes by default.
 	Timeout time.Duration
 }
 
-// ErrToolUse signale qu'un harnais a appelé un outil malgré leur
-// désactivation : sa réponse est rejetée.
-var ErrToolUse = errors.New("teacher : le harnais a appelé un outil alors qu'ils sont désactivés")
+// ErrToolUse signals that a harness called a tool despite them being
+// disabled: its response is rejected.
+var ErrToolUse = errors.New("teacher: the harness called a tool although tools are disabled")
 
-// ChatCompletion implémente llm.ChatCompletionClient. Le format de réponse
-// demandé n'est pas transmis : les prompts du teacher décrivent le JSON
-// attendu et la réponse est extraite de la prose si besoin.
+// ChatCompletion implements llm.ChatCompletionClient. The requested response
+// format is not passed through: the teacher's prompts describe the expected
+// JSON and the response is extracted from prose if needed.
 func (c *Command) ChatCompletion(ctx context.Context, funcs ...llm.ChatCompletionOptionFunc) (llm.ChatCompletionResponse, error) {
 	opts := llm.NewChatCompletionOptions(funcs...)
 	var system, user []string
@@ -72,7 +72,7 @@ func (c *Command) ChatCompletion(ctx context.Context, funcs ...llm.ChatCompletio
 		}
 	}
 	if len(args) == 0 {
-		return nil, fmt.Errorf("teacher : commande vide")
+		return nil, fmt.Errorf("teacher: empty command")
 	}
 
 	timeout := c.Timeout
@@ -110,7 +110,7 @@ func (c *Command) ChatCompletion(ctx context.Context, funcs ...llm.ChatCompletio
 		if detail == "" {
 			detail = lastLine(stdout.String())
 		}
-		return nil, fmt.Errorf("teacher : %s : %w (%s)", args[0], err, detail)
+		return nil, fmt.Errorf("teacher: %s: %w (%s)", args[0], err, detail)
 	}
 
 	text, err := extractText(c.Output, stdout.Bytes())
@@ -129,10 +129,10 @@ func extractText(format string, out []byte) (string, error) {
 			IsError bool   `json:"is_error"`
 		}
 		if err := json.Unmarshal(bytes.TrimSpace(out), &env); err != nil {
-			return "", fmt.Errorf("teacher : enveloppe claude illisible : %w", err)
+			return "", fmt.Errorf("teacher: unreadable claude envelope: %w", err)
 		}
 		if env.IsError {
-			return "", fmt.Errorf("teacher : claude a signalé une erreur : %s", lastLine(env.Result))
+			return "", fmt.Errorf("teacher: claude reported an error: %s", lastLine(env.Result))
 		}
 		return env.Result, nil
 	case "pi-json":
@@ -174,13 +174,13 @@ func extractText(format string, out []byte) (string, error) {
 			}
 		}
 		if last == "" {
-			return "", fmt.Errorf("teacher : pi n'a produit aucun message")
+			return "", fmt.Errorf("teacher: pi produced no message")
 		}
 		return last, nil
 	case "", "text":
 		return string(out), nil
 	}
-	return "", fmt.Errorf("teacher : format de sortie %q inconnu", format)
+	return "", fmt.Errorf("teacher: unknown output format %q", format)
 }
 
 func lastLine(s string) string {

@@ -5,19 +5,19 @@ import (
 	"fmt"
 )
 
-// OpenQuestion est une question posée à l'inférence, sans entraînement
-// dédié : ses réponses possibles sont décrites en texte et comparées au
-// texte à juger par plongements (voir ChooseIn). C'est la forme des
-// questions de Jev et de CLM.
+// OpenQuestion is a question asked at inference time, without dedicated
+// training: its possible answers are described in text and compared to the
+// text being judged by embeddings (see ChooseIn). This is the form of the
+// Jev and CLM questions.
 type OpenQuestion struct {
 	Name string
 	Kind Kind
-	// Instructions, si fournies, précèdent chaque option dans ce que lit
-	// le modèle (« Urgence du courriel » avant « haute »).
+	// Instructions, if given, precede each option in what the model reads
+	// ("Email urgency" before "high").
 	Instructions string
-	// Options : pour Choice, les options ; pour Score, les niveaux du plus
-	// bas au plus haut ; pour Noul, exactement deux critères, celui du
-	// « vrai » puis celui du « faux ».
+	// Options: for Choice, the options; for Score, the levels from lowest
+	// to highest; for Noul, exactly two criteria, the "true" one then the
+	// "false" one.
 	Options []Candidate
 }
 
@@ -25,14 +25,14 @@ func (q OpenQuestion) validate() error {
 	switch q.Kind {
 	case Noul:
 		if len(q.Options) != 2 {
-			return fmt.Errorf("indecis: %s : une question noul ouverte décrit deux critères (vrai, faux)", q.Name)
+			return fmt.Errorf("indecis: %s: an open noul question describes two criteria (true, false)", q.Name)
 		}
 	case Choice, Score:
 		if len(q.Options) < 2 {
-			return fmt.Errorf("indecis: %s : au moins deux options", q.Name)
+			return fmt.Errorf("indecis: %s: at least two options", q.Name)
 		}
 	default:
-		return fmt.Errorf("indecis: %s : type %q inconnu", q.Name, q.Kind)
+		return fmt.Errorf("indecis: %s: unknown type %q", q.Name, q.Kind)
 	}
 	return nil
 }
@@ -58,10 +58,10 @@ func joinNonEmpty(a, b string) string {
 	return a + "\n" + b
 }
 
-// DecideOpen répond à des questions ouvertes pour chaque texte. Les
-// probabilités viennent du softmax des cosinus (voir ChooseIn) : leur
-// calibration dépend du modèle, et un seuil se règle sur des exemples.
-// WithEmbedCache évite de réencoder les options d'un appel à l'autre.
+// DecideOpen answers open questions for each text. The probabilities come
+// from the softmax of the cosines (see ChooseIn): their calibration
+// depends on the model, and a threshold is tuned on examples.
+// WithEmbedCache avoids re-encoding the options from one call to the next.
 func (m *Model) DecideOpen(ctx context.Context, questions []OpenQuestion, texts ...string) ([]Decision, error) {
 	out := make([]Decision, len(texts))
 	for i := range out {

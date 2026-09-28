@@ -7,14 +7,14 @@ import (
 	"github.com/bornholm/indecis/internal/linalg"
 )
 
-// Batch est un lot de séquences complétées à droite jusqu'à T tokens.
+// Batch is a batch of sequences right-padded to T tokens.
 type Batch struct {
 	IDs  []int32 // [B·T]
-	Lens []int   // longueur réelle de chaque séquence
+	Lens []int   // actual length of each sequence
 	T    int
 }
 
-// NewBatch complète les séquences avec pad.
+// NewBatch pads the sequences with pad.
 func NewBatch(seqs [][]int32, pad int32) Batch {
 	T := 0
 	for _, s := range seqs {
@@ -31,49 +31,49 @@ func NewBatch(seqs [][]int32, pad int32) Batch {
 	return b
 }
 
-// B est le nombre de séquences.
+// B is the number of sequences.
 func (b Batch) B() int { return len(b.Lens) }
 
-// State contient les activations d'un forward, lues par le backward.
+// State holds the activations of a forward pass, read by the backward pass.
 type State struct {
 	Batch  Batch
-	N      int       // B·T lignes
-	emb    []float32 // plongements bruts, [N, H]
+	N      int       // B·T rows
+	emb    []float32 // raw embeddings, [N, H]
 	embLN  lnCache
 	layers []layerState
 	final  lnCache
-	// Hidden est la sortie de l'encodeur après final_norm, [N, H].
+	// Hidden is the encoder output after final_norm, [N, H].
 	Hidden []float32
 }
 
 type layerState struct {
-	in     []float32 // entrée résiduelle, [N, H]
-	attnIn []float32 // attn_norm(in), ou in pour la couche 0
+	in     []float32 // residual input, [N, H]
+	attnIn []float32 // attn_norm(in), or in for layer 0
 	attnLN lnCache
-	q, k   []float32 // après RoPE, [B, heads, T, D]
+	q, k   []float32 // after RoPE, [B, heads, T, D]
 	v      []float32 // [B, heads, T, D]
-	p      []float32 // probabilités d'attention, bloc (b, h) de len×len
-	ctx    []float32 // têtes concaténées, entrée de Wo, [N, H]
+	p      []float32 // attention probabilities, block (b, h) of len×len
+	ctx    []float32 // concatenated heads, input to Wo, [N, H]
 	h1     []float32 // in + attention
 	mlpIn  []float32 // mlp_norm(h1)
 	mlpLN  lnCache
-	z      []float32 // sortie de Wi, [N, 2·I]
-	g      []float32 // gelu(entrée) ⊙ porte, entrée de WoMLP, [N, I]
+	z      []float32 // output of Wi, [N, 2·I]
+	g      []float32 // gelu(input) ⊙ gate, input to WoMLP, [N, I]
 	out    []float32 // h1 + MLP
 }
 
-// Forward encode un lot. Le State retourné sert au backward ; en inférence,
-// seul State.Hidden est utile.
+// Forward encodes a batch. The returned State is used by the backward
+// pass; in inference, only State.Hidden is needed.
 func (m *Model) Forward(b Batch) (*State, error) {
 	cfg := m.Cfg
 	H := cfg.Hidden
 	N := b.B() * b.T
 	if len(b.IDs) != N {
-		return nil, fmt.Errorf("modernbert: lot incohérent")
+		return nil, fmt.Errorf("modernbert: inconsistent batch")
 	}
 	for _, id := range b.IDs {
 		if id < 0 || int(id) >= cfg.Vocab {
-			return nil, fmt.Errorf("modernbert: id %d hors vocabulaire", id)
+			return nil, fmt.Errorf("modernbert: id %d out of vocabulary", id)
 		}
 	}
 	m.restoreWeights()
@@ -138,7 +138,7 @@ func (m *Model) layerForward(l int, b Batch, x []float32, ls *layerState) {
 	}
 }
 
-// theta retourne la base RoPE de la couche l.
+// theta returns the RoPE base of layer l.
 func (m *Model) theta(l int) float64 {
 	if m.Cfg.IsGlobal(l) {
 		return m.Cfg.GlobalTheta
@@ -146,8 +146,8 @@ func (m *Model) theta(l int) float64 {
 	return m.Cfg.LocalTheta
 }
 
-// attentionForward répartit qkv par tête, applique RoPE, puis calcule
-// l'attention de chaque (séquence, tête) sur sa longueur réelle.
+// attentionForward splits qkv by head, applies RoPE, then computes the
+// attention of each (sequence, head) over its actual length.
 func (m *Model) attentionForward(l int, b Batch, qkv []float32, ls *layerState) {
 	cfg := m.Cfg
 	H, nh, D := cfg.Hidden, cfg.Heads, cfg.HeadDim()
@@ -218,8 +218,8 @@ func (m *Model) attentionForward(l int, b Batch, qkv []float32, ls *layerState) 
 	})
 }
 
-// MeanPool moyenne les états cachés de chaque séquence sur ses tokens réels,
-// spéciaux compris, comme le pooling de sentence-transformers.
+// MeanPool averages the hidden states of each sequence over its actual
+// tokens, special tokens included, like sentence-transformers pooling.
 func MeanPool(hidden []float32, b Batch, h int) []float32 {
 	out := make([]float32, b.B()*h)
 	for bi, n := range b.Lens {

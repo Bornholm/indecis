@@ -8,38 +8,38 @@ import (
 	"github.com/bornholm/indecis/dataset"
 )
 
-// Verdict est l'avis d'un teacher sur un exemple.
+// Verdict is a teacher's opinion on an example.
 type Verdict struct {
 	Teacher string         `json:"teacher"`
 	Labels  map[string]any `json:"labels"`
 }
 
-// Disagreement est un exemple sur lequel les teachers, ou un teacher et
-// l'étiquette existante, se contredisent : il est à relire.
+// Disagreement is an example on which the teachers, or a teacher and the
+// existing label, contradict each other: it needs a human review.
 type Disagreement struct {
 	Example  dataset.Example `json:"example"`
 	Verdicts []Verdict       `json:"verdicts"`
-	// Reason nomme la question en cause.
+	// Reason names the question at issue.
 	Reason string `json:"reason"`
 }
 
-// Consensus fusionne les étiquettes de plusieurs teachers sur les mêmes
-// exemples. byTeacher[t][i] est l'avis du teacher t sur examples[i] (nil
-// s'il n'a pas répondu).
+// Consensus merges the labels of several teachers on the same examples.
+// byTeacher[t][i] is teacher t's opinion on examples[i] (nil if it did not
+// answer).
 //
-// Un seul teacher se trompe avec assurance ; plusieurs teachers différents se
-// trompent rarement de la même façon. On garde donc ce sur quoi ils
-// s'accordent, et on renvoie le reste à un humain :
-//   - Noul : tous du même côté de 0,5 ; la probabilité retenue est la
-//     moyenne. Sinon l'exemple part en désaccord.
-//   - Choice : même option retenue par tous ; distribution moyenne. Sinon la
-//     question est retirée de l'exemple, qui reste utilisable.
-//   - Score : même niveau pour tous, sinon la question est retirée.
+// A single teacher can be confidently wrong; several different teachers
+// rarely make the same mistake. So we keep what they agree on, and hand the
+// rest to a human:
+//   - Noul: all on the same side of 0.5; the kept probability is the
+//     average. Otherwise the example goes to disagreement.
+//   - Choice: same option chosen by all; average distribution. Otherwise
+//     the question is removed from the example, which stays usable.
+//   - Score: same level for all, otherwise the question is removed.
 //
-// Une étiquette déjà présente sur l'exemple (exacte, par construction ou par
-// provenance) est conservée ; si les teachers la contredisent unanimement
-// sur une question noul, l'exemple part en désaccord : c'est souvent la
-// source qui se trompe, parfois les teachers, et seul un humain tranche.
+// A label already present on the example (exact, by construction or by
+// provenance) is kept; if the teachers unanimously contradict it on a noul
+// question, the example goes to disagreement: it is often the source that
+// is wrong, sometimes the teachers, and only a human can decide.
 func Consensus(schema indecis.Schema, examples []dataset.Example, names []string, byTeacher [][]map[string]any) ([]dataset.Example, []Disagreement) {
 	var kept []dataset.Example
 	var disputes []Disagreement
@@ -51,7 +51,7 @@ func Consensus(schema indecis.Schema, examples []dataset.Example, names []string
 			}
 		}
 		if len(verdicts) < len(byTeacher) {
-			continue // un teacher n'a pas répondu : pas de consensus possible
+			continue // a teacher did not answer: no consensus possible
 		}
 		labels := map[string]any{}
 		reason := ""
@@ -76,11 +76,11 @@ func Consensus(schema indecis.Schema, examples []dataset.Example, names []string
 					}
 				}
 				if yes != 0 && yes != len(ps) {
-					reason = fmt.Sprintf("%s : les teachers divergent", q.Name)
+					reason = fmt.Sprintf("%s: the teachers disagree", q.Name)
 					break
 				}
 				if exact, ok := e.Labels[q.Name].(bool); ok && exact != (mean >= 0.5) {
-					reason = fmt.Sprintf("%s : les teachers contredisent l'étiquette existante (%v)", q.Name, exact)
+					reason = fmt.Sprintf("%s: the teachers contradict the existing label (%v)", q.Name, exact)
 					break
 				}
 				labels[q.Name] = mean
@@ -109,8 +109,8 @@ func Consensus(schema indecis.Schema, examples []dataset.Example, names []string
 	return kept, disputes
 }
 
-// agreedChoice retourne la distribution moyenne si tous les teachers
-// retiennent la même option.
+// agreedChoice returns the average distribution if all teachers pick the
+// same option.
 func agreedChoice(q indecis.Question, verdicts []Verdict) (map[string]any, bool) {
 	avg := map[string]float64{}
 	best := ""

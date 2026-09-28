@@ -13,15 +13,15 @@ import (
 	"github.com/bornholm/indecis/dataset"
 )
 
-// Corpus regroupe des gabarits et les gazetteers qu'ils utilisent.
+// Corpus groups templates and the gazetteers they use.
 type Corpus struct {
 	Templates  []*Template
 	Gazetteers map[string]*Gazetteer
 }
 
-// LoadFS lit récursivement les gabarits (*.tmpl) et les gazetteers (*.tsv)
-// d'un système de fichiers. Un gabarit est nommé par son chemin sans
-// extension, un gazetteer par son nom de fichier sans extension.
+// LoadFS recursively reads the templates (*.tmpl) and gazetteers (*.tsv)
+// of a file system. A template is named by its path without extension, a
+// gazetteer by its file name without extension.
 func LoadFS(fsys fs.FS, opts GazetteerOptions) (*Corpus, error) {
 	c := &Corpus{Gazetteers: map[string]*Gazetteer{}}
 	err := fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
@@ -51,7 +51,7 @@ func LoadFS(fsys fs.FS, opts GazetteerOptions) (*Corpus, error) {
 			}
 			name := strings.TrimSuffix(path.Base(p), ".tsv")
 			if _, dup := c.Gazetteers[name]; dup {
-				return fmt.Errorf("gazetteer %q en double", name)
+				return fmt.Errorf("gazetteer %q duplicated", name)
 			}
 			c.Gazetteers[name] = g
 		}
@@ -64,12 +64,12 @@ func LoadFS(fsys fs.FS, opts GazetteerOptions) (*Corpus, error) {
 	return c, c.Validate()
 }
 
-// Validate vérifie que chaque gazetteer utilisé existe et que chaque motif
-// d'inclusion désigne au moins un gabarit. Une faute de frappe doit échouer
-// au chargement, pas produire un corpus silencieusement appauvri.
+// Validate checks that every used gazetteer exists and that every
+// include pattern matches at least one template. A typo must fail at
+// load time, not produce a corpus that is silently impoverished.
 func (c *Corpus) Validate() error {
 	if len(c.Templates) == 0 {
-		return fmt.Errorf("synth : aucun gabarit")
+		return fmt.Errorf("synth: no template")
 	}
 	for _, t := range c.Templates {
 		var err error
@@ -80,11 +80,11 @@ func (c *Corpus) Validate() error {
 			switch v := n.(type) {
 			case Pick:
 				if c.Gazetteers[v.Set] == nil {
-					err = fmt.Errorf("%s : gazetteer %q absent", t.Name, v.Set)
+					err = fmt.Errorf("%s: gazetteer %q missing", t.Name, v.Set)
 				}
 			case Include:
 				if len(c.matching(v.Pattern)) == 0 {
-					err = fmt.Errorf("%s : aucun gabarit pour {{include:%s}}", t.Name, v.Pattern)
+					err = fmt.Errorf("%s: no template for {{include:%s}}", t.Name, v.Pattern)
 				}
 			}
 		})
@@ -126,20 +126,20 @@ func (c *Corpus) matching(pattern string) []*Template {
 	return out
 }
 
-// Options règle la génération.
+// Options controls generation.
 type Options struct {
 	Seed uint64
-	// OptionalRate est la probabilité d'une section optionnelle sans
-	// probabilité propre. 0,5 par défaut.
+	// OptionalRate is the probability of an optional section without
+	// its own probability. 0.5 by default.
 	OptionalRate float64
-	// MaxDepth borne les inclusions imbriquées. 3 par défaut.
+	// MaxDepth bounds nested includes. 3 by default.
 	MaxDepth int
-	// Dedupe écarte les textes déjà produits.
+	// Dedupe discards already-produced texts.
 	Dedupe bool
 }
 
-// Generate produit n exemples. Les gabarits de poids nul ne sont jamais tirés
-// à la racine : ce sont des fragments destinés à être inclus.
+// Generate produces n examples. Zero-weight templates are never drawn
+// at the root: they are fragments meant to be included.
 func (c *Corpus) Generate(n int, opts Options) ([]dataset.Example, error) {
 	if opts.OptionalRate == 0 {
 		opts.OptionalRate = 0.5
@@ -156,14 +156,14 @@ func (c *Corpus) Generate(n int, opts Options) ([]dataset.Example, error) {
 		}
 	}
 	if len(roots) == 0 {
-		return nil, fmt.Errorf("synth : aucun gabarit de poids positif")
+		return nil, fmt.Errorf("synth: no template with positive weight")
 	}
 	pick := rand.New(rand.NewSource(int64(opts.Seed ^ 0x5eed)))
 	seen := map[string]bool{}
 	var out []dataset.Example
 	for i := 0; len(out) < n; i++ {
 		if i >= 20*n+100 {
-			return out, fmt.Errorf("synth : %d exemples distincts seulement après %d tirages ; les gabarits manquent de variété", len(out), i)
+			return out, fmt.Errorf("synth: only %d distinct examples after %d draws; templates lack variety", len(out), i)
 		}
 		t := roots[len(roots)-1]
 		target := pick.Float64() * total
@@ -179,8 +179,8 @@ func (c *Corpus) Generate(n int, opts Options) ([]dataset.Example, error) {
 			return nil, err
 		}
 		if opts.Dedupe {
-			// Le même message sous deux contextes différents est un autre
-			// exemple : hors périmètre ici, légitime là.
+			// The same message under two different contexts is another
+			// example: out of scope here, legitimate there.
 			key := e.Context + "\x00" + e.Text
 			if seen[key] {
 				continue
@@ -198,7 +198,7 @@ func exampleSeed(global uint64, i int) uint64 {
 	return h.Sum64()
 }
 
-// Render rend un gabarit avec une graine donnée.
+// Render renders a template with a given seed.
 func (c *Corpus) Render(t *Template, seed uint64, opts Options) (dataset.Example, error) {
 	if opts.OptionalRate == 0 {
 		opts.OptionalRate = 0.5
@@ -242,10 +242,10 @@ type state struct {
 	rng      *rand.Rand
 	slots    map[string]string
 	includes map[string]bool
-	split    int // position de {{user}} dans le texte racine, -1 sinon
+	split    int // position of {{user}} in the root text, -1 otherwise
 }
 
-// template rend un gabarit et retourne son texte et ses étiquettes.
+// template renders a template and returns its text and its labels.
 func (st *state) template(t *Template, depth int) (string, map[string]any, error) {
 	labels := make(map[string]any, len(t.Labels))
 	for k, v := range t.Labels {
@@ -335,7 +335,7 @@ func (r *rendering) nodes(b *strings.Builder, nodes []Node) error {
 				continue
 			}
 			if r.depth >= r.st.opts.MaxDepth {
-				return fmt.Errorf("synth : %s : inclusions trop profondes (> %d)", r.t.Name, r.st.opts.MaxDepth)
+				return fmt.Errorf("synth: %s: includes too deep (> %d)", r.t.Name, r.st.opts.MaxDepth)
 			}
 			cands := r.st.c.matching(v.Pattern)
 			sub := cands[rng.Intn(len(cands))]
@@ -347,7 +347,7 @@ func (r *rendering) nodes(b *strings.Builder, nodes []Node) error {
 			r.st.includes[sub.Family] = true
 			for k, val := range labels {
 				if cur, isBool := r.labels[k].(bool); isBool && cur {
-					continue // vrai l'emporte
+					continue // true wins
 				}
 				r.labels[k] = val
 			}
@@ -355,13 +355,13 @@ func (r *rendering) nodes(b *strings.Builder, nodes []Node) error {
 			r.labels[v.Name] = v.Value
 		case UserMark:
 			if r.depth > 0 {
-				// Gabarit inclus : son contexte n'a pas de sens dans le
-				// texte hôte, il est abandonné.
+				// Included template: its context has no meaning in the
+				// host text, it is dropped.
 				b.Reset()
 				continue
 			}
 			if r.st.split >= 0 {
-				return fmt.Errorf("synth : %s : {{user}} rendu deux fois", r.t.Name)
+				return fmt.Errorf("synth: %s: {{user}} rendered twice", r.t.Name)
 			}
 			r.st.split = b.Len()
 		}

@@ -36,18 +36,18 @@ import (
 
 const metaspace = "▁"
 
-// Tokenizer est sûr pour un usage concurrent.
+// Tokenizer is safe for concurrent use.
 type Tokenizer struct {
-	vocab   *strTable        // chaînes du vocabulaire BPE, par id
-	names   map[int32]string // tokens ajoutés, s'ils diffèrent du vocabulaire
-	size    int              // nombre d'ids
+	vocab   *strTable        // BPE vocabulary strings, by id
+	names   map[int32]string // added tokens, if they differ from the vocabulary
+	size    int              // number of ids
 	merges  mergeTable
-	bytes   [256]int32 // id de <0xXX>, -1 si absent
+	bytes   [256]int32 // id of <0xXX>, -1 if absent
 	unk     int32
 	bos     int32
 	eos     int32
 	pad     int32
-	added   map[byte][]addedToken // par premier octet, du plus long au plus court
+	added   map[byte][]addedToken // by first byte, longest to shortest
 	cacheMu sync.RWMutex
 	cache   map[string][]int32
 }
@@ -66,7 +66,7 @@ type addedToken struct {
 
 const maxCache = 1 << 16
 
-// Load lit un tokenizer.json.
+// Load reads a tokenizer.json.
 func Load(path string) (*Tokenizer, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -81,10 +81,10 @@ var (
 	shared   = map[[sha256.Size]byte]*Tokenizer{}
 )
 
-// LoadShared est Load, mais deux fichiers de même contenu donnent le même
-// Tokenizer : plusieurs modèles issus du même backbone n'en gardent qu'un
-// en mémoire (~12 Mo chacun). Un Tokenizer est immuable et sûr en accès
-// concurrent, son cache de mots compris.
+// LoadShared is Load, but two files with the same content give the same
+// Tokenizer: several models derived from the same backbone keep only one
+// in memory (~12 MB each). A Tokenizer is immutable and safe for
+// concurrent access, including its word cache.
 func LoadShared(path string) (*Tokenizer, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -107,7 +107,7 @@ func LoadShared(path string) (*Tokenizer, error) {
 	return t, nil
 }
 
-// Parse lit le contenu d'un tokenizer.json.
+// Parse reads the content of a tokenizer.json.
 func Parse(data []byte) (*Tokenizer, error) { return read(bytes.NewReader(data)) }
 
 type fileJSON struct {
@@ -147,7 +147,7 @@ type fileJSON struct {
 		FuseUnk                 bool     `json:"fuse_unk"`
 		ByteFallback            bool     `json:"byte_fallback"`
 		IgnoreMerges            bool     `json:"ignore_merges"`
-	} `json:"model"` // vocab et merges sont lus en flux (voir decode)
+	} `json:"model"` // vocab and merges are streamed (see decode)
 }
 
 type templatePiece struct {
@@ -159,8 +159,8 @@ type templatePiece struct {
 	} `json:"Sequence"`
 }
 
-// matches vérifie un gabarit : chaque élément est un token spécial (nommé)
-// ou une séquence (vide).
+// matches checks a template: each element is a special token (named)
+// or a sequence (empty).
 func matches(pieces []templatePiece, want ...string) bool {
 	if len(pieces) != len(want) {
 		return false
@@ -194,7 +194,7 @@ func read(r io.Reader) (*Tokenizer, error) {
 	}
 	for _, a := range f.AddedTokens {
 		if a.ID < 0 {
-			return nil, fmt.Errorf("tokenizer: id %d négatif", a.ID)
+			return nil, fmt.Errorf("tokenizer: id %d negative", a.ID)
 		}
 		for int(a.ID) >= len(byID) {
 			byID = append(byID, "")
@@ -206,7 +206,7 @@ func read(r io.Reader) (*Tokenizer, error) {
 
 	for _, a := range f.AddedTokens {
 		if a.Normalized || a.SingleWord || a.Content == "" {
-			return nil, fmt.Errorf("tokenizer: added token %q: normalized/single_word non pris en charge", a.Content)
+			return nil, fmt.Errorf("tokenizer: added token %q: normalized/single_word not supported", a.Content)
 		}
 		if byID[a.ID] != a.Content {
 			t.names[a.ID] = a.Content
@@ -220,13 +220,13 @@ func read(r io.Reader) (*Tokenizer, error) {
 
 	var ok bool
 	if t.unk, ok = t.lookup(f.Model.UnkToken); !ok {
-		return nil, fmt.Errorf("tokenizer: unk token %q absent", f.Model.UnkToken)
+		return nil, fmt.Errorf("tokenizer: unk token %q missing", f.Model.UnkToken)
 	}
 	if t.bos, ok = t.lookup("<bos>"); !ok {
-		return nil, fmt.Errorf("tokenizer: <bos> absent")
+		return nil, fmt.Errorf("tokenizer: <bos> missing")
 	}
 	if t.eos, ok = t.lookup("<eos>"); !ok {
-		return nil, fmt.Errorf("tokenizer: <eos> absent")
+		return nil, fmt.Errorf("tokenizer: <eos> missing")
 	}
 	if t.pad, ok = t.lookup("<pad>"); !ok {
 		t.pad = 0
@@ -245,7 +245,7 @@ func read(r io.Reader) (*Tokenizer, error) {
 		b, okB := vocab.lookup(p[1])
 		id, okM := vocab.lookup(p[0] + p[1])
 		if !okA || !okB || !okM {
-			return nil, fmt.Errorf("tokenizer: merge %q %q hors vocabulaire", p[0], p[1])
+			return nil, fmt.Errorf("tokenizer: merge %q %q out of vocabulary", p[0], p[1])
 		}
 		entries = append(entries, mergeEntry{key: pairKey(a, b), m: merge{rank: int32(rank), id: id}})
 	}
@@ -257,26 +257,26 @@ func checkSupported(f *fileJSON) error {
 	m := f.Model
 	switch {
 	case m.Type != "BPE":
-		return fmt.Errorf("tokenizer: modèle %q non pris en charge", m.Type)
+		return fmt.Errorf("tokenizer: model %q not supported", m.Type)
 	case m.Dropout != nil && *m.Dropout != 0:
-		return fmt.Errorf("tokenizer: dropout BPE non pris en charge")
+		return fmt.Errorf("tokenizer: BPE dropout not supported")
 	case m.ContinuingSubwordPrefix != nil && *m.ContinuingSubwordPrefix != "",
 		m.EndOfWordSuffix != nil && *m.EndOfWordSuffix != "":
-		return fmt.Errorf("tokenizer: préfixe/suffixe de sous-mot non pris en charge")
+		return fmt.Errorf("tokenizer: subword prefix/suffix not supported")
 	case !m.ByteFallback || !m.FuseUnk || m.IgnoreMerges:
-		return fmt.Errorf("tokenizer: attendu byte_fallback=true, fuse_unk=true, ignore_merges=false")
+		return fmt.Errorf("tokenizer: expected byte_fallback=true, fuse_unk=true, ignore_merges=false")
 	}
 	if n := f.Normalizer; n != nil && (n.Type != "Replace" || n.Pattern.String != " " || n.Content != metaspace) {
-		return fmt.Errorf("tokenizer: normalizer non pris en charge")
+		return fmt.Errorf("tokenizer: normalizer not supported")
 	}
 	p := f.PreTokenizer
 	if p == nil || p.Type != "Metaspace" || p.Replacement != metaspace || p.PrependScheme != "always" || !p.Split {
-		return fmt.Errorf("tokenizer: pré-tokenizer attendu : Metaspace(▁, always, split)")
+		return fmt.Errorf("tokenizer: expected pre-tokenizer: Metaspace(▁, always, split)")
 	}
 	pp := f.PostProcessor
 	if pp == nil || pp.Type != "TemplateProcessing" || !matches(pp.Single, "<bos>", "", "<eos>") ||
 		!matches(pp.Pair, "<bos>", "", "<eos>", "", "<eos>") {
-		return fmt.Errorf("tokenizer: gabarits attendus : <bos> A <eos> et <bos> A <eos> B <eos>")
+		return fmt.Errorf("tokenizer: expected templates: <bos> A <eos> and <bos> A <eos> B <eos>")
 	}
 	return nil
 }
@@ -297,10 +297,10 @@ func (t *Tokenizer) lookup(s string) (int32, bool) {
 	return 0, false
 }
 
-// VocabSize est le nombre d'ids possibles.
+// VocabSize is the number of possible ids.
 func (t *Tokenizer) VocabSize() int { return t.size }
 
-// Token retourne la chaîne d'un id.
+// Token returns the string for an id.
 func (t *Tokenizer) Token(id int32) string {
 	if id < 0 || int(id) >= t.size {
 		return ""
@@ -311,20 +311,21 @@ func (t *Tokenizer) Token(id int32) string {
 	return t.vocab.str(id)
 }
 
-// PadID, BosID, EosID exposent les ids spéciaux.
+// PadID, BosID, EosID expose the special ids.
 func (t *Tokenizer) PadID() int32 { return t.pad }
 func (t *Tokenizer) BosID() int32 { return t.bos }
 func (t *Tokenizer) EosID() int32 { return t.eos }
 
-// Encode tokenise text et encadre le résultat de <bos> et <eos>.
+// Encode tokenizes text and frames the result with <bos> and <eos>.
 func (t *Tokenizer) Encode(text string) []int32 {
 	ids := []int32{t.bos}
 	ids = t.appendText(ids, text)
 	return append(ids, t.eos)
 }
 
-// EncodeMax tokenise comme Encode et tronque à droite pour ne pas dépasser
-// maxLen ids, <eos> final conservé. maxLen ≤ 2 donne [<bos>, <eos>].
+// EncodeMax tokenizes like Encode and truncates on the right to not
+// exceed maxLen ids, keeping the final <eos>. maxLen <= 2 gives
+// [<bos>, <eos>].
 func (t *Tokenizer) EncodeMax(text string, maxLen int) []int32 {
 	ids := t.Encode(text)
 	if maxLen < 2 {
@@ -338,14 +339,14 @@ func (t *Tokenizer) EncodeMax(text string, maxLen int) []int32 {
 	return ids
 }
 
-// EncodePair tokenise une paire (contexte, texte) selon le gabarit
-// <bos> contexte <eos> texte <eos>, celui de la bibliothèque de référence.
+// EncodePair tokenizes a (context, text) pair with the template
+// <bos> context <eos> text <eos>, the one used by the reference library.
 //
-// Au-delà de maxLen ids (0 : pas de limite), la troncature sacrifie le
-// contexte avant le texte : le texte est ce qu'on juge, le contexte ce qui
-// l'éclaire. Le contexte garde au moins un tiers du budget s'il est assez
-// long, et c'est son début qui est conservé : un prompt système pose le rôle
-// de l'assistant en tête.
+// Beyond maxLen ids (0: no limit), truncation sacrifices the context
+// before the text: the text is what is being judged, the context is what
+// sheds light on it. The context keeps at least a third of the budget if
+// it is long enough, and it is its beginning that is kept: a system
+// prompt sets the assistant's role up front.
 func (t *Tokenizer) EncodePair(context, text string, maxLen int) []int32 {
 	a := t.appendText(nil, context)
 	b := t.appendText(nil, text)
@@ -366,16 +367,16 @@ func (t *Tokenizer) EncodePair(context, text string, maxLen int) []int32 {
 	return append(ids, t.eos)
 }
 
-// appendText découpe text autour des tokens ajoutés et tokenise les segments.
+// appendText splits text around added tokens and tokenizes the segments.
 func (t *Tokenizer) appendText(ids []int32, text string) []int32 {
 	t.walk(text, func(id int32) { ids = append(ids, id) }, func(w string) { ids = t.appendWord(ids, w) })
 	return ids
 }
 
-// walk découpe text : added reçoit chaque token ajouté repéré dans le texte
-// brut, word chaque morceau à passer au BPE, dans l'ordre.
+// walk splits text: added receives each added token found in the raw
+// text, word each piece to pass to BPE, in order.
 func (t *Tokenizer) walk(text string, added func(int32), word func(string)) {
-	start := 0 // début du segment courant
+	start := 0 // start of the current segment
 	i := 0
 	for i < len(text) {
 		a, ok := t.matchAdded(text, i)
@@ -409,7 +410,7 @@ func (t *Tokenizer) walk(text string, added func(int32), word func(string)) {
 	t.walkSegment(text[start:], word)
 }
 
-// matchAdded retourne le plus long token ajouté qui commence en text[i].
+// matchAdded returns the longest added token that starts at text[i].
 func (t *Tokenizer) matchAdded(text string, i int) (addedToken, bool) {
 	for _, a := range t.added[text[i]] {
 		if strings.HasPrefix(text[i:], a.content) {
@@ -419,7 +420,7 @@ func (t *Tokenizer) matchAdded(text string, i int) (addedToken, bool) {
 	return addedToken{}, false
 }
 
-// walkSegment normalise, pré-tokenise et passe chaque morceau à word.
+// walkSegment normalizes, pre-tokenizes and passes each piece to word.
 func (t *Tokenizer) walkSegment(seg string, word func(string)) {
 	if seg == "" {
 		return
@@ -428,7 +429,7 @@ func (t *Tokenizer) walkSegment(seg string, word func(string)) {
 	if !strings.HasPrefix(s, metaspace) {
 		s = metaspace + s
 	}
-	// Découpage devant chaque ▁, le ▁ restant attaché au morceau suivant.
+	// Split before each ▁, the ▁ staying attached to the next piece.
 	for len(s) > 0 {
 		next := strings.Index(s[len(metaspace):], metaspace)
 		if next < 0 {
@@ -437,8 +438,8 @@ func (t *Tokenizer) walkSegment(seg string, word func(string)) {
 		}
 		cut := next + len(metaspace)
 		if !strings.HasPrefix(s, metaspace) {
-			// Seul le premier morceau peut ne pas commencer par ▁ ; ce n'est
-			// pas le cas ici puisqu'un ▁ a été ajouté en tête.
+			// Only the first piece can start without ▁; that is not the
+			// case here since a ▁ was prepended.
 			cut = strings.Index(s, metaspace)
 		}
 		word(s[:cut])
@@ -446,10 +447,10 @@ func (t *Tokenizer) walkSegment(seg string, word func(string)) {
 	}
 }
 
-// Trace appelle visit pour chaque token que le découpage de text produit
-// ou traverse : tokens ajoutés, symboles de départ du BPE (caractères,
-// octets) et chaque fusion intermédiaire. Un vocabulaire qui garde tous
-// ces tokens découpe text exactement comme celui-ci (voir Prune).
+// Trace calls visit for every token that splitting text produces or
+// passes through: added tokens, BPE starting symbols (characters, bytes)
+// and each intermediate merge. A vocabulary that keeps all these tokens
+// splits text exactly like this one does (see Prune).
 func (t *Tokenizer) Trace(text string, visit func(id int32)) {
 	t.walk(text, visit, func(w string) { t.bpeVisit(w, visit) })
 }
@@ -474,15 +475,15 @@ func (t *Tokenizer) appendWord(ids []int32, word string) []int32 {
 type symbol struct {
 	id         int32
 	prev, next int
-	merged     bool // absorbé par son voisin de gauche
+	merged     bool // absorbed by its left neighbor
 }
 
-// bpe applique les fusions à un mot, dans l'ordre de la bibliothèque de
-// référence : rang croissant, puis position croissante.
+// bpe applies merges to a word, in the order used by the reference
+// library: increasing rank, then increasing position.
 func (t *Tokenizer) bpe(word string) []int32 { return t.bpeVisit(word, nil) }
 
-// bpeVisit est bpe, en signalant à visit (s'il est fourni) chaque symbole
-// de départ et chaque fusion appliquée.
+// bpeVisit is bpe, reporting to visit (if provided) each starting symbol
+// and each merge applied.
 func (t *Tokenizer) bpeVisit(word string, visit func(int32)) []int32 {
 	syms := make([]symbol, 0, len(word))
 	lastUnk := false
@@ -538,7 +539,7 @@ func (t *Tokenizer) bpeVisit(word string, visit func(int32)) []int32 {
 			continue
 		}
 		right := syms[cur.next]
-		// Entrée périmée : la paire a changé depuis son ajout.
+		// Stale entry: the pair changed since it was added.
 		if m, ok := t.merges.get(pairKey(cur.id, right.id)); !ok || m.id != top.id {
 			continue
 		}

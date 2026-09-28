@@ -14,10 +14,10 @@ import (
 
 func runPredict(args []string) error {
 	fs := flag.NewFlagSet("predict", flag.ExitOnError)
-	model := fs.String("model", "", "modèle")
-	in := fs.String("in", "-", "entrée : une ligne par texte, en texte brut ou en JSON {\"text\", \"context\"} (- : entrée standard)")
-	schemaPath := fs.String("schema", "", "questions posées en mode ouvert (sinon : les têtes du modèle)")
-	int8 := fs.Bool("int8", true, "calcul en int8 si le processeur le permet")
+	model := fs.String("model", "", "model")
+	in := fs.String("in", "-", "input: one line per text, as plain text or JSON {\"text\", \"context\"} (- : standard input)")
+	schemaPath := fs.String("schema", "", "questions asked in open mode (otherwise: the model's heads)")
+	int8 := fs.Bool("int8", true, "int8 computation if the processor allows it")
 	fs.Parse(args)
 	if err := required(fs, "model"); err != nil {
 		return err

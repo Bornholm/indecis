@@ -4,25 +4,25 @@ package linalg
 
 import "simd"
 
-// Accelerated indique si les noyaux SIMD sont compilés.
+// Accelerated reports whether the SIMD kernels are compiled in.
 const Accelerated = true
 
-// nrGo retourne la largeur d'une tuile : deux vecteurs. La longueur des
-// vecteurs n'est connue qu'à l'exécution (128 bits en émulation ou sur Neon,
-// 256 en AVX2, 512 en AVX-512), et ne change pas pendant l'exécution.
+// nrGo returns the width of a tile: two vectors. Vector length is only
+// known at runtime (128 bits in emulation or on Neon, 256 on AVX2, 512 on
+// AVX-512), and does not change during execution.
 //
-// Ce n'est pas une variable de package : la doc de simd signale que les
-// initialiseurs globaux dépendant du SIMD ne fonctionnent pas.
+// This is not a package variable: the simd doc notes that global
+// initializers depending on SIMD do not work.
 func nrGo() int {
 	return 2 * simd.BroadcastFloat32s(0).Len()
 }
 
-// microKernelGo n'est jamais inliné : une fonction SIMD inlinée dans une
-// closure fait planter le compilateur (Go 1.27, GOEXPERIMENT=simd).
+// microKernelGo is never inlined: a SIMD function inlined into a closure
+// crashes the compiler (Go 1.27, GOEXPERIMENT=simd).
 //
-// microKernelGo calcule la tuile mr×nr = Σ_q ap[q]ᵀ·bp[q] et l'écrit dans tile
-// (row-major, pas nr). 12 accumulateurs + 2 vecteurs de B + 1 broadcast :
-// 15 registres, ce que permettent les 16 registres ymm d'AVX2.
+// microKernelGo computes the tile mr×nr = sum_q ap[q]ᵀ·bp[q] and writes it
+// to tile (row-major, stride nr). 12 accumulators + 2 B vectors + 1
+// broadcast: 15 registers, which fits within AVX2's 16 ymm registers.
 //
 //go:noinline
 func microKernelGo(kb int, ap, bp, tile []float32, nr int) {

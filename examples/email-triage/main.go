@@ -1,6 +1,6 @@
-// Command email-triage est une preuve de concept : classer des courriels
-// parmi des catégories données à l'inférence, qui peuvent changer d'un appel
-// à l'autre (voir indecis.ChooseAmong).
+// Command email-triage is a proof of concept: classifying emails among
+// categories given at inference time, which can change from one call to
+// the next (see indecis.ChooseAmong).
 //
 //	go run ./examples/email-triage prepare
 //	go run ./examples/email-triage baseline
@@ -23,24 +23,24 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage : email-triage prepare|baseline|train|eval [options]")
+		fmt.Fprintln(os.Stderr, "usage: email-triage prepare|baseline|train|eval [options]")
 		os.Exit(2)
 	}
 	cmd := os.Args[1]
 	fs := flag.NewFlagSet(cmd, flag.ExitOnError)
 	home, _ := os.UserHomeDir()
-	data := fs.String("data", filepath.Join(home, ".cache/indecis/datasets/email"), "répertoire des données")
+	data := fs.String("data", filepath.Join(home, ".cache/indecis/datasets/email"), "data directory")
 	backbone := fs.String("backbone", filepath.Join(home, ".cache/indecis/models/bekko-embedding-v1-a8m"), "backbone")
-	ticketPages := fs.Int("ticket-pages", 80, "prepare : pages de 100 tickets")
-	enronPages := fs.Int("enron-pages", 20, "prepare : pages de 100 courriels Enron")
-	temperature := fs.Float64("temperature", 0.05, "baseline : température du softmax sur les cosinus")
-	out := fs.String("out", filepath.Join(home, ".cache/indecis/runs/email-pairs"), "train, eval : répertoire du modèle")
-	n := fs.Int("n", 3000, "train : tickets d'entraînement")
-	epochs := fs.Int("epochs", 1, "train : époques")
-	shots := fs.Int("k", 5, "few-shot : exemples par catégorie")
-	fs.BoolVar(&mix.fr, "fr", false, "train-embed : ajouter les courriels Enron traduits en français")
-	fs.IntVar(&mix.synth, "synth", 0, "train-embed : courriels synthétiques en français à ajouter")
-	fs.StringVar(&mix.synthDir, "synth-dir", "examples/email-triage/synth", "train-embed : gabarits")
+	ticketPages := fs.Int("ticket-pages", 80, "prepare: pages of 100 tickets")
+	enronPages := fs.Int("enron-pages", 20, "prepare: pages of 100 Enron emails")
+	temperature := fs.Float64("temperature", 0.05, "baseline: softmax temperature over cosines")
+	out := fs.String("out", filepath.Join(home, ".cache/indecis/runs/email-pairs"), "train, eval: model directory")
+	n := fs.Int("n", 3000, "train: training tickets")
+	epochs := fs.Int("epochs", 1, "train: epochs")
+	shots := fs.Int("k", 5, "few-shot: examples per category")
+	fs.BoolVar(&mix.fr, "fr", false, "train-embed: add Enron emails translated to French")
+	fs.IntVar(&mix.synth, "synth", 0, "train-embed: synthetic French emails to add")
+	fs.StringVar(&mix.synthDir, "synth-dir", "examples/email-triage/synth", "train-embed: templates")
 	fs.Parse(os.Args[2:])
 	ctx := context.Background()
 	dataDir = *data
@@ -70,7 +70,7 @@ func main() {
 	case "baseline":
 		err = baseline(ctx, *data, *backbone, *temperature)
 	default:
-		err = fmt.Errorf("commande %q inconnue", cmd)
+		err = fmt.Errorf("unknown command %q", cmd)
 	}
 	if err != nil {
 		log.Fatal(err)
@@ -91,7 +91,7 @@ func load(dir string) (tickets, imnim, enron []dataset.Example, err error) {
 	return
 }
 
-// baseline évalue la comparaison de plongements avec le backbone tel quel.
+// baseline evaluates embedding comparison with the backbone as is.
 func baseline(ctx context.Context, dir, backbone string, temperature float64) error {
 	tickets, imnim, enron, err := load(dir)
 	if err != nil {
@@ -102,7 +102,7 @@ func baseline(ctx context.Context, dir, backbone string, temperature float64) er
 		return err
 	}
 	for _, s := range evalSets(tickets, imnim, enron) {
-		if err := report(ctx, "plongements", embedChooser(m, temperature), s); err != nil {
+		if err := report(ctx, "embeddings", embedChooser(m, temperature), s); err != nil {
 			return err
 		}
 	}

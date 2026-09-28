@@ -12,48 +12,48 @@ import (
 	"github.com/bornholm/indecis/internal/optim"
 )
 
-// Choix par plongements, pour des options données à l'inférence.
+// Choice by embeddings, for options given at inference time.
 //
-// ChooseNearest compare le plongement du texte à celui de chaque option.
-// C'est rapide (une passe par texte, les options se calculent une fois) et
-// le backbone sait déjà le faire sans entraînement. FitEmbeddings l'affine
-// avec l'objectif même de l'inférence : pour chaque texte d'un lot, préférer
-// la bonne option parmi toutes celles du lot (entropie croisée sur les
-// cosinus mis à l'échelle), comme la perte MultipleNegativesRanking de
-// sentence-transformers.
+// ChooseNearest compares the embedding of the text to that of each option.
+// It is fast (one pass per text, the options are computed once) and the
+// backbone already knows how to do it without training. FitEmbeddings
+// refines it with the very objective of inference: for each text of a
+// batch, prefer the right option among all those in the batch (cross
+// entropy on the scaled cosines), like the MultipleNegativesRanking loss
+// of sentence-transformers.
 
-// ChoiceBatch est un lot d'entraînement : des textes et une liste d'options
-// communes. Correct[i] donne les options justes du texte i ; la première est
-// la cible, les autres sont écartées de la comparaison (une option juste
-// n'est pas une erreur).
+// ChoiceBatch is a training batch: texts and a list of shared options.
+// Correct[i] gives the right options for text i; the first is the target,
+// the others are excluded from the comparison (a correct option is not an
+// error).
 type ChoiceBatch struct {
 	Texts      []string
 	Candidates []Candidate
 	Correct    [][]int
 }
 
-// DefaultEmbedScale multiplie les cosinus avant le softmax (inverse d'une
-// température), la valeur usuelle de sentence-transformers.
+// DefaultEmbedScale multiplies the cosines before the softmax (inverse of a
+// temperature), the usual value in sentence-transformers.
 const DefaultEmbedScale = 20
 
-// FitEmbeddings affine l'encodeur pour ChooseNearest. opts.HeadLR et
-// opts.Dropout sont ignorés : aucune tête n'intervient. opts.Symmetric
-// ajoute le sens option → textes à la perte.
+// FitEmbeddings fine-tunes the encoder for ChooseNearest. opts.HeadLR and
+// opts.Dropout are ignored: no head is involved. opts.Symmetric adds the
+// option -> texts direction to the loss.
 func (m *Model) FitEmbeddings(ctx context.Context, batches []ChoiceBatch, opts TrainOptions) error {
 	if opts.Epochs <= 0 || len(batches) == 0 {
-		return fmt.Errorf("indecis: Epochs positif et au moins un lot requis")
+		return fmt.Errorf("indecis: Epochs must be positive and at least one batch is required")
 	}
 	for i, b := range batches {
 		if len(b.Correct) != len(b.Texts) || len(b.Candidates) < 2 {
-			return fmt.Errorf("indecis: lot %d mal formé", i)
+			return fmt.Errorf("indecis: malformed batch %d", i)
 		}
 		for _, c := range b.Correct {
 			if len(c) == 0 {
-				return fmt.Errorf("indecis: lot %d : texte sans option juste", i)
+				return fmt.Errorf("indecis: batch %d: text without a correct option", i)
 			}
 			for _, j := range c {
 				if j < 0 || j >= len(b.Candidates) {
-					return fmt.Errorf("indecis: lot %d : option %d hors liste", i, j)
+					return fmt.Errorf("indecis: batch %d: option %d out of list", i, j)
 				}
 			}
 		}
@@ -62,7 +62,7 @@ func (m *Model) FitEmbeddings(ctx context.Context, batches []ChoiceBatch, opts T
 	H := m.enc.Cfg.Hidden
 	m.enc.Materialize()
 	defer m.enc.Invalidate()
-	m.embedCache.clear() // les plongements vont changer
+	m.embedCache.clear() // the embeddings are about to change
 	grads := m.enc.EnableGrad()
 	var dense []optim.Dense
 	for _, p := range m.enc.Params() {
@@ -110,8 +110,8 @@ func (m *Model) FitEmbeddings(ctx context.Context, batches []ChoiceBatch, opts T
 	return nil
 }
 
-// choiceStep calcule la perte d'un lot et accumule les gradients des deux
-// passes (textes, options).
+// choiceStep computes the loss of a batch and accumulates the gradients of
+// the two passes (texts, options).
 func (m *Model) choiceStep(b ChoiceBatch, scale float64, symmetric bool, grads *modernbert.Grads) (float64, int) {
 	H := m.enc.Cfg.Hidden
 	encode := func(texts []string) (modernbert.Batch, *modernbert.State, []float32, []float32) {
@@ -122,7 +122,7 @@ func (m *Model) choiceStep(b ChoiceBatch, scale float64, symmetric bool, grads *
 		batch := modernbert.NewBatch(seqs, m.enc.Cfg.PadID)
 		s, err := m.enc.Forward(batch)
 		if err != nil {
-			panic(err) // les ids viennent du tokenizer du modèle
+			panic(err) // the ids come from the model's tokenizer
 		}
 		pooled := modernbert.MeanPool(s.Hidden, batch, H)
 		norms := make([]float32, len(texts))
@@ -147,8 +147,8 @@ func (m *Model) choiceStep(b ChoiceBatch, scale float64, symmetric bool, grads *
 	cb, cs, c, cn := encode(ctxs)
 
 	nt, nc := len(b.Texts), len(ctxs)
-	// Similarités mises à l'échelle, et paires écartées : une option juste
-	// autre que la cible n'est ni un positif ni un négatif.
+	// Scaled similarities, and excluded pairs: a correct option other than
+	// the target is neither a positive nor a negative.
 	S := make([]float64, nt*nc)
 	masked := make([]bool, nt*nc)
 	target := make([]int, nt)
@@ -165,10 +165,10 @@ func (m *Model) choiceStep(b ChoiceBatch, scale float64, symmetric bool, grads *
 			S[i*nc+j] = scale * dot
 		}
 	}
-	dS := make([]float64, nt*nc) // ∂perte/∂S
+	dS := make([]float64, nt*nc) // dLoss/dS
 	var loss float64
 
-	// Texte → options : entropie croisée sur les options de chaque texte.
+	// Text -> options: cross entropy on the options of each text.
 	weight := 1.0
 	if symmetric {
 		weight = 0.5
@@ -199,9 +199,9 @@ func (m *Model) choiceStep(b ChoiceBatch, scale float64, symmetric bool, grads *
 		}
 	}
 
-	// Option → textes, comme CLM : chaque option cible d'au moins un texte
-	// doit préférer ses textes aux autres. Plusieurs textes peuvent la viser :
-	// la probabilité à maximiser est leur somme.
+	// Option -> texts, like CLM: each option that is the target of at least
+	// one text must prefer its texts over the others. Several texts can
+	// target it: the probability to maximize is their sum.
 	if symmetric {
 		var cols []int
 		for j := 0; j < nc; j++ {
@@ -259,7 +259,7 @@ func (m *Model) choiceStep(b ChoiceBatch, scale float64, symmetric bool, grads *
 			}
 		}
 	}
-	// Retour à travers la normalisation : dx = (du − u·(u·du)) / |x|.
+	// Back through normalization: dx = (du - u*(u.du)) / |x|.
 	unnorm := func(d, u, norms []float32, n int) []float32 {
 		out := make([]float32, len(d))
 		for i := 0; i < n; i++ {
@@ -292,30 +292,30 @@ func (m *Model) embedScale() float64 {
 	return DefaultEmbedScale
 }
 
-// CandidateSet est une liste d'options préparée pour ChooseIn : le
-// plongement de chaque option est calculé une fois. Il reste valable tant
-// que le modèle n'est pas réentraîné.
+// CandidateSet is a list of options prepared for ChooseIn: the embedding of
+// each option is computed once. It remains valid as long as the model is
+// not retrained.
 type CandidateSet struct {
 	candidates []Candidate
 	protos     [][]float32
 }
 
-// Candidates retourne les options de la liste.
+// Candidates returns the options of the list.
 func (s *CandidateSet) Candidates() []Candidate { return s.candidates }
 
-// PrepareCandidates calcule le prototype de chaque option : la moyenne,
-// normalisée, du plongement de son nom et de sa description et de ceux de
-// ses exemples.
+// PrepareCandidates computes the prototype of each option: the normalized
+// average of the embedding of its name and its description and those of
+// its examples.
 func (m *Model) PrepareCandidates(ctx context.Context, candidates []Candidate) (*CandidateSet, error) {
 	if len(candidates) == 0 {
-		return nil, fmt.Errorf("indecis: aucune option")
+		return nil, fmt.Errorf("indecis: no options")
 	}
 	seen := map[string]bool{}
 	var texts []string
 	owner := []int{}
 	for i, c := range candidates {
 		if c.Name == "" || seen[c.Name] {
-			return nil, fmt.Errorf("indecis: option %q vide ou en double", c.Name)
+			return nil, fmt.Errorf("indecis: option %q empty or duplicate", c.Name)
 		}
 		seen[c.Name] = true
 		texts = append(texts, CandidateContext(c))
@@ -355,8 +355,8 @@ func (m *Model) PrepareCandidates(ctx context.Context, candidates []Candidate) (
 	return set, nil
 }
 
-// ChooseNearest choisit, pour chaque texte, l'option dont le prototype est
-// le plus proche (voir PrepareCandidates et ChooseIn).
+// ChooseNearest picks, for each text, the option whose prototype is
+// closest (see PrepareCandidates and ChooseIn).
 func (m *Model) ChooseNearest(ctx context.Context, candidates []Candidate, texts ...string) ([]Answer, error) {
 	set, err := m.PrepareCandidates(ctx, candidates)
 	if err != nil {
@@ -365,11 +365,11 @@ func (m *Model) ChooseNearest(ctx context.Context, candidates []Candidate, texts
 	return m.ChooseIn(ctx, set, texts...)
 }
 
-// ChooseIn classe chaque texte parmi les options d'une liste préparée.
-// Answer.Probs est le softmax des cosinus mis à l'échelle (Info.EmbedScale,
-// DefaultEmbedScale par défaut). Answer.Score est le cosinus de l'option
-// retenue : un seuil sur ce cosinus, réglé sur des exemples, sépare les
-// textes qu'aucune option ne décrit.
+// ChooseIn ranks each text among the options of a prepared list.
+// Answer.Probs is the softmax of the scaled cosines (Info.EmbedScale,
+// DefaultEmbedScale by default). Answer.Score is the cosine of the chosen
+// option: a threshold on this cosine, tuned on examples, separates texts
+// that no option describes.
 func (m *Model) ChooseIn(ctx context.Context, set *CandidateSet, texts ...string) ([]Answer, error) {
 	te, err := m.embed(ctx, texts, false)
 	if err != nil {
@@ -403,13 +403,12 @@ func (m *Model) ChooseIn(ctx context.Context, set *CandidateSet, texts ...string
 	return out, nil
 }
 
-// ChoiceBatches forme les lots de FitEmbeddings à partir d'exemples
-// étiquetés : pour chaque question, les exemples qui portent son étiquette
-// sont groupés par lots de size textes, avec toutes les options de la
-// question comme options du lot. Une étiquette est un nom d'option, une
-// distribution (l'option la plus probable est retenue), un indice de
-// niveau (Score) ou un booléen (Noul : la première option pour vrai, la
-// seconde pour faux).
+// ChoiceBatches forms the FitEmbeddings batches from labeled examples: for
+// each question, the examples that carry its label are grouped into
+// batches of size texts, with all the question's options as the batch's
+// options. A label is an option name, a distribution (the most probable
+// option is kept), a level index (Score), or a boolean (Noul: the first
+// option for true, the second for false).
 func ChoiceBatches(examples []dataset.Example, questions []OpenQuestion, size int, seed int64) []ChoiceBatch {
 	rng := rand.New(rand.NewSource(seed))
 	var out []ChoiceBatch
@@ -440,8 +439,8 @@ func ChoiceBatches(examples []dataset.Example, questions []OpenQuestion, size in
 	return out
 }
 
-// OptionIndex retourne l'indice de l'option que désigne une étiquette (voir
-// ChoiceBatches), ou -1.
+// OptionIndex returns the index of the option that a label designates (see
+// ChoiceBatches), or -1.
 func (q OpenQuestion) OptionIndex(v any) int {
 	switch x := v.(type) {
 	case bool:

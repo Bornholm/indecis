@@ -26,10 +26,10 @@ type trainStepFixture struct {
 	} `json:"params"`
 }
 
-// Un pas complet (forward, backward, écrêtage, AdamW) comparé à PyTorch,
-// fixtures de tools/oracle/train_step_fixtures.py.
+// A full step (forward, backward, clipping, AdamW) compared to PyTorch,
+// fixtures from tools/oracle/train_step_fixtures.py.
 //
-// Le test modifie les poids : il charge son propre modèle.
+// The test modifies the weights: it loads its own model.
 func TestTrainStepParity(t *testing.T) {
 	dir := bekkoDir(t)
 	m, err := Load(dir)
@@ -63,7 +63,7 @@ func TestTrainStepParity(t *testing.T) {
 		loss += float64(pooled[i]) * float64(fx.W[i])
 	}
 	if math.Abs(loss-fx.Loss) > 1e-4 {
-		t.Errorf("perte %v, attendu %v", loss, fx.Loss)
+		t.Errorf("loss %v, expected %v", loss, fx.Loss)
 	}
 	m.Backward(s, MeanPoolBackward(fx.W, batch, H), g)
 
@@ -93,26 +93,26 @@ func TestTrainStepParity(t *testing.T) {
 		return math.Sqrt(sq)
 	}
 
-	// Gradients : l'erreur admise est relative à la norme du tenseur, les
-	// valeurs individuelles pouvant être proches de zéro.
+	// Gradients: the tolerance is relative to the tensor's norm, since
+	// individual values can be close to zero.
 	for name, e := range fx.Params {
 		p := byName[name]
 		if p == nil {
-			t.Fatalf("paramètre %s absent", name)
+			t.Fatalf("parameter %s missing", name)
 		}
 		if n := normOf(p); math.Abs(n-e.GradNorm) > 1e-3*e.GradNorm {
-			t.Errorf("%s : ‖g‖ = %.6g, attendu %.6g", name, n, e.GradNorm)
+			t.Errorf("%s: ‖g‖ = %.6g, expected %.6g", name, n, e.GradNorm)
 		}
 		scale := e.GradNorm / math.Sqrt(float64(len(p.W)))
 		for k, i := range e.Idx {
 			if d := math.Abs(gradAt(p, i) - e.Grad[k]); d > 1e-3*math.Abs(e.Grad[k])+1e-2*scale {
-				t.Errorf("%s[%d] : g = %.6g, attendu %.6g", name, i, gradAt(p, i), e.Grad[k])
+				t.Errorf("%s[%d]: g = %.6g, expected %.6g", name, i, gradAt(p, i), e.Grad[k])
 				break
 			}
 		}
 	}
 
-	// Écrêtage puis AdamW, avec les mêmes groupes que l'oracle.
+	// Clipping then AdamW, with the same groups as the oracle.
 	var dense []optim.Dense
 	for _, p := range m.Params() {
 		if p == m.Emb {
@@ -122,18 +122,18 @@ func TestTrainStepParity(t *testing.T) {
 	}
 	sparse := []optim.Sparse{{W: m.Emb.W, Width: H, Rows: g.Emb.Rows}}
 	if n := optim.ClipGradNorm(fx.Clip, dense, sparse); math.Abs(n-fx.TotalNorm) > 1e-3*fx.TotalNorm {
-		t.Errorf("norme totale %.6g, attendu %.6g", n, fx.TotalNorm)
+		t.Errorf("total norm %.6g, expected %.6g", n, fx.TotalNorm)
 	}
 	o := optim.New(optim.Config{LR: fx.LR, Beta1: 0.9, Beta2: 0.999, Eps: 1e-8, WeightDecay: fx.WD})
 	o.Step(fx.LR, dense, sparse)
 
-	// Au premier pas d'Adam, chaque poids bouge d'environ ±lr : l'écart
-	// admis est une fraction de ce pas.
+	// On Adam's first step, each weight moves by about ±lr: the tolerance
+	// is a fraction of that step.
 	for name, e := range fx.Params {
 		p := byName[name]
 		for k, i := range e.Idx {
 			if d := math.Abs(float64(p.W[i]) - e.After[k]); d > 2e-5 {
-				t.Errorf("%s[%d] après le pas : %.7g, attendu %.7g", name, i, p.W[i], e.After[k])
+				t.Errorf("%s[%d] after the step: %.7g, expected %.7g", name, i, p.W[i], e.After[k])
 				break
 			}
 		}
