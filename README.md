@@ -32,7 +32,6 @@ Measured on a laptop (Core Ultra 7 265U) with the bekko-embedding-v1-a8m backbon
 - [Serving a model](docs/serving.md): HTTP server compatible with TypeSafe and OpenRouter, provider for genai.
 - [Inference speed and memory](docs/inference.md): int8, SIMD, shrinking a model, long texts.
 - [Architecture](docs/architecture.md): packages, parity with PyTorch, tests.
-- [Roadmap](ROADMAP.md).
 
 ## Status
 
