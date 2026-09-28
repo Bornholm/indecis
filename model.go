@@ -542,6 +542,18 @@ func writeBytes(path string, b []byte) error {
 	})
 }
 
+// Open charge un modèle écrit par Save, ou, si dir n'en contient pas
+// (pas de indecis.json), un backbone au format transformers : il ne répond
+// alors qu'aux questions ouvertes (ChooseNearest, DecideOpen), sans
+// entraînement. Sa question apprise, « match », n'est qu'un point
+// d'ancrage non entraîné.
+func Open(dir string, opts ...Option) (*Model, error) {
+	if _, err := os.Stat(filepath.Join(dir, fileMeta)); err == nil {
+		return Load(dir, opts...)
+	}
+	return New(dir, Schema{NewNoul("match", "")}, 1, opts...)
+}
+
 // Load lit un modèle écrit par Save.
 func Load(dir string, opts ...Option) (*Model, error) {
 	b, err := os.ReadFile(filepath.Join(dir, fileMeta))

@@ -1,0 +1,24 @@
+{"text": "Toujours pas reçu mon colis commandé il y a trois semaines, c'est inadmissible, je veux un responsable.", "labels": {"sujet": "livraison", "urgence": "haute", "humain": true}}
+{"text": "Bonjour, le livreur a laissé le paquet chez un voisin que je ne connais pas.", "labels": {"sujet": "livraison", "urgence": "moyenne", "humain": false}}
+{"text": "Est-ce que la livraison le samedi est possible ?", "labels": {"sujet": "livraison", "urgence": "basse", "humain": false}}
+{"text": "Le carton est arrivé écrasé et la cafetière est cassée.", "labels": {"sujet": "livraison", "urgence": "moyenne", "humain": false}}
+{"text": "Mon suivi indique « en transit » depuis dix jours, que se passe-t-il ?", "labels": {"sujet": "livraison", "urgence": "moyenne", "humain": false}}
+{"text": "Il me faut absolument le téléphone pour demain matin, appelez-moi.", "labels": {"sujet": "livraison", "urgence": "haute", "humain": true}}
+{"text": "Je ne comprends pas le montant de ma dernière facture.", "labels": {"sujet": "facturation", "urgence": "moyenne", "humain": false}}
+{"text": "Vous m'avez débité 450 € au lieu de 45 €, remboursez-moi tout de suite.", "labels": {"sujet": "facturation", "urgence": "haute", "humain": true}}
+{"text": "Pouvez-vous m'envoyer une facture au nom de ma société ?", "labels": {"sujet": "facturation", "urgence": "basse", "humain": false}}
+{"text": "Quand vais-je recevoir le remboursement de l'article retourné ?", "labels": {"sujet": "facturation", "urgence": "moyenne", "humain": false}}
+{"text": "Ma carte a été refusée alors que mon compte est approvisionné.", "labels": {"sujet": "facturation", "urgence": "moyenne", "humain": false}}
+{"text": "Je conteste ce prélèvement, je veux en parler à un conseiller.", "labels": {"sujet": "facturation", "urgence": "moyenne", "humain": true}}
+{"text": "J'ai oublié mon mot de passe et le lien de réinitialisation ne marche pas.", "labels": {"sujet": "compte", "urgence": "moyenne", "humain": false}}
+{"text": "Comment supprimer définitivement mes données personnelles ?", "labels": {"sujet": "compte", "urgence": "basse", "humain": false}}
+{"text": "Mon compte a été piraté, des commandes que je n'ai pas faites apparaissent !", "labels": {"sujet": "compte", "urgence": "haute", "humain": true}}
+{"text": "Je souhaite passer à l'abonnement annuel.", "labels": {"sujet": "compte", "urgence": "basse", "humain": false}}
+{"text": "Impossible de modifier mon adresse de livraison dans mon profil.", "labels": {"sujet": "compte", "urgence": "basse", "humain": false}}
+{"text": "Merci de me rappeler pour fermer mon compte.", "labels": {"sujet": "compte", "urgence": "basse", "humain": true}}
+{"text": "L'imprimante affiche une erreur E-04 à chaque démarrage.", "labels": {"sujet": "produit", "urgence": "moyenne", "humain": false}}
+{"text": "Le lave-linge fuit et a inondé la cuisine, il faut intervenir en urgence.", "labels": {"sujet": "produit", "urgence": "haute", "humain": true}}
+{"text": "Quelle est la durée de garantie du casque audio ?", "labels": {"sujet": "produit", "urgence": "basse", "humain": false}}
+{"text": "L'aspirateur perd sa puissance au bout de cinq minutes.", "labels": {"sujet": "produit", "urgence": "moyenne", "humain": false}}
+{"text": "La batterie du téléphone chauffe énormément, j'ai peur qu'elle explose.", "labels": {"sujet": "produit", "urgence": "haute", "humain": true}}
+{"text": "Où trouver des filtres de rechange pour la cafetière ?", "labels": {"sujet": "produit", "urgence": "basse", "humain": false}}

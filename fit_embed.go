@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"time"
 
+	"github.com/bornholm/indecis/dataset"
 	"github.com/bornholm/indecis/internal/modernbert"
 	"github.com/bornholm/indecis/internal/optim"
 )
@@ -400,4 +401,78 @@ func (m *Model) ChooseIn(ctx context.Context, set *CandidateSet, texts ...string
 		out[i] = a
 	}
 	return out, nil
+}
+
+// ChoiceBatches forme les lots de FitEmbeddings à partir d'exemples
+// étiquetés : pour chaque question, les exemples qui portent son étiquette
+// sont groupés par lots de size textes, avec toutes les options de la
+// question comme options du lot. Une étiquette est un nom d'option, une
+// distribution (l'option la plus probable est retenue), un indice de
+// niveau (Score) ou un booléen (Noul : la première option pour vrai, la
+// seconde pour faux).
+func ChoiceBatches(examples []dataset.Example, questions []OpenQuestion, size int, seed int64) []ChoiceBatch {
+	rng := rand.New(rand.NewSource(seed))
+	var out []ChoiceBatch
+	for _, q := range questions {
+		type item struct {
+			text string
+			pos  int
+		}
+		var items []item
+		for _, e := range examples {
+			if v, ok := e.Labels[q.Name]; ok {
+				if j := q.OptionIndex(v); j >= 0 {
+					items = append(items, item{e.Text, j})
+				}
+			}
+		}
+		rng.Shuffle(len(items), func(i, j int) { items[i], items[j] = items[j], items[i] })
+		for s := 0; s < len(items); s += size {
+			b := ChoiceBatch{Candidates: q.Options}
+			for _, it := range items[s:min(len(items), s+size)] {
+				b.Texts = append(b.Texts, it.text)
+				b.Correct = append(b.Correct, []int{it.pos})
+			}
+			out = append(out, b)
+		}
+	}
+	rng.Shuffle(len(out), func(i, j int) { out[i], out[j] = out[j], out[i] })
+	return out
+}
+
+// OptionIndex retourne l'indice de l'option que désigne une étiquette (voir
+// ChoiceBatches), ou -1.
+func (q OpenQuestion) OptionIndex(v any) int {
+	switch x := v.(type) {
+	case bool:
+		if x {
+			return 0
+		}
+		return 1
+	case string:
+		for i, o := range q.Options {
+			if o.Name == x {
+				return i
+			}
+		}
+	case float64:
+		if q.Kind == Score && x == math.Trunc(x) && int(x) >= 0 && int(x) < len(q.Options) {
+			return int(x)
+		}
+		if q.Kind == Noul {
+			if x >= 0.5 {
+				return 0
+			}
+			return 1
+		}
+	case map[string]any:
+		best, bp := -1, -1.0
+		for i, o := range q.Options {
+			if p, ok := x[o.Name].(float64); ok && p > bp {
+				best, bp = i, p
+			}
+		}
+		return best
+	}
+	return -1
 }

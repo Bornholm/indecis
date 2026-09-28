@@ -1,0 +1,11 @@
+[
+  {"name": "sujet", "kind": "choice", "instructions": "De quoi parle le message ?",
+   "options": [
+     {"name": "livraison", "description": "Commande, colis, retard ou suivi de livraison."},
+     {"name": "facturation", "description": "Facture, paiement, remboursement, prélèvement."},
+     {"name": "compte", "description": "Connexion, mot de passe, données personnelles, abonnement."},
+     {"name": "produit", "description": "Fonctionnement, panne ou question sur un produit."}
+   ]},
+  {"name": "urgence", "kind": "score", "instructions": "Urgence du message", "options": ["basse", "moyenne", "haute"]},
+  {"name": "humain", "kind": "noul", "instructions": "Le message demande-t-il l'intervention d'un conseiller ?"}
+]
