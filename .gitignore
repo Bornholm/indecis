@@ -3,3 +3,4 @@ tools/oracle/.venv/
 tools/oracle/__pycache__/
 .env
 teacher-cache.jsonl
+dist/

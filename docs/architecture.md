@@ -49,6 +49,7 @@ Tests that need the bekko weights are skipped when the weights are missing. Down
 make test          # all modules, SIMD enabled (GOEXPERIMENT=simd)
 make test-scalar   # same suite without SIMD: the fallback must stay correct
 make cli serve     # bin/indecis, bin/indecis-serve
+make snapshot      # release archives in dist/, as the release workflow builds them on a tag
 make bench
 make oracle        # Python environment of the oracle (tests only)
 make fixtures      # regenerates the parity fixtures

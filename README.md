@@ -35,4 +35,4 @@ Measured on a laptop (Core Ultra 7 265U) with the bekko-embedding-v1-a8m backbon
 
 ## Status
 
-Experimental: the API may still change. Requires Go 1.27. The experimental SIMD support (`GOEXPERIMENT=simd`) makes it fast; indecis also runs without it. License: MIT.
+Experimental: the API may still change. Requires Go 1.27. The experimental SIMD support (`GOEXPERIMENT=simd`) makes it fast; indecis also runs without it. Linux binaries are attached to each [release](https://github.com/Bornholm/indecis/releases); `indecis check` tells whether a processor runs them at full speed. License: MIT.

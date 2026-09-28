@@ -1,0 +1,66 @@
+version: 2
+
+env:
+  - CGO_ENABLED=0
+  # Portable SIMD: several times faster. `indecis check` tells whether the
+  # processor runs it in hardware.
+  - GOEXPERIMENT=simd
+
+builds:
+  - id: indecis
+    goos: [linux]
+    goarch: [amd64, arm64]
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    main: ./cmd/indecis
+    binary: indecis
+    flags:
+      - -trimpath
+    ldflags:
+      - -w -s -X main.version={{ .Version }}
+
+  - id: indecis-serve
+    goos: [linux]
+    goarch: [amd64, arm64]
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    dir: ./decision
+    main: ./cmd/indecis-serve
+    binary: indecis-serve
+    flags:
+      - -trimpath
+    ldflags:
+      - -w -s
+
+  - id: indecis-teach
+    goos: [linux]
+    goarch: [amd64, arm64]
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    dir: ./teacher
+    main: ./cmd/indecis-teach
+    binary: indecis-teach
+    flags:
+      - -trimpath
+    ldflags:
+      - -w -s
+
+archives:
+  - formats: [tar.gz]
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  abbrev: 7
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+
+release:
+  name_template: "v{{ .Version }}"

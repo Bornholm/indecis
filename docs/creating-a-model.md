@@ -7,8 +7,11 @@ Allow ten minutes, less than one of which is training.
 ## 0. Prepare
 
 ```bash
-make cli   # builds bin/indecis
+make cli            # builds bin/indecis
+bin/indecis check   # checks that this processor runs the fast kernels
 ```
+
+The [releases](https://github.com/Bornholm/indecis/releases) also provide `indecis`, `indecis-serve` and `indecis-teach` for Linux (amd64, arm64), built with SIMD.
 
 You need a backbone, the pretrained model that indecis fine-tunes. The default is bekko-embedding-v1-a8m (multilingual, 210 MB, MIT license):
 

@@ -9,7 +9,7 @@ FIXTURE_TEMPLATES ?= ../xolo-plugin-injection-guard/model/templates
 BEKKO_DIR ?= $(HOME)/.cache/indecis/models/bekko-embedding-v1-a8m
 ORACLE := tools/oracle/.venv/bin/python
 
-.PHONY: test test-scalar bench cli serve oracle fixtures clean
+.PHONY: test test-scalar bench cli serve snapshot oracle fixtures clean
 
 test:
 	go test ./...
@@ -23,13 +23,17 @@ test-scalar:
 bench:
 	go test -run xxx -bench . ./internal/linalg/ ./internal/modernbert/ ./tokenizer/
 
-# indecis command (synth, train, eval, predict, compact, split).
+# indecis command (synth, train, eval, predict, compact, split, check).
 cli:
 	go build -o bin/indecis ./cmd/indecis
 
 # HTTP server compatible with the TypeSafe / OpenRouter decision API.
 serve:
 	cd decision && go build -o ../bin/indecis-serve ./cmd/indecis-serve
+
+# Release binaries built locally, as the release workflow does on a tag.
+snapshot:
+	goreleaser release --snapshot --clean
 
 # Python environment for the parity oracle (tests only).
 oracle:
@@ -44,4 +48,4 @@ fixtures:
 	cd tools/oracle && ../../$(ORACLE) train_step_fixtures.py --model $(BEKKO_DIR) --out ../../testdata/bekko
 
 clean:
-	rm -rf bin
+	rm -rf bin dist
