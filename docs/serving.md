@@ -40,7 +40,7 @@ A question named like a learned question goes through the model's head, which is
 | `-embed-cache` | 4,096 | option embeddings kept in memory |
 | `-batching` | false | groups simultaneous requests (see [inference.md](inference.md)) |
 
-Step by step, with the email classification model: [tutorial-email-classification.md](tutorial-email-classification.md).
+A complete example, from training to curl: [indecis-email-triage](../../indecis-email-triage).
 
 ## Decision provider for genai
 

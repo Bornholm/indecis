@@ -23,8 +23,6 @@ Measured on a laptop (Core Ultra 7 265U) with the bekko-embedding-v1-a8m backbon
 - **half an hour** to train on 20,000 examples;
 - no GPU, no cgo, no dependency outside the Go standard library.
 
-The prompt-injection detector [xolo-plugin-injection-guard](../xolo-plugin-injection-guard) is built with indecis. It gets 92.6% right on 636 hand-reviewed examples.
-
 ## Documentation
 
 - [Creating a model in five steps](docs/creating-a-model.md): schema, data, training, evaluation, deployment.
@@ -32,7 +30,6 @@ The prompt-injection detector [xolo-plugin-injection-guard](../xolo-plugin-injec
 - [Producing data](docs/data.md): templates, labeling by LLMs, consensus.
 - [Open categories](docs/open-categories.md): classify among a list that changes with every request.
 - [Serving a model](docs/serving.md): HTTP server compatible with TypeSafe and OpenRouter, provider for genai.
-- [Tutorial: classifying emails](docs/tutorial-email-classification.md), end to end with curl.
 - [Inference speed and memory](docs/inference.md): int8, SIMD, shrinking a model, long texts.
 - [Architecture](docs/architecture.md): packages, parity with PyTorch, tests.
 - [Roadmap](ROADMAP.md).

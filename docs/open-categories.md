@@ -23,7 +23,7 @@ The backbone alone can already match a text with a description. `FitEmbeddings` 
 
 ## What examples are worth
 
-We measured it on three email datasets, with category lists the model had never seen (proof of concept `examples/email-triage`):
+We measured it on three email datasets, with category lists the model had never seen (proof of concept [indecis-email-triage](../../indecis-email-triage)):
 
 | Test set | a8m, name only | a8m, name and 5 examples | a25m, name only | a25m, name and 5 examples |
 | --- | --- | --- | --- | --- |
