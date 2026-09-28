@@ -65,3 +65,9 @@ func microKernelGo(kb int, ap, bp, tile []float32, nr int) {
 	c50.Store(tile[5*nr:])
 	c51.Store(tile[5*nr+V:])
 }
+
+// SIMDInfo reports the vector width in bits and whether the portable SIMD
+// runs in hardware or is emulated in pure Go.
+func SIMDInfo() (bits int, emulated bool) {
+	return simd.VectorBitSize(), simd.Emulated()
+}

@@ -25,3 +25,7 @@ func microKernelGo(kb int, ap, bp, tile []float32, nr int) {
 	}
 	copy(tile, acc[:])
 }
+
+// SIMDInfo reports the vector width in bits and whether the portable SIMD
+// runs in hardware: without SIMD compiled in, there are no vectors.
+func SIMDInfo() (bits int, emulated bool) { return 0, false }

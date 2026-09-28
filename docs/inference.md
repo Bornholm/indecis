@@ -18,6 +18,8 @@ On the 636-example hand-reviewed reference, the AUC stays at 0.972, and 0.970 fo
 
 ## Settings
 
+`indecis check` reports what speeds up computation on the current machine: portable SIMD in hardware or emulated, vector width, AVX2 and FMA, AVX-VNNI. It exits with status 1 when SIMD is missing or emulated. From Go: `indecis.DetectHardware()`.
+
 | Option | Effect |
 | --- | --- |
 | `WithInt8()` | layers computed in int8 when the CPU has AVX-VNNI (Intel since Alder Lake, AMD since Zen 4); no effect elsewhere |

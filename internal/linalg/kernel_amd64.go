@@ -22,6 +22,11 @@ func detectAVX2() bool {
 	if os.Getenv("INDECIS_NOASM") == "1" {
 		return false
 	}
+	return cpuAVX2()
+}
+
+// cpuAVX2 reports whether the CPU and the OS support AVX2 and FMA.
+func cpuAVX2() bool {
 	maxLeaf, _, _, _ := cpuid(0, 0)
 	if maxLeaf < 7 {
 		return false
@@ -77,6 +82,13 @@ func detectVNNI() bool {
 	}
 	eax71, _, _, _ := cpuid(7, 1)
 	return eax71&(1<<4) != 0 // AVX-VNNI
+}
+
+// CPU reports what the processor supports, whether or not INDECIS_NOASM
+// turned the assembly kernels off.
+func CPU() (avx2FMA, avxVNNI bool) {
+	avx2FMA = cpuAVX2()
+	return avx2FMA, avx2FMA && detectVNNI()
 }
 
 // Int8Fast reports whether MatMul8 has a hardware kernel. Without it,

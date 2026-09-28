@@ -17,3 +17,7 @@ func Int8Fast() bool { return false }
 func microKernel8(kq int, ap []uint8, lda int, bp []int8, tile *[mr8 * nr8]int32) {
 	microKernel8Go(kq, ap, lda, bp, tile)
 }
+
+// CPU reports what the processor supports: the assembly kernels exist on
+// amd64 only.
+func CPU() (avx2FMA, avxVNNI bool) { return false, false }
