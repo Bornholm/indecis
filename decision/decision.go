@@ -20,7 +20,7 @@
 //   - any other value: its JSON serialization.
 //
 // This module is separate from indecis so that the library keeps no
-// dependency, and separate from genai because indecis is under the GPL.
+// dependency.
 package decision
 
 import (

@@ -1,9 +1,9 @@
 // Package synth generates training examples from templates, with labels
 // that are exact by construction.
 //
-// The engine is adapted from the corpus generator of go-anon (same author,
-// GPL-3.0) and generalized: the labels are no longer named entities but the
-// answers to the questions of an indecis schema.
+// The engine is adapted from the corpus generator of go-anon (same author)
+// and generalized: the labels are no longer named entities but the answers
+// to the questions of an indecis schema.
 //
 // A template has a header and a body:
 //
