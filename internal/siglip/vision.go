@@ -89,6 +89,17 @@ func (v *Vision) Embed(pixels []float32) ([]float32, error) {
 	return v.pool(x, v.cfg.Patches(), b), nil
 }
 
+// EmbedPatches returns both the patch features and the pooled embedding,
+// with one pass of the encoder.
+func (v *Vision) EmbedPatches(pixels []float32) (patches, pooled []float32, err error) {
+	x, b, err := v.patches(pixels)
+	if err != nil {
+		return nil, nil, err
+	}
+	// pool reads x without changing it.
+	return x, v.pool(x, v.cfg.Patches(), b), nil
+}
+
 // Patches returns the features of each patch, [Patches, H] in raster
 // order, after the final LayerNorm and before pooling: where the pooled
 // embedding summarizes the image, they keep the position of what they see.

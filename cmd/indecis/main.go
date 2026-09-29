@@ -6,6 +6,7 @@
 //	indecis predict  -model model < texts.jsonl
 //	indecis compact  -model model -out model-compact -int8-embeddings
 //	indecis split    -in data.jsonl -fraction 0.2 -by family -kept train.jsonl -held test.jsonl
+//	indecis train-vision -backbone siglip -schema schema.json -train images.jsonl -out model
 //	indecis check
 //
 // The guide docs/creating-a-model.md goes through these steps on an example.
@@ -35,6 +36,7 @@ var commands = []struct {
 	{"predict", "answers questions for texts (JSONL or lines)", runPredict},
 	{"compact", "reduces the size of a model (vocabulary, int8 table)", runCompact},
 	{"split", "sets aside a part of a set of examples (by family or by example)", runSplit},
+	{"train-vision", "trains a head that answers questions on images (SigLIP encoder)", runTrainVision},
 	{"check", "checks that this processor runs the SIMD and assembly kernels", runCheck},
 	{"version", "prints the version", runVersion},
 }

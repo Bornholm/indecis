@@ -14,7 +14,7 @@ func runSplit(args []string) error {
 	fs := flag.NewFlagSet("split", flag.ExitOnError)
 	in := fs.String("in", "", "examples (JSONL, comma-separated patterns)")
 	fraction := fs.Float64("fraction", 0.1, "fraction set aside")
-	by := fs.String("by", "example", "example ou family")
+	by := fs.String("by", "example", "example or family")
 	seed := fs.Uint64("seed", 1, "seed")
 	kept := fs.String("kept", "", "file of kept examples")
 	held := fs.String("held", "", "file of held-out examples")

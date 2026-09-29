@@ -30,8 +30,9 @@ import (
 
 // Model is a SigLIP model ready to decide.
 type Model struct {
-	m   *siglip.Model
-	tok *tokenizer.Tokenizer
+	m    *siglip.Model
+	tok  *tokenizer.Tokenizer
+	head *Head // learned questions, nil for a bare encoder
 
 	mu    sync.Mutex
 	cache map[string][]float32 // text embeddings: options recur from call to call
@@ -57,12 +58,24 @@ func WithInt8() Option { return func(c *config) { c.int8 = true } }
 // use at most the number of performance cores.
 func WithThreads(n int) Option { return func(c *config) { c.threads = n } }
 
-// Load reads a SigLIP model directory: config.json, model.safetensors and
-// tokenizer.json.
+// Load reads a SigLIP model directory (config.json, model.safetensors and
+// tokenizer.json), or a trained model directory (see SaveHead), which
+// loads its encoder and its head.
 func Load(dir string, opts ...Option) (*Model, error) {
 	c := config{threads: 1}
 	for _, o := range opts {
 		o(&c)
+	}
+	man, err := readManifest(dir)
+	if err != nil {
+		return nil, err
+	}
+	var head *Head
+	if man != nil {
+		if head, err = loadHead(dir, man); err != nil {
+			return nil, err
+		}
+		dir = man.Backbone
 	}
 	m, err := siglip.Load(dir, c.int8)
 	if err != nil {
@@ -73,7 +86,72 @@ func Load(dir string, opts ...Option) (*Model, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Model{m: m, tok: tok, cache: map[string][]float32{}}, nil
+	if head != nil && (head.T != m.Cfg.Patches() || head.H != m.Cfg.Hidden) {
+		return nil, fmt.Errorf("vision: the head expects %d×%d patch features, the encoder gives %d×%d", head.T, head.H, m.Cfg.Patches(), m.Cfg.Hidden)
+	}
+	return &Model{m: m, tok: tok, head: head, cache: map[string][]float32{}}, nil
+}
+
+// Schema returns the learned questions, nil for a bare encoder.
+func (m *Model) Schema() indecis.Schema {
+	if m.head == nil {
+		return nil
+	}
+	return m.head.Schema
+}
+
+// Patches returns the features of each patch of img, [patches, hidden]:
+// what a Head reads.
+func (m *Model) Patches(img image.Image) ([]float32, error) {
+	px, err := m.m.Cfg.Preprocess(img)
+	if err != nil {
+		return nil, err
+	}
+	return m.m.Vision.Patches(px)
+}
+
+// PatchShape returns the number of patches and their width.
+func (m *Model) PatchShape() (patches, hidden int) { return m.m.Cfg.Patches(), m.m.Cfg.Hidden }
+
+// Decide answers for img, with one pass of the encoder, the learned
+// questions named in learned (the model's head) and open questions (see
+// DecideOpen).
+func (m *Model) Decide(ctx context.Context, img image.Image, learned []string, open []indecis.OpenQuestion) (indecis.Decision, error) {
+	if len(learned) > 0 && m.head == nil {
+		return nil, fmt.Errorf("vision: this model has no learned questions")
+	}
+	px, err := m.m.Cfg.Preprocess(img)
+	if err != nil {
+		return nil, err
+	}
+	patches, pooled, err := m.m.Vision.EmbedPatches(px)
+	if err != nil {
+		return nil, err
+	}
+	d := indecis.Decision{}
+	if len(learned) > 0 {
+		hd, err := m.head.Decide(patches)
+		if err != nil {
+			return nil, err
+		}
+		for _, name := range learned {
+			a, ok := hd[name]
+			if !ok {
+				return nil, fmt.Errorf("vision: %q is not a learned question", name)
+			}
+			d[name] = a
+		}
+	}
+	ie := normalize(pooled)
+	for _, q := range open {
+		a, err := m.decide(ie, q)
+		if err != nil {
+			return nil, fmt.Errorf("vision: %s: %w", q.Name, err)
+		}
+		a.Question = q.Name
+		d[q.Name] = a
+	}
+	return d, nil
 }
 
 // EmbedImage returns the normalized embedding of an image.
@@ -291,9 +369,13 @@ func softmax(z []float64) []float64 {
 	return p
 }
 
-// IsModel reports whether dir holds a model this package reads (its
-// config.json declares the "siglip" model type).
+// IsModel reports whether dir holds a model this package reads: a SigLIP
+// encoder (config.json of the "siglip" model type) or a trained model
+// (vision.json).
 func IsModel(dir string) bool {
+	if m, err := readManifest(dir); err == nil && m != nil {
+		return true
+	}
 	_, err := siglip.ReadConfig(dir)
 	return err == nil
 }

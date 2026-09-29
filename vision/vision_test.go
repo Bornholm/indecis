@@ -88,3 +88,57 @@ func TestDecide(t *testing.T) {
 		t.Errorf("content: %s, %s", d[0]["content"].Choice, d[1]["content"].Choice)
 	}
 }
+
+// A head trained on patch features, saved and loaded back, answers its
+// learned question in the same pass as an open one.
+func TestTrainedModel(t *testing.T) {
+	m := load(t)
+	shapes, noise := open(t, "shapes"), open(t, "noise")
+	var examples []HeadExample
+	for _, c := range []struct {
+		img   image.Image
+		label string
+	}{{shapes, "shapes"}, {noise, "noise"}} {
+		p, err := m.Patches(c.img)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := 0; i < 20; i++ {
+			examples = append(examples, HeadExample{Patches: ToBF16(p), Labels: map[string]any{"kind": c.label}})
+		}
+	}
+	T, H := m.PatchShape()
+	h, err := NewHead(indecis.Schema{indecis.NewChoice("kind", "", "shapes", "noise")}, T, H, 4, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Fit(examples, DefaultHeadTrainOptions()); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	home, _ := os.UserHomeDir()
+	backbone := os.Getenv("INDECIS_SIGLIP2_DIR")
+	if backbone == "" {
+		backbone = filepath.Join(home, ".cache/indecis/models/siglip2-base-patch32-256")
+	}
+	if err := SaveHead(dir, backbone, h); err != nil {
+		t.Fatal(err)
+	}
+	if !IsModel(dir) {
+		t.Fatal("IsModel(trained dir) = false")
+	}
+	trained, err := Load(dir, WithInt8())
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := trained.Decide(context.Background(), noise, []string{"kind"}, []indecis.OpenQuestion{indecis.OpenNoul("circle", "a red circle")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d["kind"].Choice != "noise" {
+		t.Errorf("kind = %s (%v), want noise", d["kind"].Choice, d["kind"].Probs)
+	}
+	if d["circle"].P > 0.5 {
+		t.Errorf("circle on noise: P = %.3f", d["circle"].P)
+	}
+}
