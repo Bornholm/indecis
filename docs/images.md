@@ -1,0 +1,87 @@
+# Deciding on images
+
+indecis also decides on images, with a SigLIP model and no training: the options of a question are described in text, in English or French, and each is scored against the image. This is open mode (see [open-categories.md](open-categories.md)), with an image instead of a text.
+
+The model is [google/siglip2-base-patch32-256](https://huggingface.co/google/siglip2-base-patch32-256): an 86M-parameter image encoder and a multilingual text encoder, under the Apache-2.0 license.
+
+```bash
+M=~/.cache/indecis/models/siglip2-base-patch32-256
+mkdir -p $M
+for f in config.json model.safetensors tokenizer.json; do
+  curl -sL -o $M/$f https://huggingface.co/google/siglip2-base-patch32-256/resolve/main/$f
+done
+```
+
+The file weighs 1.5 GB, most of it the text embedding table (256,000 tokens × 768).
+
+## From Go
+
+```go
+m, _ := vision.Load(dir, vision.WithInt8())
+a, _ := m.ChooseNearest(ctx, []indecis.Candidate{
+    {Name: "truck", Description: "a photo of a garbage truck"},
+    {Name: "car", Description: "a photo of a car"},
+}, img)
+a.Choice // "truck"
+```
+
+- `ChooseNearest` picks the option that best describes the image.
+- `DecideOpen` answers `indecis.OpenQuestion` values: choice, score, yes/no.
+- `Match` returns the model's own probability that a text describes the image.
+- `EmbedImage`, `EmbedText` and `Logit` give the embeddings and the score.
+
+Describe each option as a caption: "a photo of a garbage truck" rather than "truck". The text encoder reads the description, or the name when there is none; the question's instructions are not read for a choice.
+
+## Behind the decision API
+
+`indecis-serve` recognizes a SigLIP model by its `config.json` and serves it as an image model. The state is the image, as a data URL or as `{"image": ...}` (PNG, JPEG or GIF, 64 megapixels at most); every question is open.
+
+```bash
+bin/indecis-serve -model images=$M
+IMG=$(base64 -w0 photo.jpg)
+curl -s localhost:8080/api/alpha/decisions -d '{
+  "state": "data:image/jpeg;base64,'$IMG'",
+  "questions": {
+    "vehicle": {"type": "choice", "instructions": "Vehicle",
+      "criteria": {"truck": "une photo d'\''un camion poubelle", "car": "une photo d'\''une voiture"}},
+    "outdoors": {"type": "noul", "instructions": "Outdoors",
+      "criteria": {"true": "une photo prise en extérieur", "false": "une photo prise en intérieur"}}
+  }
+}'
+```
+
+## Measured quality
+
+Zero-shot, on 500 images of the validation split of [Imagenette](https://github.com/fastai/imagenette) (10 ImageNet classes, 50 per class), each class described by a caption:
+
+| Captions | float32 | int8 |
+| --- | --- | --- |
+| "a photo of a tench." | 99.0% | 99.0% |
+| "une photo de tanche." | 98.8% | 98.8% |
+| the class name only | 99.0% | 99.2% |
+
+transformers gets 99.2% on the same images and captions; the difference is one image, decoded slightly differently by Go's JPEG decoder. Imagenette's classes are far apart: expect less on close categories. `go run ./tools/imgeval` repeats the measurement.
+
+**Yes/no questions: describe both criteria.** SigLIP ranks images well on a property (AUC 0.97 to 1.00 for "a photo of an animal", "a vehicle", "a musical instrument"), but its own probability (`Match`) is set for precise captions and stays under 0.5 for most positives. `DecideOpen` opposes the two criteria of a noul question instead. With only instructions, they face a fixed anchor, "Something else": 86 to 97% right at 0.5 on those properties. With a described negation ("a photo of an object"), 92 to 98%. On a photo of a garbage truck, "une photo prise en extérieur" alone gives 0.31; against "une photo prise en intérieur", 0.89.
+
+## Speed and memory
+
+On one laptop performance core (Core Ultra 7 265U):
+
+| | float32 | int8 |
+| --- | --- | --- |
+| an image (64 patches of 32 pixels) | 148 ms | 106 ms |
+| a text (64 tokens) | 141 ms | 96 ms |
+
+Text embeddings are cached, so an option costs once; an image costs every time. In int8, the second MLP product (`fc2`) stays in float32: its input carries the large outliers typical of vision transformers, and per-token int8 moved the scores too much. Making it int8 without that loss, and spreading the products of a single image over several cores, are the next speed-ups.
+
+## Parity with the reference implementation
+
+| Stage | Test | Result |
+| --- | --- | --- |
+| Tokenizer (original Gemma pipeline, no `<bos>`) | 3,053 texts | identical ids |
+| Resize (PIL's bilinear filter) | downscale and upscale | identical bytes |
+| Image and text embeddings, float32 | 2 images, 5 texts | max relative difference 2.4·10⁻⁶ |
+| Logits, int8 | 10 pairs | within 0.45, same ranking |
+
+Fixtures come from `tools/oracle/siglip_fixtures.py`, with synthetic images.

@@ -30,6 +30,7 @@ Measured on a laptop (Core Ultra 7 265U) with the bekko-embedding-v1-a8m backbon
 - [Producing data](docs/data.md): templates, labeling by LLMs, consensus.
 - [Open categories](docs/open-categories.md): classify among a list that changes with every request.
 - [Serving a model](docs/serving.md): HTTP server compatible with TypeSafe and OpenRouter, provider for genai.
+- [Deciding on images](docs/images.md): SigLIP, options described in text, zero-shot.
 - [Inference speed and memory](docs/inference.md): int8, SIMD, shrinking a model, long texts.
 - [Architecture](docs/architecture.md): packages, parity with PyTorch, tests.
 

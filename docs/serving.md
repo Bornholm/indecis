@@ -42,6 +42,8 @@ A question named like a learned question goes through the model's head, which is
 
 A complete example, from training to curl: [indecis-email-triage](../../indecis-email-triage).
 
+A SigLIP model is served as an image model: the state is the image. See [images.md](images.md).
+
 ## Decision provider for genai
 
 The `decision` module exposes an indecis model as an `llm.DecisionClient` of [genai](https://github.com/bornholm/genai) (branch `feat/decision-client`). The same code then queries Jev or a local model:
