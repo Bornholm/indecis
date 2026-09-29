@@ -11,6 +11,7 @@ import (
 // LayerNorm and multi-head attention pooling.
 type Vision struct {
 	cfg   Config
+	work  *workPool
 	patch *linear   // the patch convolution, as a product over flattened patches
 	pos   []float32 // [patches, H]
 	enc   *encoder
@@ -27,7 +28,7 @@ type Vision struct {
 
 func loadVision(cfg Config, w weights, int8 bool) (*Vision, error) {
 	H, P := cfg.Hidden, cfg.PatchSize
-	v := &Vision{cfg: cfg}
+	v := &Vision{cfg: cfg, work: &workPool{cfg: cfg, T: cfg.Patches(), rows: cfg.Patches() * 3 * P * P}}
 	var err error
 	// Conv2d weight [H, 3, P, P]: a row per output channel, flattened in
 	// (channel, y, x) order, the order patchify uses.
@@ -82,7 +83,7 @@ func loadVision(cfg Config, w weights, int8 bool) (*Vision, error) {
 // [3, S, S] channel-major with S = ImageSize (see Pixels). The result,
 // [H], is not normalized.
 func (v *Vision) Embed(pixels []float32) ([]float32, error) {
-	_, pooled, err := v.Forward(pixels, 0, true)
+	_, pooled, err := v.forward(pixels, 0, false, true)
 	return pooled, err
 }
 
@@ -91,6 +92,10 @@ func (v *Vision) Embed(pixels []float32) ([]float32, error) {
 // LayerNorm), 0 the final ones; without pool, the layers beyond are not
 // computed. With pool, it also returns the pooled embedding.
 func (v *Vision) Forward(pixels []float32, layer int, pool bool) (patches, pooled []float32, err error) {
+	return v.forward(pixels, layer, true, pool)
+}
+
+func (v *Vision) forward(pixels []float32, layer int, wantPatches, pool bool) (patches, pooled []float32, err error) {
 	cfg := v.cfg
 	S, P, H := cfg.ImageSize, cfg.PatchSize, cfg.Hidden
 	if len(pixels) != 3*S*S {
@@ -100,15 +105,17 @@ func (v *Vision) Forward(pixels []float32, layer int, pool bool) (patches, poole
 		return nil, nil, fmt.Errorf("siglip: layer %d, the tower has %d", layer, cfg.Layers)
 	}
 	T := cfg.Patches()
-	x := make([]float32, T*H)
-	v.patch.apply(x, patchify(pixels, S, P), T, v.enc.workers)
+	w := v.work.get()
+	defer v.work.put(w)
+	x, b := w.x, w.b
+	patchify(w.rows, pixels, S, P)
+	v.patch.apply(x, w.rows, T, v.enc.workers)
 	linalg.AddTo(x, v.pos)
-	b := newBuffers(cfg, T)
 	n := cfg.Layers
 	if layer > 0 && !pool {
 		n = layer
 	}
-	if layer > 0 {
+	if layer > 0 && wantPatches {
 		patches = make([]float32, T*H)
 	}
 	v.enc.forwardN(x, T, b, n, layer, patches)
@@ -116,8 +123,8 @@ func (v *Vision) Forward(pixels []float32, layer int, pool bool) (patches, poole
 		return patches, nil, nil
 	}
 	v.post.apply(x, x, T, H, cfg.Eps)
-	if layer == 0 {
-		patches = x // pool reads x without changing it
+	if layer == 0 && wantPatches {
+		patches = append([]float32(nil), x...) // x goes back to the pool
 	}
 	if pool {
 		pooled = v.pool(x, T, b)
@@ -141,9 +148,8 @@ func (v *Vision) Patches(pixels []float32) ([]float32, error) {
 
 // patchify cuts [3, S, S] pixels into P×P patches, one row per patch in
 // raster order, each flattened in (channel, y, x) order.
-func patchify(pixels []float32, S, P int) []float32 {
+func patchify(rows, pixels []float32, S, P int) {
 	g := S / P
-	rows := make([]float32, g*g*3*P*P)
 	i := 0
 	for py := 0; py < g; py++ {
 		for px := 0; px < g; px++ {
@@ -156,7 +162,6 @@ func patchify(pixels []float32, S, P int) []float32 {
 			}
 		}
 	}
-	return rows
 }
 
 // pool is the attention pooling head: one query, the probe, attends to the

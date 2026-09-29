@@ -3,6 +3,7 @@ package siglip
 import (
 	"fmt"
 	"math"
+	"sync"
 
 	"github.com/bornholm/indecis/internal/linalg"
 )
@@ -148,6 +149,29 @@ type buffers struct {
 	h, qkv, attn, tmp, mlp []float32
 	q, k, v, s, o          []float32 // one head
 }
+
+// work is the memory of one pass of a tower: activations, patch rows and
+// buffers. A pool keeps it from pass to pass, so that a server deciding on
+// image after image does not allocate megabytes each time.
+type work struct {
+	x, rows []float32
+	b       *buffers
+}
+
+type workPool struct {
+	cfg     Config
+	T, rows int
+	p       sync.Pool
+}
+
+func (wp *workPool) get() *work {
+	if w, ok := wp.p.Get().(*work); ok {
+		return w
+	}
+	return &work{x: make([]float32, wp.T*wp.cfg.Hidden), rows: make([]float32, wp.rows), b: newBuffers(wp.cfg, wp.T)}
+}
+
+func (wp *workPool) put(w *work) { wp.p.Put(w) }
 
 func newBuffers(cfg Config, T int) *buffers {
 	H, d := cfg.Hidden, cfg.headDim()

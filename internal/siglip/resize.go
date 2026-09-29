@@ -143,6 +143,12 @@ func resizePass(src []uint8, w, h, out int, horizontal bool) []uint8 {
 // Preprocess turns an image into the vision tower's input: RGB, resized to
 // ImageSize × ImageSize with PIL's bilinear filter, normalized.
 func (c Config) Preprocess(img image.Image) ([]float32, error) {
+	return c.PreprocessInto(nil, img)
+}
+
+// PreprocessInto is Preprocess writing the pixels into dst when it is
+// large enough.
+func (c Config) PreprocessInto(dst []float32, img image.Image) ([]float32, error) {
 	rgb, w, h := RGB(img)
-	return Pixels(Resize(rgb, w, h, c.ImageSize, c.ImageSize), c.ImageSize)
+	return PixelsInto(dst, Resize(rgb, w, h, c.ImageSize, c.ImageSize), c.ImageSize)
 }

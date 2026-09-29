@@ -12,6 +12,7 @@ import (
 // layers, a final LayerNorm, and a projection of the last position.
 type Text struct {
 	cfg   Config
+	work  *workPool
 	table []byte // token embeddings [Vocab, H], F32, read in place
 	pos   []float32
 	enc   *encoder
@@ -21,7 +22,7 @@ type Text struct {
 
 func loadText(cfg Config, w weights, int8 bool) (*Text, error) {
 	H := cfg.Hidden
-	t := &Text{cfg: cfg}
+	t := &Text{cfg: cfg, work: &workPool{cfg: cfg, T: cfg.TextLen}}
 	dtype, shape, raw, ok := w.f.Raw("text_model.embeddings.token_embedding.weight")
 	if !ok {
 		return nil, fmt.Errorf("siglip: token embeddings missing")
@@ -56,7 +57,9 @@ func (t *Text) Embed(ids []int32) ([]float32, error) {
 	if len(ids) != T {
 		return nil, fmt.Errorf("siglip: %d ids, expected %d", len(ids), T)
 	}
-	x := make([]float32, T*H)
+	w := t.work.get()
+	defer t.work.put(w)
+	x := w.x
 	for i, id := range ids {
 		if id < 0 || int(id) >= cfg.Vocab {
 			return nil, fmt.Errorf("siglip: id %d out of vocabulary", id)
@@ -67,8 +70,7 @@ func (t *Text) Embed(ids []int32) ([]float32, error) {
 		}
 	}
 	linalg.AddTo(x, t.pos)
-	b := newBuffers(cfg, T)
-	t.enc.forward(x, T, b)
+	t.enc.forward(x, T, w.b)
 	// Only the last position is used: normalize it alone.
 	last := x[(T-1)*H:]
 	n := make([]float32, H)
