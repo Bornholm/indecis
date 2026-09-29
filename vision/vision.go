@@ -104,10 +104,10 @@ func (m *Model) EmbedText(text string) ([]float32, error) {
 	return e, nil
 }
 
-// logit is the model's score for an (image, text) pair of normalized
-// embeddings; its sigmoid is the probability that the text describes the
-// image.
-func (m *Model) logit(img, text []float32) float64 {
+// Logit is the model's score for an (image, text) pair of normalized
+// embeddings (EmbedImage, EmbedText); its sigmoid is the probability that
+// the text describes the image.
+func (m *Model) Logit(img, text []float32) float64 {
 	return float64(m.m.Logit(dot(img, text)))
 }
 
@@ -121,7 +121,7 @@ func (m *Model) Match(img image.Image, text string) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return sigmoid(m.logit(ie, te)), nil
+	return sigmoid(m.Logit(ie, te)), nil
 }
 
 // optionText is what the text tower reads for an option: its description,
@@ -154,7 +154,7 @@ func (m *Model) choose(ie []float32, cands []indecis.Candidate) (indecis.Answer,
 		if err != nil {
 			return indecis.Answer{}, err
 		}
-		cos[i], logits[i] = float64(dot(ie, te)), m.logit(ie, te)
+		cos[i], logits[i] = float64(dot(ie, te)), m.Logit(ie, te)
 	}
 	p := softmax(logits)
 	best := 0
@@ -183,9 +183,9 @@ func (m *Model) choose(ie []float32, cands []indecis.Candidate) (indecis.Answer,
 // DecideOpen answers open questions on each image:
 //   - Choice: the option that best describes the image, as ChooseNearest;
 //   - Score: the levels as options, Score being the expected level;
-//   - Noul: with the default options of indecis.OpenNoul, P is Match of
-//     the instructions (SigLIP scores a text on its own); with two described
-//     criteria, the softmax of their logits.
+//   - Noul: P is the softmax of the logits of the two criteria, by default
+//     the instructions against indecis.NoulAnchor (see indecis.OpenNoul);
+//     describing the negation ("a photo of an object") does better.
 //
 // Questions' Instructions are not read for Choice and Score: the text
 // tower reads captions, so describe each option as one.
@@ -215,20 +215,16 @@ func (m *Model) decide(ie []float32, q indecis.OpenQuestion) (indecis.Answer, er
 		if len(q.Options) != 2 {
 			return indecis.Answer{}, fmt.Errorf("an open noul question describes two criteria (true, false)")
 		}
-		var p float64
-		if q.Options[1].Description == indecis.NoulAnchor {
-			te, err := m.EmbedText(optionText(q.Options[0]))
-			if err != nil {
-				return indecis.Answer{}, err
-			}
-			p = sigmoid(m.logit(ie, te))
-		} else {
-			a, err := m.choose(ie, q.Options)
-			if err != nil {
-				return indecis.Answer{}, err
-			}
-			p = a.Probs[q.Options[0].Name]
+		// SigLIP's own sigmoid (Match) ranks images well but is set for
+		// precise captions: on Imagenette, "a photo of an animal" stayed
+		// under 0.5 for most animals. Opposing the two criteria, by default
+		// the instructions and indecis.NoulAnchor, answered 86 to 97% right
+		// at 0.5; a described negation ("a photo of an object"), 92 to 98%.
+		a, err := m.choose(ie, q.Options)
+		if err != nil {
+			return indecis.Answer{}, err
 		}
+		p := a.Probs[q.Options[0].Name]
 		return indecis.Answer{Kind: indecis.Noul, P: p, Confidence: math.Max(p, 1-p)}, nil
 	case indecis.Choice, indecis.Score:
 		a, err := m.choose(ie, q.Options)
