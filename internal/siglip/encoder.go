@@ -29,14 +29,15 @@ func newLinear(w, b []float32, in, out int, int8 bool) *linear {
 	return l
 }
 
-// apply writes dst = x·Wᵀ + b for rows rows of x.
-func (l *linear) apply(dst, x []float32, rows int) {
+// apply writes dst = x·Wᵀ + b for rows rows of x, with at most workers
+// goroutines.
+func (l *linear) apply(dst, x []float32, rows, workers int) {
 	if l.p8 != nil && l.outliers {
-		linalg.MatMul8Outliers(dst[:rows*l.out], x[:rows*l.in], l.p8, rows, false, outlierRatio)
+		linalg.MatMul8Outliers(dst[:rows*l.out], x[:rows*l.in], l.p8, rows, false, outlierRatio, workers)
 	} else if l.p8 != nil {
-		linalg.MatMul8(dst[:rows*l.out], x[:rows*l.in], l.p8, rows, false)
+		linalg.MatMul8N(dst[:rows*l.out], x[:rows*l.in], l.p8, rows, false, workers)
 	} else {
-		linalg.MatMulPacked(dst[:rows*l.out], x[:rows*l.in], l.p, rows, false)
+		linalg.MatMulPackedN(dst[:rows*l.out], x[:rows*l.in], l.p, rows, false, workers)
 	}
 	if l.bias != nil {
 		for r := 0; r < rows; r++ {
@@ -87,13 +88,14 @@ type layer struct {
 
 // encoder is the stack of layers shared by both towers.
 type encoder struct {
-	cfg    Config
-	layers []layer
+	cfg     Config
+	layers  []layer
+	workers int
 }
 
 func loadEncoder(cfg Config, w weights, prefix string, int8 bool) (*encoder, error) {
 	H, M := cfg.Hidden, cfg.MLP
-	e := &encoder{cfg: cfg, layers: make([]layer, cfg.Layers)}
+	e := &encoder{cfg: cfg, layers: make([]layer, cfg.Layers), workers: 1}
 	for i := range e.layers {
 		p := fmt.Sprintf("%s.layers.%d.", prefix, i)
 		l := &e.layers[i]
@@ -164,15 +166,15 @@ func (e *encoder) forward(x []float32, T int, b *buffers) {
 	for i := range e.layers {
 		l := &e.layers[i]
 		l.ln1.apply(b.h, x, T, H, cfg.Eps)
-		l.qkv.apply(b.qkv, b.h, T)
+		l.qkv.apply(b.qkv, b.h, T, e.workers)
 		attention(b.attn, b.qkv, T, cfg, b)
-		l.out.apply(b.tmp, b.attn, T)
+		l.out.apply(b.tmp, b.attn, T, e.workers)
 		linalg.AddTo(x[:T*H], b.tmp[:T*H])
 
 		l.ln2.apply(b.h, x, T, H, cfg.Eps)
-		l.fc1.apply(b.mlp, b.h, T)
+		l.fc1.apply(b.mlp, b.h, T, e.workers)
 		linalg.GeluTanh(b.mlp[:T*cfg.MLP], b.mlp[:T*cfg.MLP])
-		l.fc2.apply(b.tmp, b.mlp, T)
+		l.fc2.apply(b.tmp, b.mlp, T, e.workers)
 		linalg.AddTo(x[:T*H], b.tmp[:T*H])
 	}
 }
@@ -189,11 +191,11 @@ func attention(dst, qkv []float32, T int, cfg Config, b *buffers) {
 			copy(b.k[t*d:(t+1)*d], row[H+h*d:H+(h+1)*d])
 			copy(b.v[t*d:(t+1)*d], row[2*H+h*d:2*H+(h+1)*d])
 		}
-		linalg.MatMul(b.s[:T*T], b.q[:T*d], b.k[:T*d], T, d, T, false, true, false)
+		linalg.MatMulSerial(b.s[:T*T], b.q[:T*d], b.k[:T*d], T, d, T, false, true, false)
 		for t := 0; t < T; t++ {
 			softmax(b.s[t*T:(t+1)*T], scale)
 		}
-		linalg.MatMul(b.o[:T*d], b.s[:T*T], b.v[:T*d], T, T, d, false, false, false)
+		linalg.MatMulSerial(b.o[:T*d], b.s[:T*T], b.v[:T*d], T, T, d, false, false, false)
 		for t := 0; t < T; t++ {
 			copy(dst[t*H+h*d:t*H+(h+1)*d], b.o[t*d:(t+1)*d])
 		}

@@ -85,6 +85,9 @@ func main() {
 			if *int8 {
 				vopts = append(vopts, vision.WithInt8())
 			}
+			if *threads > 0 { // 0 keeps one core per image, the fastest default
+				vopts = append(vopts, vision.WithThreads(*threads))
+			}
 			v, err := vision.Load(dir, vopts...)
 			if err != nil {
 				log.Error("loading", "model", dir, "error", err)

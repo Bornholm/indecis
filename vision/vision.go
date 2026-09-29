@@ -40,7 +40,10 @@ type Model struct {
 // maxCache bounds the text embedding cache; beyond, it starts over.
 const maxCache = 4096
 
-type config struct{ int8 bool }
+type config struct {
+	int8    bool
+	threads int
+}
 
 // Option configures Load.
 type Option func(*config)
@@ -49,10 +52,15 @@ type Option func(*config)
 // AVX-VNNI. On Imagenette, zero-shot accuracy is unchanged.
 func WithInt8() Option { return func(c *config) { c.int8 = true } }
 
+// WithThreads spreads one image over n cores (default 1; 0: all). The
+// other cores stay free for simultaneous requests; on a hybrid processor,
+// use at most the number of performance cores.
+func WithThreads(n int) Option { return func(c *config) { c.threads = n } }
+
 // Load reads a SigLIP model directory: config.json, model.safetensors and
 // tokenizer.json.
 func Load(dir string, opts ...Option) (*Model, error) {
-	var c config
+	c := config{threads: 1}
 	for _, o := range opts {
 		o(&c)
 	}
@@ -60,6 +68,7 @@ func Load(dir string, opts ...Option) (*Model, error) {
 	if err != nil {
 		return nil, err
 	}
+	m.SetThreads(c.threads)
 	tok, err := tokenizer.LoadShared(filepath.Join(dir, "tokenizer.json"))
 	if err != nil {
 		return nil, err

@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/bornholm/indecis/internal/linalg"
 	"github.com/bornholm/indecis/internal/safetensors"
 )
 
@@ -139,6 +140,18 @@ func Load(dir string, int8 bool) (*Model, error) {
 	}
 	m.LogitScale, m.LogitBias = scale[0], bias[0]
 	return m, nil
+}
+
+// SetThreads bounds the cores one image or one text uses (default 1; 0:
+// all). An image is 64 rows: on a hybrid processor, spreading it beyond
+// the performance cores slows it down (48 ms on two performance cores, 73
+// on one, 160 on all fourteen of a Core Ultra 7 265U). Not safe to call
+// during a computation.
+func (m *Model) SetThreads(n int) {
+	if n <= 0 {
+		n = linalg.Workers()
+	}
+	m.Vision.enc.workers, m.Text.enc.workers = n, n
 }
 
 // Logit turns the cosine between an image and a text embedding into the

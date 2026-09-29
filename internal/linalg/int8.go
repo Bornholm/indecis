@@ -245,8 +245,9 @@ const maxOutliers = 32
 // of the column maxima, 32 at most, are left out of the int8 product, so
 // they no longer flatten the per-row quantization, and multiplied in
 // float32 by the dequantized weights of those rows of op(B). The columns
-// are chosen on each call, from A itself: no calibration.
-func MatMul8Outliers(c, a []float32, b *PackedB8, m int, accumulate bool, ratio float32) {
+// are chosen on each call, from A itself: no calibration. limit bounds
+// the workers, as in MatMul8N.
+func MatMul8Outliers(c, a []float32, b *PackedB8, m int, accumulate bool, ratio float32, limit int) {
 	k, n := b.k, b.n
 	if m == 0 || n == 0 {
 		return
@@ -271,7 +272,7 @@ func MatMul8Outliers(c, a []float32, b *PackedB8, m int, accumulate bool, ratio 
 		}
 	}
 	if len(out) == 0 {
-		MatMul8(c, a, b, m, accumulate)
+		MatMul8N(c, a, b, m, accumulate, limit)
 		return
 	}
 	if len(out) > maxOutliers {
@@ -295,7 +296,7 @@ func MatMul8Outliers(c, a []float32, b *PackedB8, m int, accumulate bool, ratio 
 			rest[i*k+j] = 0
 		}
 	}
-	MatMul8(c, rest, b, m, accumulate)
+	MatMul8N(c, rest, b, m, accumulate, limit)
 	// Rows j of op(B), dequantized: data[p·kq·64 + q·64 + col·4 + t] holds
 	// op(B)[4q+t][16p+col].
 	w := getBuf(n)

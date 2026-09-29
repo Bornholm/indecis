@@ -60,7 +60,7 @@ func loadVision(cfg Config, w weights, int8 bool) (*Vision, error) {
 	// The query only depends on the probe: computed once, in float32.
 	q := newLinear(inW[:H*H], inB[:H], H, H, false)
 	v.probeQ = make([]float32, H)
-	q.apply(v.probeQ, probe, 1)
+	q.apply(v.probeQ, probe, 1, 1)
 	v.headK = newLinear(inW[H*H:2*H*H], inB[H:2*H], H, H, false)
 	v.headV = newLinear(inW[2*H*H:], inB[2*H:], H, H, false)
 	if v.headOut, err = loadLinear(w, "vision_model.head.attention.out_proj", H, H, false); err != nil {
@@ -90,7 +90,7 @@ func (v *Vision) Embed(pixels []float32) ([]float32, error) {
 	T := cfg.Patches()
 	rows := patchify(pixels, S, P)
 	x := make([]float32, T*H)
-	v.patch.apply(x, rows, T)
+	v.patch.apply(x, rows, T, v.enc.workers)
 	linalg.AddTo(x, v.pos)
 	b := newBuffers(cfg, T)
 	v.enc.forward(x, T, b)
@@ -124,8 +124,8 @@ func (v *Vision) pool(x []float32, T int, b *buffers) []float32 {
 	cfg := v.cfg
 	H, d := cfg.Hidden, cfg.headDim()
 	k, vv := b.qkv[:T*H], b.tmp[:T*H]
-	v.headK.apply(k, x, T)
-	v.headV.apply(vv, x, T)
+	v.headK.apply(k, x, T, v.enc.workers)
+	v.headV.apply(vv, x, T, v.enc.workers)
 	scale := float32(1 / math.Sqrt(float64(d)))
 	att := make([]float32, H)
 	s := make([]float32, T)
@@ -149,14 +149,14 @@ func (v *Vision) pool(x []float32, T int, b *buffers) []float32 {
 		}
 	}
 	out := make([]float32, H)
-	v.headOut.apply(out, att, 1)
+	v.headOut.apply(out, att, 1, 1)
 	// out + mlp(layernorm(out))
 	n := make([]float32, H)
 	v.headNorm.apply(n, out, 1, H, cfg.Eps)
 	m := make([]float32, cfg.MLP)
-	v.headFC1.apply(m, n, 1)
+	v.headFC1.apply(m, n, 1, 1)
 	linalg.GeluTanh(m, m)
-	v.headFC2.apply(n, m, 1)
+	v.headFC2.apply(n, m, 1, 1)
 	linalg.AddTo(out, n)
 	return out
 }

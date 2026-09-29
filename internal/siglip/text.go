@@ -74,7 +74,7 @@ func (t *Text) Embed(ids []int32) ([]float32, error) {
 	n := make([]float32, H)
 	t.final.apply(n, last, 1, H, cfg.Eps)
 	out := make([]float32, H)
-	t.head.apply(out, n, 1)
+	t.head.apply(out, n, 1, 1)
 	return out, nil
 }
 

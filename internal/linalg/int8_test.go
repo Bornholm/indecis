@@ -115,7 +115,7 @@ func TestMatMul8Outliers(t *testing.T) {
 	p := PackB8(b, k, n, false)
 	plain, split := make([]float32, m*n), make([]float32, m*n)
 	MatMul8(plain, a, p, m, false)
-	MatMul8Outliers(split, a, p, m, false, 6)
+	MatMul8Outliers(split, a, p, m, false, 6, 0)
 	errOf := func(got []float32) float64 {
 		var e, s float64
 		for i := range want {
@@ -135,7 +135,7 @@ func TestMatMul8Outliers(t *testing.T) {
 		a[i*k+1038], a[i*k+7] = 0, 0
 	}
 	MatMul8(plain, a, p, m, false)
-	MatMul8Outliers(split, a, p, m, false, 6)
+	MatMul8Outliers(split, a, p, m, false, 6, 0)
 	for i := range plain {
 		if plain[i] != split[i] {
 			t.Fatalf("without outliers, [%d] %v vs %v", i, split[i], plain[i])

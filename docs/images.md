@@ -66,14 +66,16 @@ transformers gets 99.2% on the same images and captions; the difference is one i
 
 ## Speed and memory
 
-On one laptop performance core (Core Ultra 7 265U):
+On a laptop (Core Ultra 7 265U):
 
-| | float32 | int8 |
-| --- | --- | --- |
-| an image (64 patches of 32 pixels) | 148 ms | 106 ms |
-| a text (64 tokens) | 141 ms | 96 ms |
+| | float32, one core | int8, one core | int8, two performance cores |
+| --- | --- | --- | --- |
+| an image (64 patches of 32 pixels) | 148 ms | 65 to 73 ms | 48 ms |
+| a text (64 tokens) | 141 ms | 52 ms | |
 
-Text embeddings are cached, so an option costs once; an image costs every time. In int8, the second MLP product (`fc2`) stays in float32: its input carries the large outliers typical of vision transformers, and per-token int8 moved the scores too much. Making it int8 without that loss, and spreading the products of a single image over several cores, are the next speed-ups.
+Text embeddings are cached, so an option costs once; an image costs every time. One image uses one core by default, leaving the others to simultaneous requests; `vision.WithThreads(2)` (or `indecis-serve -threads 2`) spreads it. On a hybrid processor, go no further than the performance cores: on all fourteen cores, an image takes 160 ms, the efficiency cores holding the others up.
+
+**int8 and massive activations.** In a few layers, some input channels of the second MLP product (`fc2`) reach a hundred times the others: up to 1,479 against a median of 3.4 in layer 9. Plain per-token int8 flattens the rest of each row. `linalg.MatMul8Outliers` finds those channels on each call, takes them out of the int8 product and multiplies them in float32 (the LLM.int8() decomposition), with no calibration. On 300 Imagenette images, the logits move by 0.21 on average from float32 (0.17 with `fc2` kept in float32), for the same accuracy, 99.7%, and 37% less time.
 
 ## Parity with the reference implementation
 
