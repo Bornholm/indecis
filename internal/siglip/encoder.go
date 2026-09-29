@@ -3,6 +3,7 @@ package siglip
 import (
 	"fmt"
 	"math"
+	"runtime"
 	"sync"
 
 	"github.com/bornholm/indecis/internal/linalg"
@@ -136,6 +137,10 @@ func loadEncoder(cfg Config, w weights, prefix string, int8 bool) (*encoder, err
 		if l.fc2, err = loadLinear(w, p+"mlp.fc2", M, H, int8); err != nil {
 			return nil, err
 		}
+		// Each layer's weights are decoded in float32, then packed: the
+		// float32 copies are garbage at once. Collecting after each layer
+		// keeps the startup peak near the final size, for a few ms.
+		runtime.GC()
 	}
 	return e, nil
 }
