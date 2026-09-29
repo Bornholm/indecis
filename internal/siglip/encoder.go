@@ -14,6 +14,9 @@ type linear struct {
 	bias    []float32
 	p       *linalg.PackedB
 	p8      *linalg.PackedB8
+	// outliers takes massive input channels out of the int8 product (see
+	// linalg.MatMul8Outliers).
+	outliers bool
 }
 
 func newLinear(w, b []float32, in, out int, int8 bool) *linear {
@@ -28,7 +31,9 @@ func newLinear(w, b []float32, in, out int, int8 bool) *linear {
 
 // apply writes dst = x·Wᵀ + b for rows rows of x.
 func (l *linear) apply(dst, x []float32, rows int) {
-	if l.p8 != nil {
+	if l.p8 != nil && l.outliers {
+		linalg.MatMul8Outliers(dst[:rows*l.out], x[:rows*l.in], l.p8, rows, false, outlierRatio)
+	} else if l.p8 != nil {
 		linalg.MatMul8(dst[:rows*l.out], x[:rows*l.in], l.p8, rows, false)
 	} else {
 		linalg.MatMulPacked(dst[:rows*l.out], x[:rows*l.in], l.p, rows, false)
@@ -93,6 +98,7 @@ func loadEncoder(cfg Config, w weights, prefix string, int8 bool) (*encoder, err
 		p := fmt.Sprintf("%s.layers.%d.", prefix, i)
 		l := &e.layers[i]
 		var err error
+		defer func() { l.fc2.outliers = true }()
 		if l.ln1, err = loadNorm(w, p+"layer_norm1", H); err != nil {
 			return nil, err
 		}
@@ -119,15 +125,21 @@ func loadEncoder(cfg Config, w weights, prefix string, int8 bool) (*encoder, err
 		if l.fc1, err = loadLinear(w, p+"mlp.fc1", H, M, int8); err != nil {
 			return nil, err
 		}
-		// fc2 reads the GELU output, whose outliers (a known trait of vision
-		// transformers) per-token int8 flattens: alone, it moved the logits
-		// by up to 1.5 on the fixtures. It stays in float32.
-		if l.fc2, err = loadLinear(w, p+"mlp.fc2", M, H, false); err != nil {
+		// fc2 reads the GELU output, where a few channels reach a hundred
+		// times the others (the "massive activations" of vision
+		// transformers). Plain per-token int8 flattens the rest of the row:
+		// alone, it moved the logits by up to 1.5 on the fixtures. Those
+		// channels are split off and computed in float32.
+		if l.fc2, err = loadLinear(w, p+"mlp.fc2", M, H, int8); err != nil {
 			return nil, err
 		}
 	}
 	return e, nil
 }
+
+// outlierRatio: an input channel of fc2 is split off when its maximum
+// exceeds this many times the mean of the channel maxima.
+const outlierRatio = 6
 
 // buffers holds the working memory of one forward pass over T rows.
 type buffers struct {
