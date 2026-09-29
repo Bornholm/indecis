@@ -2,6 +2,9 @@ package main
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -13,6 +16,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,7 +34,7 @@ func runTrainVision(args []string) error {
 	fs := flag.NewFlagSet("train-vision", flag.ExitOnError)
 	backbone := fs.String("backbone", "", "SigLIP encoder (config.json, model.safetensors, tokenizer.json)")
 	schemaPath := fs.String("schema", "", "schema: JSON list of questions (see the guide)")
-	trainPath := fs.String("train", "", `training examples: JSONL of {"image": path, "labels": {...}}, paths relative to the file`)
+	trainPath := fs.String("train", "", `training examples: JSONL of {"image": path, "labels": {...}}, paths relative to the file (comma-separated files)`)
 	testPath := fs.String("test", "", "test examples (default: 10% of training)")
 	out := fs.String("out", "", "directory of the trained model")
 	def := vision.DefaultHeadTrainOptions()
@@ -41,6 +45,7 @@ func runTrainVision(args []string) error {
 	seed := fs.Int64("seed", def.Seed, "seed")
 	workers := fs.Int("workers", 2, "images encoded at the same time (at most the performance cores)")
 	int8 := fs.Bool("int8", true, "int8 encoder, as in serving")
+	cacheDir := fs.String("cache", "", "directory where the patch features of each image are kept, to train again without encoding")
 	fs.Parse(args)
 	if err := required(fs, "backbone", "schema", "train", "out"); err != nil {
 		return err
@@ -73,11 +78,12 @@ func runTrainVision(args []string) error {
 		train, test = train[cut:], train[:cut]
 	}
 	start := time.Now()
-	trainH, err := encodeImages(m, train, *workers)
+	enc := encoder{m: m, cache: *cacheDir, key: fmt.Sprintf("%s|int8=%v", filepath.Clean(*backbone), *int8)}
+	trainH, err := enc.images(train, *workers)
 	if err != nil {
 		return err
 	}
-	testH, err := encodeImages(m, test, *workers)
+	testH, err := enc.images(test, *workers)
 	if err != nil {
 		return err
 	}
@@ -109,7 +115,19 @@ func runTrainVision(args []string) error {
 	return nil
 }
 
-func readImageExamples(path string) ([]imageExample, error) {
+func readImageExamples(paths string) ([]imageExample, error) {
+	var out []imageExample
+	for _, path := range strings.Split(paths, ",") {
+		ex, err := readImageFile(path)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, ex...)
+	}
+	return out, nil
+}
+
+func readImageFile(path string) ([]imageExample, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -135,9 +153,36 @@ func readImageExamples(path string) ([]imageExample, error) {
 	return out, sc.Err()
 }
 
-// encodeImages computes the patch features of each image, workers at a
-// time; the order of the examples is kept.
-func encodeImages(m *vision.Model, examples []imageExample, workers int) ([]vision.HeadExample, error) {
+// encoder computes patch features, reading and writing them in cache if
+// set: one file per image, named after the image (path, size, date) and
+// the encoder.
+type encoder struct {
+	m     *vision.Model
+	cache string
+	key   string
+}
+
+func (e encoder) cachePath(path string) (string, bool) {
+	if e.cache == "" {
+		return "", false
+	}
+	st, err := os.Stat(path)
+	if err != nil {
+		return "", false
+	}
+	abs, _ := filepath.Abs(path)
+	h := sha256.Sum256([]byte(fmt.Sprintf("%s|%d|%d|%s", abs, st.Size(), st.ModTime().UnixNano(), e.key)))
+	return filepath.Join(e.cache, hex.EncodeToString(h[:16])+".bf16"), true
+}
+
+// images computes the patch features of each image, workers at a time;
+// the order of the examples is kept.
+func (e encoder) images(examples []imageExample, workers int) ([]vision.HeadExample, error) {
+	if e.cache != "" {
+		if err := os.MkdirAll(e.cache, 0o755); err != nil {
+			return nil, err
+		}
+	}
 	out := make([]vision.HeadExample, len(examples))
 	errs := make([]error, len(examples))
 	var wg sync.WaitGroup
@@ -147,7 +192,7 @@ func encodeImages(m *vision.Model, examples []imageExample, workers int) ([]visi
 		go func() {
 			defer wg.Done()
 			for i := range next {
-				out[i], errs[i] = encodeImage(m, examples[i])
+				out[i], errs[i] = e.image(examples[i])
 			}
 		}()
 	}
@@ -165,6 +210,35 @@ func encodeImages(m *vision.Model, examples []imageExample, workers int) ([]visi
 		}
 	}
 	return out, nil
+}
+
+func (e encoder) image(ex imageExample) (vision.HeadExample, error) {
+	cp, cached := e.cachePath(ex.Image)
+	if cached {
+		if b, err := os.ReadFile(cp); err == nil {
+			T, H := e.m.PatchShape()
+			if len(b) == 2*T*H {
+				p := make([]uint16, T*H)
+				for i := range p {
+					p[i] = binary.LittleEndian.Uint16(b[2*i:])
+				}
+				return vision.HeadExample{Patches: p, Labels: ex.Labels}, nil
+			}
+		}
+	}
+	h, err := encodeImage(e.m, ex)
+	if err == nil && cached {
+		b := make([]byte, 2*len(h.Patches))
+		for i, v := range h.Patches {
+			binary.LittleEndian.PutUint16(b[2*i:], v)
+		}
+		// Written aside then renamed: a crash leaves no half file.
+		tmp := cp + ".tmp"
+		if werr := os.WriteFile(tmp, b, 0o644); werr == nil {
+			os.Rename(tmp, cp)
+		}
+	}
+	return h, err
 }
 
 func encodeImage(m *vision.Model, e imageExample) (vision.HeadExample, error) {
