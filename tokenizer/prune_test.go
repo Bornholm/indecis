@@ -16,7 +16,7 @@ func TestPrune(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fx := readFixtures(t)
+	fx := readFixtures(t, "../testdata/bekko/tokenizer_cases.jsonl")
 	var corpus, other []string
 	for i, f := range fx {
 		if f.Pair {

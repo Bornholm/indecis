@@ -48,9 +48,9 @@ type fixture struct {
 	IDs     []int32 `json:"ids"`
 }
 
-func readFixtures(t *testing.T) []fixture {
+func readFixtures(t *testing.T, path string) []fixture {
 	t.Helper()
-	f, err := os.Open("../testdata/bekko/tokenizer_cases.jsonl")
+	f, err := os.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,9 +71,13 @@ func readFixtures(t *testing.T) []fixture {
 // Parity with the Hugging Face tokenizers library, fixtures generated
 // by tools/oracle/tokenizer_fixtures.py.
 func TestParityWithReference(t *testing.T) {
-	tok := bekko(t)
+	checkParity(t, bekko(t), "../testdata/bekko/tokenizer_cases.jsonl")
+}
+
+func checkParity(t *testing.T, tok *Tokenizer, fixtures string) {
+	t.Helper()
 	fails := 0
-	for _, fx := range readFixtures(t) {
+	for _, fx := range readFixtures(t, fixtures) {
 		got := tok.Encode(fx.Text)
 		if fx.Pair {
 			got = tok.EncodePair(fx.Context, fx.Text, 0)
