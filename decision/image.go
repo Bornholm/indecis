@@ -54,19 +54,35 @@ func decideImage(ctx context.Context, name string, v *vision.Model, state any, q
 	if err != nil {
 		return nil, err
 	}
-	ids := make([]string, 0, len(questions))
+	// A question named after one of the head's is learned; any other is
+	// open. Both are answered with one pass of the encoder.
+	schema := map[string]indecis.Question{}
+	for _, q := range v.Schema() {
+		schema[q.Name] = q
+	}
+	var learned []string
 	open := make([]indecis.OpenQuestion, 0, len(questions))
 	for id, q := range questions {
-		ids = append(ids, id)
+		if _, ok := schema[id]; ok {
+			if err := compatible(id, q, schema); err != nil {
+				return nil, err
+			}
+			learned = append(learned, id)
+			continue
+		}
 		open = append(open, toOpen(id, q))
 	}
-	ds, err := v.DecideOpen(ctx, open, img)
+	d, err := v.Decide(ctx, img, learned, open)
 	if err != nil {
 		return nil, err
 	}
-	answers := make(map[string]llm.Answer, len(ids))
-	for _, id := range ids {
-		answers[id] = toOpenAnswer(questions[id], ds[0][id])
+	answers := make(map[string]llm.Answer, len(questions))
+	for id, q := range questions {
+		if sq, ok := schema[id]; ok {
+			answers[id] = toAnswer(q, sq, d[id])
+		} else {
+			answers[id] = toOpenAnswer(q, d[id])
+		}
 	}
 	return llm.NewDecisionResponse(name, answers, llm.NewDecisionUsage(0, 0, 0)), nil
 }

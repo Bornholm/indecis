@@ -172,7 +172,11 @@ func (s *Server) models(w http.ResponseWriter, r *http.Request) {
 	for _, n := range s.names() {
 		c := s.Models[n]
 		if v, _ := c.visionModel(c.defaultDir); v != nil {
-			list = append(list, model{ID: n, Default: n == s.Default, Input: "image", Questions: []string{}})
+			qs := []string{}
+			for _, q := range v.Schema() {
+				qs = append(qs, fmt.Sprintf("%s (%s)", q.Name, q.Kind))
+			}
+			list = append(list, model{ID: n, Default: n == s.Default, Input: "image", Questions: qs})
 			continue
 		}
 		m, _ := c.model(c.defaultDir)
