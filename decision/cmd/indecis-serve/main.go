@@ -12,7 +12,10 @@
 //
 // -model also accepts a raw backbone (config.json, model.safetensors,
 // tokenizer.json, without indecis.json), such as bekko: it then answers
-// only open questions, without training.
+// only open questions, without training. A SigLIP checkpoint (config.json
+// of type "siglip") is served as an image model: the state is an image,
+// "data:image/png;base64,..." or {"image": "..."}, and every question is
+// open.
 //
 // Clients: genai (openrouter provider with GENAI_…_BASE_URL=http://…/api/v1,
 // or typesafe with http://…/v1), the TypeSafe SDK, curl.
@@ -32,6 +35,7 @@ import (
 
 	"github.com/bornholm/indecis"
 	"github.com/bornholm/indecis/decision"
+	"github.com/bornholm/indecis/vision"
 )
 
 type modelFlags []string
@@ -75,6 +79,24 @@ func main() {
 		name, dir, ok := strings.Cut(spec, "=")
 		if !ok {
 			name, dir = filepath.Base(spec), spec
+		}
+		if vision.IsModel(dir) {
+			var vopts []vision.Option
+			if *int8 {
+				vopts = append(vopts, vision.WithInt8())
+			}
+			v, err := vision.Load(dir, vopts...)
+			if err != nil {
+				log.Error("loading", "model", dir, "error", err)
+				os.Exit(1)
+			}
+			debug.FreeOSMemory()
+			s.Models[name] = decision.FromVision(name, v)
+			if s.Default == "" {
+				s.Default = name
+			}
+			log.Info("image model loaded", "name", name, "dir", dir, "memory", memory())
+			continue
 		}
 		m, err := indecis.Open(dir, opts...)
 		if err != nil {

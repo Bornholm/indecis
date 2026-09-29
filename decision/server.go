@@ -165,18 +165,24 @@ func (s *Server) models(w http.ResponseWriter, r *http.Request) {
 	type model struct {
 		ID        string   `json:"id"`
 		Default   bool     `json:"default,omitempty"`
+		Input     string   `json:"input"` // "text" or "image"
 		Questions []string `json:"learned_questions"`
 	}
 	var list []model
 	for _, n := range s.names() {
-		m, _ := s.Models[n].model(s.Models[n].defaultDir)
+		c := s.Models[n]
+		if v, _ := c.visionModel(c.defaultDir); v != nil {
+			list = append(list, model{ID: n, Default: n == s.Default, Input: "image", Questions: []string{}})
+			continue
+		}
+		m, _ := c.model(c.defaultDir)
 		var qs []string
 		if m != nil {
 			for _, q := range m.Schema() {
 				qs = append(qs, fmt.Sprintf("%s (%s)", q.Name, q.Kind))
 			}
 		}
-		list = append(list, model{ID: n, Default: n == s.Default, Questions: qs})
+		list = append(list, model{ID: n, Default: n == s.Default, Input: "text", Questions: qs})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": list})
 }

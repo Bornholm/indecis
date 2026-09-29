@@ -38,6 +38,7 @@ import (
 	"github.com/bornholm/genai/llm/provider"
 
 	"github.com/bornholm/indecis"
+	"github.com/bornholm/indecis/vision"
 )
 
 // Name is the provider name in genai's configuration.
@@ -63,6 +64,7 @@ type Client struct {
 	defaultDir string
 	mu         sync.Mutex
 	models     map[string]*indecis.Model
+	visions    map[string]*vision.Model // image models (SigLIP), see image.go
 }
 
 // New loads the model from dir, which serves when the call does not
@@ -105,6 +107,11 @@ func (c *Client) Decision(ctx context.Context, state any, questions llm.Question
 	dir := c.defaultDir
 	if opts := llm.NewDecisionOptions(funcs...); opts.Model != "" {
 		dir = opts.Model
+	}
+	if v, err := c.visionModel(dir); err != nil {
+		return nil, err
+	} else if v != nil {
+		return decideImage(ctx, filepath.Base(dir), v, state, questions)
 	}
 	m, err := c.model(dir)
 	if err != nil {

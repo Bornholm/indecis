@@ -285,3 +285,10 @@ func softmax(z []float64) []float64 {
 	}
 	return p
 }
+
+// IsModel reports whether dir holds a model this package reads (its
+// config.json declares the "siglip" model type).
+func IsModel(dir string) bool {
+	_, err := siglip.ReadConfig(dir)
+	return err == nil
+}
