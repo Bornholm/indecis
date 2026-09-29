@@ -20,7 +20,7 @@ func TestVectorOps(t *testing.T) {
 			want = max(want, float32(math.Abs(float64(v))))
 		}
 		if got := AbsMax(x); got != want {
-			t.Fatalf("n=%d AbsMax %v, attendu %v", n, got, want)
+			t.Fatalf("n=%d AbsMax %v, want %v", n, got, want)
 		}
 
 		q := make([]uint8, n)
@@ -28,7 +28,7 @@ func TestVectorOps(t *testing.T) {
 		QuantizeRow(q, x, inv)
 		for i, v := range x {
 			if w := uint8(int32(math.RoundToEven(float64(v*inv))) + 128); q[i] != w {
-				t.Fatalf("n=%d QuantizeRow[%d] %d, attendu %d", n, i, q[i], w)
+				t.Fatalf("n=%d QuantizeRow[%d] %d, want %d", n, i, q[i], w)
 			}
 		}
 
@@ -37,7 +37,24 @@ func TestVectorOps(t *testing.T) {
 		for i := range o {
 			g := 0.5 * float64(x[i]) * (1 + math.Erf(float64(x[i])/math.Sqrt2)) * float64(b[i])
 			if math.Abs(float64(o[i])-g) > 1e-5*(1+math.Abs(g)) {
-				t.Fatalf("n=%d GeluMul[%d] %v, attendu %v", n, i, o[i], g)
+				t.Fatalf("n=%d GeluMul[%d] %v, want %v", n, i, o[i], g)
+			}
+		}
+
+		GeluTanh(o, x)
+		for i := range o {
+			xv := float64(x[i])
+			g := 0.5 * xv * (1 + math.Tanh(math.Sqrt(2/math.Pi)*(xv+0.044715*xv*xv*xv)))
+			if math.Abs(float64(o[i])-g) > 2e-6*(1+math.Abs(g)) {
+				t.Fatalf("n=%d GeluTanh[%d] %v, want %v", n, i, o[i], g)
+			}
+		}
+
+		s := append([]float32(nil), x...)
+		AddTo(s, b)
+		for i := range s {
+			if s[i] != x[i]+b[i] {
+				t.Fatalf("n=%d AddTo[%d] %v, want %v", n, i, s[i], x[i]+b[i])
 			}
 		}
 
@@ -53,11 +70,11 @@ func TestVectorOps(t *testing.T) {
 			}
 			ws += w
 			if math.Abs(float64(e[i])-w) > 1e-6*(1+w) {
-				t.Fatalf("n=%d ExpShift[%d] %v, attendu %v", n, i, e[i], w)
+				t.Fatalf("n=%d ExpShift[%d] %v, want %v", n, i, e[i], w)
 			}
 		}
 		if math.Abs(float64(sum)-ws) > 1e-5*ws+1e-7 {
-			t.Fatalf("n=%d somme %v, attendu %v", n, sum, ws)
+			t.Fatalf("n=%d sum %v, want %v", n, sum, ws)
 		}
 
 		gamma := b
@@ -74,7 +91,7 @@ func TestVectorOps(t *testing.T) {
 		for i := range o {
 			w := (float64(x[i]) - mean) * rstd * float64(gamma[i])
 			if math.Abs(float64(o[i])-w) > 1e-5*(1+math.Abs(w)) {
-				t.Fatalf("n=%d LayerNormRow[%d] %v, attendu %v", n, i, o[i], w)
+				t.Fatalf("n=%d LayerNormRow[%d] %v, want %v", n, i, o[i], w)
 			}
 		}
 
@@ -88,7 +105,7 @@ func TestVectorOps(t *testing.T) {
 		for i := range o {
 			w := 0.01 * float64(b[i]) * (float64(acc[i]) - float64(zc[i]))
 			if math.Abs(float64(o[i])-w) > 1e-5*(1+math.Abs(w)) {
-				t.Fatalf("n=%d Dequantize[%d] %v, attendu %v", n, i, o[i], w)
+				t.Fatalf("n=%d Dequantize[%d] %v, want %v", n, i, o[i], w)
 			}
 		}
 	}

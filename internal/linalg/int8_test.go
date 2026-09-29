@@ -88,7 +88,7 @@ func BenchmarkMatMul8(b *testing.B) {
 func TestRoundHalfEven(t *testing.T) {
 	for _, v := range []float32{0, 0.5, 1.5, 2.5, -0.5, -1.5, 126.7, -127, 3.49999, -3.5000002} {
 		if got, want := roundHalfEven(v), float32(math.RoundToEven(float64(v))); got != want {
-			t.Errorf("roundHalfEven(%v) = %v, attendu %v", v, got, want)
+			t.Errorf("roundHalfEven(%v) = %v, want %v", v, got, want)
 		}
 	}
 }

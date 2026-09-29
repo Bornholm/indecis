@@ -123,6 +123,60 @@ func GeluMul(o, a, b []float32) {
 	}
 }
 
+// GeluTanh writes o[i] = gelu(a[i]) with the tanh approximation, computed
+// as a[i] * sigmoid(2u), u = sqrt(2/pi) * (a[i] + 0.044715 a[i]^3).
+//
+//go:noinline
+func GeluTanh(o, a []float32) {
+	one := simd.BroadcastFloat32s(1)
+	k := simd.BroadcastFloat32s(-2 * 0.7978845608028654)
+	c := simd.BroadcastFloat32s(0.044715)
+	floor, ceil := simd.BroadcastFloat32s(-87.3), simd.BroadcastFloat32s(88.7)
+	log2e := simd.BroadcastFloat32s(1.44269504088896341)
+	magic := simd.BroadcastFloat32s(12582912)
+	ln2hi, ln2lo := simd.BroadcastFloat32s(0.693359375), simd.BroadcastFloat32s(-2.12194440e-4)
+	c5, c4 := simd.BroadcastFloat32s(1.9875691500e-4), simd.BroadcastFloat32s(1.3981999507e-3)
+	c3, c2 := simd.BroadcastFloat32s(8.3334519073e-3), simd.BroadcastFloat32s(4.1665795894e-2)
+	c1, c0 := simd.BroadcastFloat32s(1.6666665459e-1), simd.BroadcastFloat32s(5.0000001201e-1)
+	bias := simd.BroadcastInt32s(127)
+	V := one.Len()
+	i := 0
+	for ; i+V <= len(o); i += V {
+		x := simd.LoadFloat32s(a[i:])
+		// v = -2u, clamped where exp stays finite: beyond, gelu is x or 0.
+		v := x.Mul(x).MulAdd(c, one).Mul(x).Mul(k).Max(floor).Min(ceil)
+		n := v.MulAdd(log2e, magic).Sub(magic)
+		r := n.MulAdd(ln2hi.Neg(), v)
+		r = n.MulAdd(ln2lo.Neg(), r)
+		p := r.MulAdd(c5, c4)
+		p = r.MulAdd(p, c3)
+		p = r.MulAdd(p, c2)
+		p = r.MulAdd(p, c1)
+		p = r.MulAdd(p, c0)
+		y := p.Mul(r).MulAdd(r, r).Add(one)
+		pow := n.ConvertToInt32().Add(bias).ShiftAllLeft(23).ToBits().BitsToFloat32()
+		x.Div(one.Add(y.Mul(pow))).Store(o[i:])
+	}
+	for ; i < len(o); i++ {
+		o[i] = geluTanhScalar(a[i])
+	}
+}
+
+// AddTo adds b to o, element by element.
+//
+//go:noinline
+func AddTo(o, b []float32) {
+	var zero simd.Float32s
+	V := zero.Len()
+	i := 0
+	for ; i+V <= len(o); i += V {
+		simd.LoadFloat32s(o[i:]).Add(simd.LoadFloat32s(b[i:])).Store(o[i:])
+	}
+	for ; i < len(o); i++ {
+		o[i] += b[i]
+	}
+}
+
 // ExpShift writes x[i] = exp(x[i] - m) (0 below -87.3, for the -Inf of
 // masked positions) and returns their sum.
 //
