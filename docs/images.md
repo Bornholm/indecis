@@ -32,6 +32,19 @@ a.Choice // "truck"
 
 Describe each option as a caption: "a photo of a garbage truck" rather than "truck". The text encoder reads the description, or the name when there is none; the question's instructions are not read for a choice.
 
+## Trained questions
+
+When describing the options is not enough, or a question depends on where something is in the image, train a head on examples. The encoder stays frozen; the head reads the features of each of the 64 patches (32×32 pixels) at its position, and their maxima over the image for questions about anywhere.
+
+```bash
+bin/indecis train-vision -backbone $M -schema schema.json \
+    -train images.jsonl -test test.jsonl -out model
+```
+
+Each line of the JSONL is `{"image": "frames/000123.png", "labels": {"fire": true, "turn": "left"}}`, with paths relative to the file, and the schema is the one of a text model (see [concepts.md](concepts.md)). Encoding takes about 65 ms per image and core (`-workers`); training the head, a few seconds to a minute. The output directory holds `vision.json` and a head of about 100 KB; `vision.Load` and `indecis-serve` read it like an encoder, and answer its questions with the head, any other in open mode, with one pass of the encoder.
+
+On Imagenette (1,000 training images, 300 test), the head gets 99.3%, against 99.0% zero-shot. In [indecis-vizdoom](../../indecis-vizdoom), a head trained on 6,671 Doom frames plays from pixels alone at 92% of the scripted policy's score, deciding in 74 ms.
+
 ## Behind the decision API
 
 `indecis-serve` recognizes a SigLIP model by its `config.json` and serves it as an image model. The state is the image, as a data URL or as `{"image": ...}` (PNG, JPEG or GIF, 64 megapixels at most); every question is open.
