@@ -55,6 +55,7 @@ func main() {
 	batching := flag.Bool("batching", false, "group the computation of simultaneous requests (a few % gain on short requests, more memory; also raise -max-concurrent)")
 	maxLen := flag.Int("max-len", 0, "tokens read at most per text (0: the model's value, 256 generally); quadratic cost beyond 1024")
 	memLimit := flag.Int("memory-limit", 0, "soft heap memory limit, in MiB (0: none); the garbage collector works harder as it approaches")
+	headroom := flag.Int("memory-headroom", 64, "garbage allowed above the loaded models before collecting, in MiB (0: Go's default, as much as the live heap)")
 	flag.Parse()
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	if len(models) == 0 {
@@ -120,6 +121,22 @@ func main() {
 			s.Default = name
 		}
 		log.Info("model loaded", "name", name, "dir", dir, "paired", m.Paired(), "memory", memory())
+	}
+	// By default Go lets the heap grow to twice its live part before
+	// collecting: here the live part is mostly model weights, so hundreds
+	// of MB of garbage would pile up between collections. The collection
+	// threshold is set to about headroom above the loaded models; it stays
+	// proportional, so a model part loaded later (SigLIP's text tower)
+	// cannot make the collector run without end. The weights hold no
+	// pointers: the extra collections cost little.
+	if *headroom > 0 {
+		var ms runtime.MemStats
+		runtime.ReadMemStats(&ms)
+		pct := max(10, int(int64(*headroom)<<20*100/max(int64(ms.HeapAlloc), 1)))
+		if pct < 100 {
+			debug.SetGCPercent(pct)
+			log.Info("garbage collection", "GOGC", pct, "live MiB", ms.HeapAlloc>>20)
+		}
 	}
 	log.Info("listening", "addr", *addr, "endpoints", "POST /api/alpha/decisions, POST /v1/systemone, GET /api/alpha/models")
 	if err := http.ListenAndServe(*addr, s.Handler()); err != nil {

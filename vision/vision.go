@@ -31,11 +31,19 @@ import (
 // Model is a SigLIP model ready to decide.
 type Model struct {
 	m    *siglip.Model
-	tok  *tokenizer.Tokenizer
 	head *Head // learned questions, nil for a bare encoder
+
+	// The tokenizer and the text tower load at the first text: a model
+	// whose questions are all learned never needs them.
+	tokPath string
+	tokOnce sync.Once
+	tok     *tokenizer.Tokenizer
+	tokErr  error
 
 	mu    sync.Mutex
 	cache map[string][]float32 // text embeddings: options recur from call to call
+
+	pixels sync.Pool // *[]float32: normalized pixels, reused from image to image
 }
 
 // maxCache bounds the text embedding cache; beyond, it starts over.
@@ -82,14 +90,11 @@ func Load(dir string, opts ...Option) (*Model, error) {
 		return nil, err
 	}
 	m.SetThreads(c.threads)
-	tok, err := tokenizer.LoadShared(filepath.Join(dir, "tokenizer.json"))
-	if err != nil {
-		return nil, err
-	}
+
 	if head != nil && (head.T != m.Cfg.Patches() || head.H != m.Cfg.Hidden) {
 		return nil, fmt.Errorf("vision: the head expects %d×%d patch features, the encoder gives %d×%d", head.T, head.H, m.Cfg.Patches(), m.Cfg.Hidden)
 	}
-	return &Model{m: m, tok: tok, head: head, cache: map[string][]float32{}}, nil
+	return &Model{m: m, tokPath: filepath.Join(dir, "tokenizer.json"), head: head, cache: map[string][]float32{}}, nil
 }
 
 // Schema returns the learned questions, nil for a bare encoder.
@@ -109,11 +114,12 @@ func (m *Model) Patches(img image.Image) ([]float32, error) {
 // PatchesAt returns the patch features after layer layers of the encoder
 // (0: the final ones), computing no further.
 func (m *Model) PatchesAt(img image.Image, layer int) ([]float32, error) {
-	px, err := m.m.Cfg.Preprocess(img)
+	px, err := m.preprocess(img)
 	if err != nil {
 		return nil, err
 	}
 	p, _, err := m.m.Vision.Forward(px, layer, false)
+	m.release(px)
 	return p, err
 }
 
@@ -127,7 +133,7 @@ func (m *Model) Decide(ctx context.Context, img image.Image, learned []string, o
 	if len(learned) > 0 && m.head == nil {
 		return nil, fmt.Errorf("vision: this model has no learned questions")
 	}
-	px, err := m.m.Cfg.Preprocess(img)
+	px, err := m.preprocess(img)
 	if err != nil {
 		return nil, err
 	}
@@ -137,6 +143,7 @@ func (m *Model) Decide(ctx context.Context, img image.Image, learned []string, o
 	}
 	// Without open questions, the encoder stops at the head's layer.
 	patches, pooled, err := m.m.Vision.Forward(px, layer, len(open) > 0)
+	m.release(px)
 	if err != nil {
 		return nil, err
 	}
@@ -171,11 +178,12 @@ func (m *Model) Decide(ctx context.Context, img image.Image, learned []string, o
 
 // EmbedImage returns the normalized embedding of an image.
 func (m *Model) EmbedImage(img image.Image) ([]float32, error) {
-	px, err := m.m.Cfg.Preprocess(img)
+	px, err := m.preprocess(img)
 	if err != nil {
 		return nil, err
 	}
 	e, err := m.m.Vision.Embed(px)
+	m.release(px)
 	if err != nil {
 		return nil, err
 	}
@@ -191,8 +199,16 @@ func (m *Model) EmbedText(text string) ([]float32, error) {
 	if ok {
 		return e, nil
 	}
-	ids := m.m.Text.Pad(m.tok.Encode(text), m.tok.EosID(), m.tok.PadID())
-	e, err := m.m.Text.Embed(ids)
+	m.tokOnce.Do(func() { m.tok, m.tokErr = tokenizer.LoadShared(m.tokPath) })
+	if m.tokErr != nil {
+		return nil, m.tokErr
+	}
+	tt, err := m.m.Text()
+	if err != nil {
+		return nil, err
+	}
+	ids := tt.Pad(m.tok.Encode(text), m.tok.EosID(), m.tok.PadID())
+	e, err = tt.Embed(ids)
 	if err != nil {
 		return nil, err
 	}
@@ -393,4 +409,20 @@ func IsModel(dir string) bool {
 	}
 	_, err := siglip.ReadConfig(dir)
 	return err == nil
+}
+
+// preprocess returns the normalized pixels of img in a buffer from the
+// pool; release gives it back once the encoder has read it.
+func (m *Model) preprocess(img image.Image) ([]float32, error) {
+	var dst []float32
+	if p, ok := m.pixels.Get().(*[]float32); ok {
+		dst = *p
+	}
+	return m.m.Cfg.PreprocessInto(dst, img)
+}
+
+func (m *Model) release(px []float32) {
+	if px != nil {
+		m.pixels.Put(&px)
+	}
 }

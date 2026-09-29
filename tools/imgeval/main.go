@@ -53,7 +53,11 @@ func main() {
 		log.Fatal(err)
 	}
 	embedText := func(s string) []float32 {
-		e, err := m.Text.Embed(m.Text.Pad(tok.Encode(s), tok.EosID(), tok.PadID()))
+		tt, err := m.Text()
+		if err != nil {
+			log.Fatal(err)
+		}
+		e, err := tt.Embed(tt.Pad(tok.Encode(s), tok.EosID(), tok.PadID()))
 		if err != nil {
 			log.Fatal(err)
 		}

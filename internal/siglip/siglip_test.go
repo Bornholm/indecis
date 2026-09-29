@@ -121,7 +121,7 @@ func TestParity(t *testing.T) {
 	}
 	txts := make([][]float32, len(c.Texts))
 	for i, tx := range c.Texts {
-		e, err := m.Text.Embed(tx.IDs)
+		e, err := mustText(t, m).Embed(tx.IDs)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -149,7 +149,7 @@ func TestInt8(t *testing.T) {
 	c := readCases(t)
 	txts := make([][]float32, len(c.Texts))
 	for j, tx := range c.Texts {
-		e, err := m.Text.Embed(tx.IDs)
+		e, err := mustText(t, m).Embed(tx.IDs)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -192,10 +192,11 @@ func benchVision(b *testing.B, int8 bool) {
 
 func benchText(b *testing.B, int8 bool) {
 	m := load(b, int8)
+	tt := mustText(b, m)
 	ids := make([]int32, m.Cfg.TextLen)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if _, err := m.Text.Embed(ids); err != nil {
+		if _, err := tt.Embed(ids); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -269,4 +270,13 @@ func TestForwardLayers(t *testing.T) {
 			t.Fatalf("pooled embedding differs at %d", i)
 		}
 	}
+}
+
+func mustText(t testing.TB, m *Model) *Text {
+	t.Helper()
+	tt, err := m.Text()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tt
 }

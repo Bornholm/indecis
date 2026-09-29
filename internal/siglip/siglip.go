@@ -17,6 +17,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/bornholm/indecis/internal/linalg"
 	"github.com/bornholm/indecis/internal/safetensors"
@@ -102,13 +103,32 @@ func ReadConfig(dir string) (Config, error) {
 }
 
 // Model is a SigLIP checkpoint: both towers and the logit scale and bias.
+// The text tower is loaded on first use (Text): a model whose questions
+// are all learned by a head never needs it.
 type Model struct {
 	Cfg        Config
 	Vision     *Vision
-	Text       *Text
 	LogitScale float32 // log of the temperature
 	LogitBias  float32
 	file       *safetensors.File
+	int8       bool
+	workers    int
+
+	textOnce sync.Once
+	text     *Text
+	textErr  error
+}
+
+// Text returns the text tower, loading it the first time (a few seconds,
+// about 85 MB in int8).
+func (m *Model) Text() (*Text, error) {
+	m.textOnce.Do(func() {
+		m.text, m.textErr = loadText(m.Cfg, weights{f: m.file}, m.int8)
+		if m.text != nil {
+			m.text.enc.workers = m.workers
+		}
+	})
+	return m.text, m.textErr
 }
 
 // Load reads a model directory (config.json, model.safetensors). int8
@@ -123,11 +143,8 @@ func Load(dir string, int8 bool) (*Model, error) {
 		return nil, err
 	}
 	w := weights{f: f}
-	m := &Model{Cfg: cfg, file: f}
+	m := &Model{Cfg: cfg, file: f, int8: int8, workers: 1}
 	if m.Vision, err = loadVision(cfg, w, int8); err != nil {
-		return nil, err
-	}
-	if m.Text, err = loadText(cfg, w, int8); err != nil {
 		return nil, err
 	}
 	scale, err := w.get("logit_scale", 1)
@@ -146,12 +163,12 @@ func Load(dir string, int8 bool) (*Model, error) {
 // all). An image is 64 rows: on a hybrid processor, spreading it beyond
 // the performance cores slows it down (48 ms on two performance cores, 73
 // on one, 160 on all fourteen of a Core Ultra 7 265U). Not safe to call
-// during a computation.
+// during a computation; the text tower takes it when it loads.
 func (m *Model) SetThreads(n int) {
 	if n <= 0 {
 		n = linalg.Workers()
 	}
-	m.Vision.enc.workers, m.Text.enc.workers = n, n
+	m.workers, m.Vision.enc.workers = n, n
 }
 
 // Logit turns the cosine between an image and a text embedding into the
