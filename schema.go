@@ -120,6 +120,11 @@ func (s Schema) Index(name string) int {
 	return -1
 }
 
+// Target converts a dataset label into a training target: a probability
+// for Noul, a distribution for Choice, a level for Score. ok is false if
+// the label is absent. For heads trained outside this package (vision).
+func (q Question) Target(v any) (t []float64, ok bool, err error) { return q.target(v) }
+
 // target converts a dataset label into a training target: a probability
 // for Noul, a distribution for Choice, a level for Score. ok is false if
 // the label is absent.
