@@ -23,7 +23,8 @@ func Workers() int {
 }
 
 // Parallel splits [0, n) into slices of at least grain elements and calls
-// fn on each, in parallel. The slices are disjoint.
+// fn on each, in parallel. The slices are disjoint; fn may be called
+// several times by the same goroutine.
 func Parallel(n, grain int, fn func(lo, hi int)) {
 	ParallelN(Workers(), n, grain, fn)
 }
@@ -38,23 +39,35 @@ func ParallelN(limit, n, grain int, fn func(lo, hi int)) {
 	if grain < 1 {
 		grain = 1
 	}
-	chunks := min(workers, (n+grain-1)/grain)
-	if chunks <= 1 {
+	if workers == 1 || n <= grain {
 		fn(0, n)
 		return
 	}
-	step := (n + chunks - 1) / chunks
+	// About four slices per worker, taken as they come: on a hybrid
+	// processor, a slow core (E, LP-E) takes fewer slices instead of holding
+	// everyone up with an equal share. The slices are disjoint, so the
+	// result does not depend on who computes which.
+	step := max(grain, (n+4*workers-1)/(4*workers))
+	chunks := (n + step - 1) / step
+	workers = min(workers, chunks)
+	var next atomic.Int64
 	var wg sync.WaitGroup
-	for lo := 0; lo < n; lo += step {
-		wg.Add(1)
-		go parallelChunk(&wg, fn, lo, min(lo+step, n))
+	wg.Add(workers)
+	for w := 0; w < workers; w++ {
+		go parallelWorker(&wg, &next, fn, n, step)
 	}
 	wg.Wait()
 }
 
-func parallelChunk(wg *sync.WaitGroup, fn func(lo, hi int), lo, hi int) {
+func parallelWorker(wg *sync.WaitGroup, next *atomic.Int64, fn func(lo, hi int), n, step int) {
 	defer wg.Done()
-	fn(lo, hi)
+	for {
+		lo := int(next.Add(1)-1) * step
+		if lo >= n {
+			return
+		}
+		fn(lo, min(lo+step, n))
+	}
 }
 
 // Partials reduces [0, n) in fixed slices of grain elements: fn accumulates
