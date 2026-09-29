@@ -2,6 +2,7 @@ package siglip
 
 import (
 	"encoding/json"
+	"image/png"
 	"math"
 	"os"
 	"path/filepath"
@@ -203,3 +204,35 @@ func BenchmarkVisionFloat32(b *testing.B) { benchVision(b, false) }
 func BenchmarkVisionInt8(b *testing.B)    { benchVision(b, true) }
 func BenchmarkTextFloat32(b *testing.B)   { benchText(b, false) }
 func BenchmarkTextInt8(b *testing.B)      { benchText(b, true) }
+
+// Resize matches PIL's bilinear resize byte for byte: downscaling one
+// axis and upscaling the other (shapes, 320×240), upscaling both (noise,
+// 131×97).
+func TestResizeMatchesPIL(t *testing.T) {
+	for _, name := range []string{"shapes", "noise"} {
+		f, err := os.Open("../../testdata/siglip2/" + name + ".png")
+		if err != nil {
+			t.Fatal(err)
+		}
+		img, err := png.Decode(f)
+		f.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, err := os.ReadFile("../../testdata/siglip2/" + name + "_resized.u8")
+		if err != nil {
+			t.Fatal(err)
+		}
+		rgb, w, h := RGB(img)
+		got := Resize(rgb, w, h, 256, 256)
+		diff := 0
+		for i := range want {
+			if got[i] != want[i] {
+				diff++
+			}
+		}
+		if diff > 0 {
+			t.Errorf("%s: %d of %d bytes differ from PIL", name, diff, len(want))
+		}
+	}
+}
