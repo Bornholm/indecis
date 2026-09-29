@@ -103,11 +103,18 @@ func (m *Model) Schema() indecis.Schema {
 // Patches returns the features of each patch of img, [patches, hidden]:
 // what a Head reads.
 func (m *Model) Patches(img image.Image) ([]float32, error) {
+	return m.PatchesAt(img, 0)
+}
+
+// PatchesAt returns the patch features after layer layers of the encoder
+// (0: the final ones), computing no further.
+func (m *Model) PatchesAt(img image.Image, layer int) ([]float32, error) {
 	px, err := m.m.Cfg.Preprocess(img)
 	if err != nil {
 		return nil, err
 	}
-	return m.m.Vision.Patches(px)
+	p, _, err := m.m.Vision.Forward(px, layer, false)
+	return p, err
 }
 
 // PatchShape returns the number of patches and their width.
@@ -124,7 +131,12 @@ func (m *Model) Decide(ctx context.Context, img image.Image, learned []string, o
 	if err != nil {
 		return nil, err
 	}
-	patches, pooled, err := m.m.Vision.EmbedPatches(px)
+	layer := 0
+	if m.head != nil {
+		layer = m.head.Layer
+	}
+	// Without open questions, the encoder stops at the head's layer.
+	patches, pooled, err := m.m.Vision.Forward(px, layer, len(open) > 0)
 	if err != nil {
 		return nil, err
 	}
@@ -141,6 +153,9 @@ func (m *Model) Decide(ctx context.Context, img image.Image, learned []string, o
 			}
 			d[name] = a
 		}
+	}
+	if len(open) == 0 {
+		return d, nil
 	}
 	ie := normalize(pooled)
 	for _, q := range open {

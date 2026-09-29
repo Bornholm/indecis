@@ -42,6 +42,7 @@ func runTrainVision(args []string) error {
 	batch := fs.Int("batch", def.BatchSize, "examples per batch")
 	lr := fs.Float64("lr", def.LR, "learning rate")
 	k := fs.Int("k", 16, "values per patch read by the head")
+	layer := fs.Int("layer", 0, "encoder layer the head reads (0: the last); the encoder stops there when serving learned questions")
 	seed := fs.Int64("seed", def.Seed, "seed")
 	workers := fs.Int("workers", 2, "images encoded at the same time (at most the performance cores)")
 	int8 := fs.Bool("int8", true, "int8 encoder, as in serving")
@@ -78,7 +79,7 @@ func runTrainVision(args []string) error {
 		train, test = train[cut:], train[:cut]
 	}
 	start := time.Now()
-	enc := encoder{m: m, cache: *cacheDir, key: fmt.Sprintf("%s|int8=%v", filepath.Clean(*backbone), *int8)}
+	enc := encoder{m: m, layer: *layer, cache: *cacheDir, key: fmt.Sprintf("%s|int8=%v|layer=%d", filepath.Clean(*backbone), *int8, *layer)}
 	trainH, err := enc.images(train, *workers)
 	if err != nil {
 		return err
@@ -93,6 +94,7 @@ func runTrainVision(args []string) error {
 	if err != nil {
 		return err
 	}
+	head.Layer = *layer
 	to := vision.HeadTrainOptions{Epochs: *epochs, BatchSize: *batch, LR: *lr, WeightDecay: def.WeightDecay, Seed: *seed,
 		Progress: func(epoch int, loss float64) { log.Printf("epoch %d/%d loss %.4f", epoch, *epochs, loss) }}
 	start = time.Now()
@@ -158,6 +160,7 @@ func readImageFile(path string) ([]imageExample, error) {
 // the encoder.
 type encoder struct {
 	m     *vision.Model
+	layer int
 	cache string
 	key   string
 }
@@ -226,7 +229,7 @@ func (e encoder) image(ex imageExample) (vision.HeadExample, error) {
 			}
 		}
 	}
-	h, err := encodeImage(e.m, ex)
+	h, err := encodeImage(e.m, ex, e.layer)
 	if err == nil && cached {
 		b := make([]byte, 2*len(h.Patches))
 		for i, v := range h.Patches {
@@ -241,7 +244,7 @@ func (e encoder) image(ex imageExample) (vision.HeadExample, error) {
 	return h, err
 }
 
-func encodeImage(m *vision.Model, e imageExample) (vision.HeadExample, error) {
+func encodeImage(m *vision.Model, e imageExample, layer int) (vision.HeadExample, error) {
 	f, err := os.Open(e.Image)
 	if err != nil {
 		return vision.HeadExample{}, err
@@ -251,7 +254,7 @@ func encodeImage(m *vision.Model, e imageExample) (vision.HeadExample, error) {
 	if err != nil {
 		return vision.HeadExample{}, err
 	}
-	p, err := m.Patches(img)
+	p, err := m.PatchesAt(img, layer)
 	if err != nil {
 		return vision.HeadExample{}, err
 	}

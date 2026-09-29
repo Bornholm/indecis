@@ -22,8 +22,12 @@ type Head struct {
 	Schema indecis.Schema
 	// T patches of H features, projected to K values each.
 	T, H, K int
-	W1, B1  []float32 // [K, H], [K]
-	W2, B2  []float32 // [O, T·K + K], [O]: O outputs, see outputs
+	// Layer is the encoder layer whose patch features the head reads: 0
+	// for the final ones, n for the hidden states after n layers (the
+	// encoder then stops there when only learned questions are asked).
+	Layer  int
+	W1, B1 []float32 // [K, H], [K]
+	W2, B2 []float32 // [O, T·K + K], [O]: O outputs, see outputs
 }
 
 // outputs returns the offset of each question's outputs and their total:

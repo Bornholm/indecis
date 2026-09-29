@@ -237,3 +237,36 @@ func TestResizeMatchesPIL(t *testing.T) {
 		}
 	}
 }
+
+// Stopping at a layer gives the same features as capturing that layer in
+// a full pass, and the full pass gives the same pooled embedding.
+func TestForwardLayers(t *testing.T) {
+	m := load(t, true)
+	rgb, err := os.ReadFile("../../testdata/siglip2/shapes_resized.u8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	px, _ := Pixels(rgb, m.Cfg.ImageSize)
+	stopped, pooled0, err := m.Vision.Forward(px, 8, false)
+	if err != nil || pooled0 != nil {
+		t.Fatalf("Forward(8, no pool): %v, pooled %v", err, pooled0 != nil)
+	}
+	captured, pooled, err := m.Vision.Forward(px, 8, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range stopped {
+		if stopped[i] != captured[i] {
+			t.Fatalf("layer 8: stopped and captured differ at %d", i)
+		}
+	}
+	want, err := m.Vision.Embed(px)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range want {
+		if pooled[i] != want[i] {
+			t.Fatalf("pooled embedding differs at %d", i)
+		}
+	}
+}

@@ -21,6 +21,7 @@ type manifest struct {
 	Patches  int            `json:"patches"`
 	Hidden   int            `json:"hidden"`
 	K        int            `json:"k"`
+	Layer    int            `json:"layer,omitempty"`
 }
 
 const manifestFile = "vision.json"
@@ -45,7 +46,7 @@ func SaveHead(dir, backbone string, h *Head) error {
 	if err != nil || strings.Count(rel, "..") > 2 {
 		rel = absBackbone
 	}
-	b, err := json.MarshalIndent(manifest{Backbone: rel, Schema: h.Schema, Patches: h.T, Hidden: h.H, K: h.K}, "", "  ")
+	b, err := json.MarshalIndent(manifest{Backbone: rel, Schema: h.Schema, Patches: h.T, Hidden: h.H, K: h.K, Layer: h.Layer}, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -90,7 +91,7 @@ func readManifest(dir string) (*manifest, error) {
 }
 
 func loadHead(dir string, m *manifest) (*Head, error) {
-	h := &Head{Schema: m.Schema, T: m.Patches, H: m.Hidden, K: m.K}
+	h := &Head{Schema: m.Schema, T: m.Patches, H: m.Hidden, K: m.K, Layer: m.Layer}
 	if err := h.Schema.Validate(); err != nil {
 		return nil, err
 	}

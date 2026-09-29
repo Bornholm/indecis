@@ -161,9 +161,15 @@ func newBuffers(cfg Config, T int) *buffers {
 
 // forward runs the layers on x, [T, H], in place.
 func (e *encoder) forward(x []float32, T int, b *buffers) {
+	e.forwardN(x, T, b, len(e.layers), 0, nil)
+}
+
+// forwardN runs the first n layers on x, in place; with capture > 0, it
+// copies x into dst after that many layers.
+func (e *encoder) forwardN(x []float32, T int, b *buffers, n, capture int, dst []float32) {
 	cfg := e.cfg
 	H := cfg.Hidden
-	for i := range e.layers {
+	for i := range e.layers[:n] {
 		l := &e.layers[i]
 		l.ln1.apply(b.h, x, T, H, cfg.Eps)
 		l.qkv.apply(b.qkv, b.h, T, e.workers)
@@ -176,6 +182,9 @@ func (e *encoder) forward(x []float32, T int, b *buffers) {
 		linalg.GeluTanh(b.mlp[:T*cfg.MLP], b.mlp[:T*cfg.MLP])
 		l.fc2.apply(b.tmp, b.mlp, T, e.workers)
 		linalg.AddTo(x[:T*H], b.tmp[:T*H])
+		if i+1 == capture {
+			copy(dst, x[:T*H])
+		}
 	}
 }
 

@@ -82,47 +82,61 @@ func loadVision(cfg Config, w weights, int8 bool) (*Vision, error) {
 // [3, S, S] channel-major with S = ImageSize (see Pixels). The result,
 // [H], is not normalized.
 func (v *Vision) Embed(pixels []float32) ([]float32, error) {
-	x, b, err := v.patches(pixels)
-	if err != nil {
-		return nil, err
+	_, pooled, err := v.Forward(pixels, 0, true)
+	return pooled, err
+}
+
+// Forward runs the image tower on normalized pixels. layer > 0 returns the
+// patch features after that many layers (hidden states, before the final
+// LayerNorm), 0 the final ones; without pool, the layers beyond are not
+// computed. With pool, it also returns the pooled embedding.
+func (v *Vision) Forward(pixels []float32, layer int, pool bool) (patches, pooled []float32, err error) {
+	cfg := v.cfg
+	S, P, H := cfg.ImageSize, cfg.PatchSize, cfg.Hidden
+	if len(pixels) != 3*S*S {
+		return nil, nil, fmt.Errorf("siglip: %d pixel values, expected 3×%d×%d", len(pixels), S, S)
 	}
-	return v.pool(x, v.cfg.Patches(), b), nil
+	if layer < 0 || layer > cfg.Layers {
+		return nil, nil, fmt.Errorf("siglip: layer %d, the tower has %d", layer, cfg.Layers)
+	}
+	T := cfg.Patches()
+	x := make([]float32, T*H)
+	v.patch.apply(x, patchify(pixels, S, P), T, v.enc.workers)
+	linalg.AddTo(x, v.pos)
+	b := newBuffers(cfg, T)
+	n := cfg.Layers
+	if layer > 0 && !pool {
+		n = layer
+	}
+	if layer > 0 {
+		patches = make([]float32, T*H)
+	}
+	v.enc.forwardN(x, T, b, n, layer, patches)
+	if n < cfg.Layers {
+		return patches, nil, nil
+	}
+	v.post.apply(x, x, T, H, cfg.Eps)
+	if layer == 0 {
+		patches = x // pool reads x without changing it
+	}
+	if pool {
+		pooled = v.pool(x, T, b)
+	}
+	return patches, pooled, nil
 }
 
 // EmbedPatches returns both the patch features and the pooled embedding,
 // with one pass of the encoder.
 func (v *Vision) EmbedPatches(pixels []float32) (patches, pooled []float32, err error) {
-	x, b, err := v.patches(pixels)
-	if err != nil {
-		return nil, nil, err
-	}
-	// pool reads x without changing it.
-	return x, v.pool(x, v.cfg.Patches(), b), nil
+	return v.Forward(pixels, 0, true)
 }
 
 // Patches returns the features of each patch, [Patches, H] in raster
 // order, after the final LayerNorm and before pooling: where the pooled
 // embedding summarizes the image, they keep the position of what they see.
 func (v *Vision) Patches(pixels []float32) ([]float32, error) {
-	x, _, err := v.patches(pixels)
+	x, _, err := v.Forward(pixels, 0, false)
 	return x, err
-}
-
-func (v *Vision) patches(pixels []float32) ([]float32, *buffers, error) {
-	cfg := v.cfg
-	S, P, H := cfg.ImageSize, cfg.PatchSize, cfg.Hidden
-	if len(pixels) != 3*S*S {
-		return nil, nil, fmt.Errorf("siglip: %d pixel values, expected 3×%d×%d", len(pixels), S, S)
-	}
-	T := cfg.Patches()
-	rows := patchify(pixels, S, P)
-	x := make([]float32, T*H)
-	v.patch.apply(x, rows, T, v.enc.workers)
-	linalg.AddTo(x, v.pos)
-	b := newBuffers(cfg, T)
-	v.enc.forward(x, T, b)
-	v.post.apply(x, x, T, H, cfg.Eps)
-	return x, b, nil
 }
 
 // patchify cuts [3, S, S] pixels into P×P patches, one row per patch in
