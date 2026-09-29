@@ -234,3 +234,84 @@ func putBytes(b []uint8) {
 	default:
 	}
 }
+
+// maxOutliers bounds the input channels MatMul8Outliers takes out of the
+// int8 product.
+const maxOutliers = 32
+
+// MatMul8Outliers is MatMul8 for activations with a few massive input
+// channels, as vision transformers have (the LLM.int8() decomposition):
+// the columns of A whose maximum magnitude exceeds ratio times the mean
+// of the column maxima, 32 at most, are left out of the int8 product, so
+// they no longer flatten the per-row quantization, and multiplied in
+// float32 by the dequantized weights of those rows of op(B). The columns
+// are chosen on each call, from A itself: no calibration.
+func MatMul8Outliers(c, a []float32, b *PackedB8, m int, accumulate bool, ratio float32) {
+	k, n := b.k, b.n
+	if m == 0 || n == 0 {
+		return
+	}
+	colMax := getBuf(k)
+	defer putBuf(colMax)
+	clear(colMax)
+	for i := 0; i < m; i++ {
+		for j, v := range a[i*k : (i+1)*k] {
+			colMax[j] = max(colMax[j], abs32(v))
+		}
+	}
+	var mean float32
+	for _, v := range colMax {
+		mean += v
+	}
+	mean /= float32(k)
+	var out []int
+	for j, v := range colMax {
+		if v > ratio*mean {
+			out = append(out, j)
+		}
+	}
+	if len(out) == 0 {
+		MatMul8(c, a, b, m, accumulate)
+		return
+	}
+	if len(out) > maxOutliers {
+		// Keep the largest.
+		for i := 0; i < maxOutliers; i++ {
+			best := i
+			for x := i + 1; x < len(out); x++ {
+				if colMax[out[x]] > colMax[out[best]] {
+					best = x
+				}
+			}
+			out[i], out[best] = out[best], out[i]
+		}
+		out = out[:maxOutliers]
+	}
+	rest := getBuf(m * k)
+	defer putBuf(rest)
+	copy(rest, a[:m*k])
+	for i := 0; i < m; i++ {
+		for _, j := range out {
+			rest[i*k+j] = 0
+		}
+	}
+	MatMul8(c, rest, b, m, accumulate)
+	// Rows j of op(B), dequantized: data[p·kq·64 + q·64 + col·4 + t] holds
+	// op(B)[4q+t][16p+col].
+	w := getBuf(n)
+	defer putBuf(w)
+	for _, j := range out {
+		q, t := j/4, j%4
+		for col := 0; col < n; col++ {
+			v := b.data[(col/nr8)*b.kq*nr8*4+q*nr8*4+(col%nr8)*4+t]
+			w[col] = float32(v) * b.scale[col]
+		}
+		for i := 0; i < m; i++ {
+			x := a[i*k+j]
+			ci := c[i*n : (i+1)*n]
+			for col, wv := range w[:n] {
+				ci[col] += x * wv
+			}
+		}
+	}
+}
