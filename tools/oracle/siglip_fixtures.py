@@ -21,6 +21,8 @@ TEXTS = [
     "a photo of a cat",
     "un cercle rouge sur fond bleu",
     "Une photo d'un chat qui dort sur un canapé, très longue description pour dépasser éventuellement la limite de soixante-quatre tokens imposée par le modèle SigLIP, avec encore quelques mots en plus pour être sûr.",
+    # Beyond the tower's 64 tokens: checks the truncation of Text.Pad.
+    "A long caption that goes on and on: " + " ".join(f"item{i}" for i in range(80)),
 ]
 
 

@@ -6,8 +6,11 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
+
+	"github.com/bornholm/indecis/tokenizer"
 )
 
 func modelDir(t testing.TB) string {
@@ -279,4 +282,26 @@ func mustText(t testing.TB, m *Model) *Text {
 		t.Fatal(err)
 	}
 	return tt
+}
+
+// Tokenizing then framing with Pad gives the ids of transformers' processor
+// (padding and truncation to 64), including for a text beyond 64 tokens.
+func TestPadMatchesProcessor(t *testing.T) {
+	m := load(t, true)
+	tok, err := tokenizer.Load(filepath.Join(modelDir(t), "tokenizer.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tt := mustText(t, m)
+	long := false
+	for _, tx := range readCases(t).Texts {
+		ids := tok.Encode(tx.Text)
+		long = long || len(ids) > m.Cfg.TextLen
+		if got := tt.Pad(ids, tok.EosID(), tok.PadID()); !slices.Equal(got, tx.IDs) {
+			t.Errorf("%q:\n got  %v\n want %v", tx.Text, got, tx.IDs)
+		}
+	}
+	if !long {
+		t.Error("no fixture text beyond the tower's length: truncation untested")
+	}
 }
