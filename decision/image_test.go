@@ -8,8 +8,11 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/bornholm/indecis"
 	"github.com/bornholm/indecis/vision"
@@ -117,5 +120,57 @@ func TestNewImageModel(t *testing.T) {
 		if v == nil || v != got[0] {
 			t.Fatalf("request %d got %p, request 0 got %p: one load expected", i, v, got[0])
 		}
+	}
+}
+
+// A load that panics releases the requests waiting for it, and the next
+// request tries again.
+func TestLoadPanicReleasesWaiters(t *testing.T) {
+	orig := loadModel
+	t.Cleanup(func() { loadModel = orig })
+	release := make(chan struct{})
+	calls := 0
+	loadModel = func(string, []vision.Option) (*indecis.Model, *vision.Model, error) {
+		calls++
+		<-release
+		panic("malformed checkpoint")
+	}
+	c := &Client{}
+	errs := make(chan error, 3)
+	for range 3 {
+		go func() {
+			_, _, err := c.load("dir")
+			errs <- err
+		}()
+	}
+	for {
+		c.mu.Lock()
+		p := c.loading["dir"]
+		n := 0
+		if p != nil {
+			n = p.waiting
+		}
+		c.mu.Unlock()
+		if n == 2 {
+			break
+		}
+		runtime.Gosched()
+	}
+	close(release)
+	for range 3 {
+		select {
+		case err := <-errs:
+			if err == nil || !strings.Contains(err.Error(), "malformed checkpoint") {
+				t.Errorf("err = %v, want the panic as an error", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("a request still waits after the load panicked")
+		}
+	}
+	if calls != 1 {
+		t.Errorf("%d loads for three simultaneous requests, want 1", calls)
+	}
+	if _, _, err := c.load("dir"); err == nil || calls != 2 {
+		t.Errorf("next request: err %v after %d loads, want a new load", err, calls)
 	}
 }

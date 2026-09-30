@@ -77,10 +77,11 @@ type Client struct {
 // pending is a model being loaded: other requests for the same directory
 // wait on done instead of loading it again.
 type pending struct {
-	done   chan struct{}
-	text   *indecis.Model
-	vision *vision.Model
-	err    error
+	done    chan struct{}
+	waiting int // requests waiting on done, under Client.mu
+	text    *indecis.Model
+	vision  *vision.Model
+	err     error
 }
 
 // load returns the model of dir, loading it once. The load, seconds long
@@ -97,6 +98,7 @@ func (c *Client) load(dir string) (*indecis.Model, *vision.Model, error) {
 		return nil, v, nil
 	}
 	if p, ok := c.loading[dir]; ok {
+		p.waiting++
 		c.mu.Unlock()
 		<-p.done
 		return p.text, p.vision, p.err
@@ -108,36 +110,53 @@ func (c *Client) load(dir string) (*indecis.Model, *vision.Model, error) {
 	c.loading[dir] = p
 	c.mu.Unlock()
 
-	if vision.IsModel(dir) {
-		opts := c.VisionOptions
-		if opts == nil {
-			opts = []vision.Option{vision.WithInt8()}
-		}
-		p.vision, p.err = vision.Load(dir, opts...)
-	} else {
-		p.text, p.err = indecis.Load(dir)
-	}
-	if p.err != nil {
-		p.err = fmt.Errorf("indecis: loading %s: %w", dir, p.err)
-	}
-
-	c.mu.Lock()
-	delete(c.loading, dir)
-	switch {
-	case p.text != nil:
-		if c.models == nil {
-			c.models = map[string]*indecis.Model{}
-		}
-		c.models[dir] = p.text
-	case p.vision != nil:
-		if c.visions == nil {
-			c.visions = map[string]*vision.Model{}
-		}
-		c.visions[dir] = p.vision
-	}
-	c.mu.Unlock()
-	close(p.done)
+	c.fill(p, dir)
 	return p.text, p.vision, p.err
+}
+
+// fill loads the model of p, publishes it and releases the waiters, even
+// if the load panics: a malformed checkpoint must not leave every later
+// request for dir waiting on p.done.
+func (c *Client) fill(p *pending, dir string) {
+	defer func() {
+		if r := recover(); r != nil {
+			p.text, p.vision, p.err = nil, nil, fmt.Errorf("panic: %v", r)
+		}
+		if p.err != nil {
+			p.err = fmt.Errorf("indecis: loading %s: %w", dir, p.err)
+		}
+		c.mu.Lock()
+		delete(c.loading, dir)
+		switch {
+		case p.err != nil:
+		case p.text != nil:
+			if c.models == nil {
+				c.models = map[string]*indecis.Model{}
+			}
+			c.models[dir] = p.text
+		case p.vision != nil:
+			if c.visions == nil {
+				c.visions = map[string]*vision.Model{}
+			}
+			c.visions[dir] = p.vision
+		}
+		c.mu.Unlock()
+		close(p.done)
+	}()
+	p.text, p.vision, p.err = loadModel(dir, c.VisionOptions)
+}
+
+// loadModel reads a text or image model; tests replace it.
+var loadModel = func(dir string, vopts []vision.Option) (*indecis.Model, *vision.Model, error) {
+	if vision.IsModel(dir) {
+		if vopts == nil {
+			vopts = []vision.Option{vision.WithInt8()}
+		}
+		v, err := vision.Load(dir, vopts...)
+		return nil, v, err
+	}
+	m, err := indecis.Load(dir)
+	return m, nil, err
 }
 
 // New loads the model from dir, which serves when the call does not
