@@ -22,7 +22,8 @@ import (
 // Client.MaxImagePixels is 0: a small compressed file can declare a huge
 // image. The encoder reads 256×256; 16 megapixels leaves room for camera
 // photos. A decoded image then takes at most 64 MB (RGBA PNG), 48 MB for a
-// JPEG, and resizing streams its rows: about 3 MB more. A progressive JPEG
+// JPEG, and resizing streams its rows: under 10 MB more, whatever the shape
+// (sides are bounded by vision.MaxImageSide). A progressive JPEG
 // is bounded to a quarter of that, its coefficients taking 12 bytes per
 // pixel while it decodes.
 const DefaultMaxImagePixels = 16 << 20
@@ -112,13 +113,16 @@ func stateImage(state any, maxPixels int) (image.Image, error) {
 	if cfg.Width <= 0 || cfg.Height <= 0 {
 		return nil, llm.NewValidationError("state", fmt.Sprintf("image of %d×%d pixels", cfg.Width, cfg.Height))
 	}
-	if int64(cfg.Width)*int64(cfg.Height) > int64(maxPixels) {
+	if cfg.Width > vision.MaxImageSide || cfg.Height > vision.MaxImageSide {
+		return nil, llm.NewValidationError("state", fmt.Sprintf("image of %d×%d pixels, at most %d a side", cfg.Width, cfg.Height, vision.MaxImageSide))
+	}
+	if cfg.Width > maxPixels/cfg.Height {
 		return nil, llm.NewValidationError("state", fmt.Sprintf("image of %d×%d pixels, at most %d", cfg.Width, cfg.Height, maxPixels))
 	}
 	// A progressive JPEG is decoded through all its DCT coefficients, 256
 	// bytes per 8×8 block and component: up to 12 bytes per pixel, eight
 	// times the final image. It gets a quarter of the bound.
-	if progressiveJPEG(raw) && int64(cfg.Width)*int64(cfg.Height) > int64(maxPixels/4) {
+	if progressiveJPEG(raw) && cfg.Width > maxPixels/4/cfg.Height {
 		return nil, llm.NewValidationError("state", fmt.Sprintf("progressive JPEG of %d×%d pixels, at most %d", cfg.Width, cfg.Height, maxPixels/4))
 	}
 	r.Seek(0, io.SeekStart)

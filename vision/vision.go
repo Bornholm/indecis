@@ -485,6 +485,10 @@ func softmaxInto(p, z []float64) []float64 {
 	return p
 }
 
+// MaxImageSide bounds each side of an image, in pixels: beyond, Decide and
+// the embeddings return an error (see siglip.MaxImageSide).
+const MaxImageSide = siglip.MaxImageSide
+
 // IsModel reports whether dir holds a model this package reads: a SigLIP
 // encoder (config.json of the "siglip" model type) or a trained model
 // (vision.json).

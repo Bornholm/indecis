@@ -1,6 +1,7 @@
 package siglip
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 	"math"
@@ -66,32 +67,66 @@ func unpremultiply(r, g, b, a uint32) (uint8, uint8, uint8) {
 	return uint8(r * 0xffff / a >> 8), uint8(g * 0xffff / a >> 8), uint8(b * 0xffff / a >> 8)
 }
 
-// resizeImage is Resize(RGB(img)) without the RGB copy of the whole image:
-// each row is converted, then resampled horizontally, one at a time. For a
-// 16-megapixel photo, that saves 48 MB.
+// resizeImage is Resize(RGB(img)), byte for byte, in bounded memory: each
+// source row is converted, resampled horizontally, then added at once to
+// the output rows whose vertical window reads it. The integer sums do not
+// depend on their order, so the result is the same as PIL's two passes;
+// memory stays at one source row plus the output accumulators, whatever
+// the aspect ratio (a 1×16M image would otherwise need a 256×16M buffer).
 func resizeImage(img image.Image, outW, outH int) []uint8 {
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
 	row := make([]uint8, w*3)
-	cur := make([]uint8, outW*h*3)
-	var bounds []int
-	var k [][]int32
+	hrow := row
+	var hb []int
+	var hk [][]int32
 	if outW != w {
-		bounds, k = coeffs(w, outW)
+		hb, hk = coeffs(w, outW)
+		hrow = make([]uint8, outW*3)
 	}
-	for y := 0; y < h; y++ {
-		dst := cur[y*outW*3 : (y+1)*outW*3]
-		if outW == w {
-			rgbRow(dst, img, b.Min.Y+y)
-			continue
+	out := make([]uint8, outW*outH*3)
+	if outH == h {
+		for y := 0; y < h; y++ {
+			dst := out[y*outW*3 : (y+1)*outW*3]
+			if outW == w {
+				rgbRow(dst, img, b.Min.Y+y)
+				continue
+			}
+			rgbRow(row, img, b.Min.Y+y)
+			resampleRow(dst, row, hb, hk)
 		}
+		return out
+	}
+	vb, vk := coeffs(h, outH)
+	acc := make([]int32, outW*outH*3)
+	for i := range acc {
+		acc[i] = 1 << (precisionBits - 1)
+	}
+	first := 0 // first output row whose window has not ended
+	for y := 0; y < h; y++ {
 		rgbRow(row, img, b.Min.Y+y)
-		resampleRow(dst, row, bounds, k)
+		if outW != w {
+			resampleRow(hrow, row, hb, hk)
+		}
+		for first < outH && vb[first]+len(vk[first]) <= y {
+			first++
+		}
+		for yy := first; yy < outH && vb[yy] <= y; yy++ {
+			d := y - vb[yy]
+			if d >= len(vk[yy]) {
+				continue
+			}
+			kv := vk[yy][d]
+			a := acc[yy*outW*3 : (yy+1)*outW*3]
+			for i, v := range hrow {
+				a[i] += int32(v) * kv
+			}
+		}
 	}
-	if outH != h {
-		cur = resizePass(cur, outW, h, outH, false)
+	for i, v := range acc {
+		out[i] = clip8(v)
 	}
-	return cur
+	return out
 }
 
 // resampleRow resamples one row of RGB bytes horizontally.
@@ -215,6 +250,12 @@ func resizePass(src []uint8, w, h, out int, horizontal bool) []uint8 {
 	return dst
 }
 
+// MaxImageSide bounds each side of an image to preprocess. PIL's bilinear
+// filter widens with the scale: each output row of a 1×16M image would
+// read 131,000 source rows, 25 billion operations. At 16,384 pixels a side,
+// the worst case stays near 100 million.
+const MaxImageSide = 1 << 14
+
 // Preprocess turns an image into the vision tower's input: RGB, resized to
 // ImageSize × ImageSize with PIL's bilinear filter, normalized.
 func (c Config) Preprocess(img image.Image) ([]float32, error) {
@@ -224,5 +265,8 @@ func (c Config) Preprocess(img image.Image) ([]float32, error) {
 // PreprocessInto is Preprocess writing the pixels into dst when it is
 // large enough.
 func (c Config) PreprocessInto(dst []float32, img image.Image) ([]float32, error) {
+	if b := img.Bounds(); b.Dx() < 1 || b.Dy() < 1 || b.Dx() > MaxImageSide || b.Dy() > MaxImageSide {
+		return nil, fmt.Errorf("siglip: image of %d×%d pixels, sides from 1 to %d", b.Dx(), b.Dy(), MaxImageSide)
+	}
 	return PixelsInto(dst, resizeImage(img, c.ImageSize, c.ImageSize), c.ImageSize)
 }

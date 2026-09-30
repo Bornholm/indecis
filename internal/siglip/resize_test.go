@@ -22,6 +22,10 @@ func TestResizeImageMatchesResize(t *testing.T) {
 		{"same size", randomNRGBA(rng, image.Rect(0, 0, 256, 256)), 256},
 		{"offset bounds", randomNRGBA(rng, image.Rect(0, 0, 500, 500)).SubImage(image.Rect(37, 81, 420, 333)), 256},
 		{"YCbCr", randomYCbCr(rng, image.Rect(0, 0, 341, 257)), 256},
+		{"tall and narrow", randomNRGBA(rng, image.Rect(0, 0, 3, 5000)), 256},
+		{"wide and short", randomNRGBA(rng, image.Rect(0, 0, 5000, 3)), 256},
+		{"same height", randomNRGBA(rng, image.Rect(0, 0, 700, 256)), 256},
+		{"upscale, odd target", randomNRGBA(rng, image.Rect(0, 0, 13, 7)), 31},
 	}
 	for _, c := range cases {
 		rgb, w, h := RGB(c.img)
@@ -71,4 +75,13 @@ func randomYCbCr(rng *rand.Rand, r image.Rectangle) *image.YCbCr {
 	rng.Read(img.Cb)
 	rng.Read(img.Cr)
 	return img
+}
+
+func TestPreprocessBoundsSides(t *testing.T) {
+	c := Config{ImageSize: 256}
+	for _, r := range []image.Rectangle{image.Rect(0, 0, 1, MaxImageSide+1), image.Rect(0, 0, MaxImageSide+1, 1), image.Rect(0, 0, 0, 5)} {
+		if _, err := c.Preprocess(image.NewGray(r)); err == nil {
+			t.Errorf("%v: accepted", r)
+		}
+	}
 }

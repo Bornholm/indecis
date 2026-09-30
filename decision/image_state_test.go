@@ -102,6 +102,7 @@ func TestStateImage(t *testing.T) {
 		{"not an image", "data:image/png;base64," + base64.StdEncoding.EncodeToString([]byte("hello")), 0, "unreadable"},
 		{"beyond the default bound", "data:image/png;base64," + base64.StdEncoding.EncodeToString(hugePNG(8192, 8192)), 0, "at most"},
 		{"beyond a set bound", "data:image/png;base64," + small, 10, "at most"},
+		{"tall and narrow", "data:image/png;base64," + base64.StdEncoding.EncodeToString(hugePNG(1, 1<<24)), 0, "a side"},
 		{"progressive JPEG beyond a quarter of the bound", "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(jpegHeader(4096, 2048, true)), 0, "progressive JPEG"},
 	} {
 		img, err := stateImage(c.state, c.max)
