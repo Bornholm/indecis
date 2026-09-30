@@ -36,9 +36,8 @@ type Model struct {
 	// The tokenizer and the text tower load at the first text: a model
 	// whose questions are all learned never needs them.
 	tokPath string
-	tokOnce sync.Once
+	tokMu   sync.Mutex // guards tok; held while it loads
 	tok     *tokenizer.Tokenizer
-	tokErr  error
 
 	mu       sync.Mutex
 	cache    map[string][]float32 // text embeddings: options recur from call to call
@@ -256,16 +255,31 @@ type textCall struct {
 	err  error
 }
 
+// textTokenizer returns the text tokenizer, loading it the first time; a
+// failed load is tried again at the next call.
+func (m *Model) textTokenizer() (*tokenizer.Tokenizer, error) {
+	m.tokMu.Lock()
+	defer m.tokMu.Unlock()
+	if m.tok == nil {
+		tok, err := tokenizer.LoadShared(m.tokPath)
+		if err != nil {
+			return nil, err
+		}
+		m.tok = tok
+	}
+	return m.tok, nil
+}
+
 func (m *Model) embedText(text string) ([]float32, error) {
-	m.tokOnce.Do(func() { m.tok, m.tokErr = tokenizer.LoadShared(m.tokPath) })
-	if m.tokErr != nil {
-		return nil, m.tokErr
+	tok, err := m.textTokenizer()
+	if err != nil {
+		return nil, err
 	}
 	tt, err := m.m.Text()
 	if err != nil {
 		return nil, err
 	}
-	ids := tt.Pad(m.tok.Encode(text), m.tok.EosID(), m.tok.PadID())
+	ids := tt.Pad(tok.Encode(text), tok.EosID(), tok.PadID())
 	e, err := tt.Embed(ids)
 	if err != nil {
 		return nil, err

@@ -117,21 +117,25 @@ type Model struct {
 	quantized  bool
 	workers    int
 
-	textOnce sync.Once
-	text     *Text
-	textErr  error
+	textMu sync.Mutex // guards text; held while it loads
+	text   *Text
 }
 
 // Text returns the text tower, loading it the first time (a few seconds,
-// about 85 MB in int8).
+// about 85 MB in int8). A failed load is tried again at the next call.
 func (m *Model) Text() (*Text, error) {
-	m.textOnce.Do(func() {
-		m.text, m.textErr = loadText(m.Cfg, weights{f: m.file}, m.quantized)
-		if m.text != nil {
-			m.text.enc.workers = m.workers
-		}
-	})
-	return m.text, m.textErr
+	m.textMu.Lock()
+	defer m.textMu.Unlock()
+	if m.text != nil {
+		return m.text, nil
+	}
+	t, err := loadText(m.Cfg, weights{f: m.file}, m.quantized)
+	if err != nil {
+		return nil, err
+	}
+	t.enc.workers = m.workers
+	m.text = t
+	return t, nil
 }
 
 // Load reads a model directory (config.json, model.safetensors). int8

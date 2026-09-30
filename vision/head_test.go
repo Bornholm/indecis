@@ -111,3 +111,15 @@ func TestSaveHeadOverwrites(t *testing.T) {
 		t.Errorf("temporary files left: %v", tmp)
 	}
 }
+
+// A failed tokenizer load is not kept: the next call tries again.
+func TestTokenizerLoadRetries(t *testing.T) {
+	m := &Model{tokPath: filepath.Join(t.TempDir(), "absent.json")}
+	if _, err := m.textTokenizer(); err == nil {
+		t.Fatal("absent tokenizer: no error")
+	}
+	m.tokPath = "../testdata/siglip2-tiny/tokenizer.json"
+	if tok, err := m.textTokenizer(); err != nil || tok == nil {
+		t.Fatalf("second call: %v, %v", tok, err)
+	}
+}
