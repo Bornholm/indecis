@@ -36,12 +36,17 @@ type Server struct {
 	// own buffers (~10 MB for 256 tokens): the bound also fixes the peak
 	// memory.
 	MaxConcurrent int
-	slots         chan struct{}
-	Logger        *slog.Logger
+	// MaxRequestSize bounds a request body, in bytes (0:
+	// DefaultMaxRequestSize). An image travels in base64: 4 MiB carries a
+	// JPEG of about 3 MB.
+	MaxRequestSize int64
+	slots          chan struct{}
+	Logger         *slog.Logger
 }
 
-// maxRequestSize bounds a request body.
-const maxRequestSize = 4 << 20
+// DefaultMaxRequestSize bounds a request body when Server.MaxRequestSize
+// is 0.
+const DefaultMaxRequestSize = 4 << 20
 
 // Handler returns the server's HTTP router.
 func (s *Server) Handler() http.Handler {
@@ -97,13 +102,17 @@ func (s *Server) decide(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "missing or invalid API key")
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxRequestSize+1))
+	limit := s.MaxRequestSize
+	if limit <= 0 {
+		limit = DefaultMaxRequestSize
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if len(body) > maxRequestSize {
-		writeError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("request larger than %d bytes", maxRequestSize))
+	if int64(len(body)) > limit {
+		writeError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("request larger than %d bytes (indecis-serve -max-body)", limit))
 		return
 	}
 	var req wireRequest

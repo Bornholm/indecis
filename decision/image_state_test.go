@@ -51,6 +51,8 @@ func TestStateImage(t *testing.T) {
 		{"data URL", "data:image/png;base64," + small, 0, ""},
 		{"object with data URL", map[string]any{"image": "data:image/png;base64," + small}, 0, ""},
 		{"object with bare base64", map[string]any{"image": small}, 0, ""},
+		{"base64 wrapped in lines", "data:image/png;base64," + wrap(small, 8), 0, ""},
+		{"within a set bound", "data:image/png;base64," + small, 12, ""},
 		{"text", "just text", 0, "base64"},
 		{"empty object", map[string]any{"text": "x"}, 0, "reads an image"},
 		{"number", 42, 0, "reads an image"},
@@ -70,4 +72,14 @@ func TestStateImage(t *testing.T) {
 			t.Errorf("%s: error %v, want %q", c.name, err, c.wantErr)
 		}
 	}
+}
+
+// wrap cuts s into lines of n characters, as base64(1) does.
+func wrap(s string, n int) string {
+	var b strings.Builder
+	for len(s) > n {
+		b.WriteString(s[:n] + "\r\n")
+		s = s[n:]
+	}
+	return b.String() + s
 }

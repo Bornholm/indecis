@@ -96,6 +96,8 @@ func stateImage(state any, maxPixels int) (image.Image, error) {
 		}
 		s = data
 	}
+	// base64(1) and MIME wrap lines at 76 characters.
+	s = strings.NewReplacer("\n", "", "\r", "").Replace(s)
 	raw, err := base64.StdEncoding.DecodeString(s)
 	if err != nil {
 		return nil, llm.NewValidationError("state", "invalid base64: "+err.Error())

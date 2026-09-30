@@ -50,6 +50,7 @@ func main() {
 	apiKey := flag.String("api-key", os.Getenv("INDECIS_API_KEY"), "key required as Authorization: Bearer (empty: none)")
 	threads := flag.Int("threads", 0, "cores at most per request (0: all for a text model, where a text under 1024 tokens uses a single one anyway; one for an image model)")
 	maxPixels := flag.Int("max-pixels", decision.DefaultMaxImagePixels, "image models: largest image accepted, in pixels")
+	maxBody := flag.Int("max-body", 0, "largest request body, in MiB (0: 4, or 24 when an image model is served, enough for a 16-megapixel JPEG in base64)")
 	int8 := flag.Bool("int8", true, "layers in int8 if the processor has AVX-VNNI")
 	cache := flag.Int("embed-cache", 4096, "option embeddings kept in cache (open questions)")
 	maxConcurrent := flag.Int("max-concurrent", runtime.GOMAXPROCS(0), "decisions in flight at most, others wait (0: no bound)")
@@ -77,6 +78,7 @@ func main() {
 		debug.SetMemoryLimit(int64(*memLimit) << 20)
 	}
 	s := &decision.Server{Models: map[string]*decision.Client{}, APIKey: *apiKey, Logger: log, MaxConcurrent: *maxConcurrent}
+	hasImages := false
 	for _, spec := range models {
 		name, dir, ok := strings.Cut(spec, "=")
 		if !ok {
@@ -99,6 +101,7 @@ func main() {
 			debug.FreeOSMemory()
 			c := decision.FromVision(name, v)
 			c.MaxImagePixels = *maxPixels
+			hasImages = true
 			s.Models[name] = c
 			if s.Default == "" {
 				s.Default = name
@@ -125,6 +128,12 @@ func main() {
 			s.Default = name
 		}
 		log.Info("model loaded", "name", name, "dir", dir, "paired", m.Paired(), "memory", memory())
+	}
+	switch {
+	case *maxBody > 0:
+		s.MaxRequestSize = int64(*maxBody) << 20
+	case hasImages:
+		s.MaxRequestSize = 24 << 20
 	}
 	// By default Go lets the heap grow to twice its live part before
 	// collecting: here the live part is mostly model weights, so hundreds

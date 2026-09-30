@@ -95,12 +95,13 @@ func TestServerErrors(t *testing.T) {
 		{"/api/alpha/decision", "secret", `{"questions":{"a":{"type":"noul","instructions":"?"}}}`, 422, "state"},
 		{"/api/alpha/decision", "secret", `{"state":"x","questions":{}}`, 422, "question"},
 		{"/api/alpha/decision", "secret", `{"state":"x","questions":{"injection":{"type":"score","instructions":"?","criteria":["a","b"]}}}`, 422, "noul"},
+		{"/api/alpha/decision", "secret", `{"state":"` + strings.Repeat("x", DefaultMaxRequestSize) + `"}`, 413, "-max-body"},
 		{"/api/alpha/decision", "secret", ok, 200, ""},
 	}
 	for _, c := range cases {
 		status, msg := post(c.path, c.key, c.body)
 		if status != c.status || !strings.Contains(msg, c.want) {
-			t.Errorf("%s: %d %q, expected %d %q", c.body, status, msg, c.status, c.want)
+			t.Errorf("%.80s: %d %q, expected %d %q", c.body, status, msg, c.status, c.want)
 		}
 	}
 }

@@ -125,6 +125,9 @@ func (c *Client) load(dir string) (*indecis.Model, *vision.Model, error) {
 	delete(c.loading, dir)
 	switch {
 	case p.text != nil:
+		if c.models == nil {
+			c.models = map[string]*indecis.Model{}
+		}
 		c.models[dir] = p.text
 	case p.vision != nil:
 		if c.visions == nil {
@@ -138,12 +141,13 @@ func (c *Client) load(dir string) (*indecis.Model, *vision.Model, error) {
 }
 
 // New loads the model from dir, which serves when the call does not
-// designate another one with llm.WithDecisionModel.
-func New(dir string) (*Client, error) {
+// designate another one with llm.WithDecisionModel. vopts configure image
+// models, dir's included (see VisionOptions).
+func New(dir string, vopts ...vision.Option) (*Client, error) {
 	if dir == "" {
 		return nil, fmt.Errorf("indecis: model directory not configured (GENAI_DECISION_INDECIS_MODEL)")
 	}
-	c := &Client{defaultDir: dir, models: map[string]*indecis.Model{}}
+	c := &Client{defaultDir: dir, models: map[string]*indecis.Model{}, VisionOptions: vopts}
 	if _, _, err := c.load(dir); err != nil {
 		return nil, err
 	}
