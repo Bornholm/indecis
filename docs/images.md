@@ -49,7 +49,7 @@ On Imagenette (1,000 training images, 300 test), the head gets 99.3%, against 99
 
 ## Behind the decision API
 
-`indecis-serve` recognizes a SigLIP model by its `config.json` and serves it as an image model. The state is the image, as a data URL or as `{"image": ...}` (PNG, JPEG or GIF, 64 megapixels at most); every question is open.
+`indecis-serve` recognizes a SigLIP model by its `config.json` and serves it as an image model. The state is the image, as a data URL or as `{"image": ...}` (PNG, JPEG or GIF, 16 megapixels at most by default); every question is open.
 
 ```bash
 bin/indecis-serve -model images=$M
@@ -99,6 +99,6 @@ Text embeddings are cached, so an option costs once; an image costs every time. 
 | Tokenizer (original Gemma pipeline, no `<bos>`) | 3,053 texts | identical ids |
 | Resize (PIL's bilinear filter) | downscale and upscale | identical bytes |
 | Image and text embeddings, float32 | 2 images, 5 texts | max relative difference 2.4·10⁻⁶ |
-| Logits, int8 | 10 pairs | within 0.45, same ranking |
+| Logits, int8 | 12 pairs | within 0.75 for captions, 0.85 for a truncated 64-token text; same ranking |
 
 Fixtures come from `tools/oracle/siglip_fixtures.py`, with synthetic images.
