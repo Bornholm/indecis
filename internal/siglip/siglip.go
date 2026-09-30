@@ -52,6 +52,7 @@ type configJSON struct {
 	TextConfig struct {
 		Hidden int    `json:"hidden_size"`
 		Layers int    `json:"num_hidden_layers"`
+		Heads  int    `json:"num_attention_heads"`
 		MaxPos int    `json:"max_position_embeddings"`
 		Vocab  int    `json:"vocab_size"`
 		Act    string `json:"hidden_act"`
@@ -93,7 +94,7 @@ func ReadConfig(dir string) (Config, error) {
 	}
 	// The text tower shares the vision dimensions in every released
 	// checkpoint; a model where they differ is refused rather than misread.
-	if (t.Hidden != 0 && t.Hidden != c.Hidden) || (t.Layers != 0 && t.Layers != c.Layers) {
+	if (t.Hidden != 0 && t.Hidden != c.Hidden) || (t.Layers != 0 && t.Layers != c.Layers) || (t.Heads != 0 && t.Heads != c.Heads) {
 		return Config{}, fmt.Errorf("siglip: text and vision towers of different sizes are not supported")
 	}
 	if c.Hidden%c.Heads != 0 || c.ImageSize%c.PatchSize != 0 {
