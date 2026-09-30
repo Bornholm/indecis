@@ -152,12 +152,13 @@ func (m *Model) Decide(ctx context.Context, img image.Image, learned []string, o
 	if err != nil {
 		return nil, err
 	}
-	layer := 0
-	if m.head != nil {
-		layer = m.head.Layer
+	var patches, pooled []float32
+	if len(learned) > 0 {
+		// Without open questions, the encoder stops at the head's layer.
+		patches, pooled, err = m.m.Vision.Forward(px, m.head.Layer, len(open) > 0)
+	} else {
+		pooled, err = m.m.Vision.Embed(px) // no patch features to copy
 	}
-	// Without open questions, the encoder stops at the head's layer.
-	patches, pooled, err := m.m.Vision.Forward(px, layer, len(open) > 0)
 	m.release(px)
 	if err != nil {
 		return nil, err
