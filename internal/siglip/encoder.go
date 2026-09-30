@@ -21,9 +21,9 @@ type linear struct {
 	outliers bool
 }
 
-func newLinear(w, b []float32, in, out int, int8 bool) *linear {
+func newLinear(w, b []float32, in, out int, quantized bool) *linear {
 	l := &linear{in: in, out: out, bias: b}
-	if int8 {
+	if quantized {
 		l.p8 = linalg.PackB8(w, in, out, true)
 	} else {
 		l.p = linalg.PackB(w, in, out, true)
@@ -68,7 +68,7 @@ func loadNorm(w weights, prefix string, width int) (layerNorm, error) {
 	return layerNorm{g, b}, err
 }
 
-func loadLinear(w weights, prefix string, in, out int, int8 bool) (*linear, error) {
+func loadLinear(w weights, prefix string, in, out int, quantized bool) (*linear, error) {
 	wt, err := w.get(prefix+".weight", out, in)
 	if err != nil {
 		return nil, err
@@ -77,7 +77,7 @@ func loadLinear(w weights, prefix string, in, out int, int8 bool) (*linear, erro
 	if err != nil {
 		return nil, err
 	}
-	return newLinear(wt, b, in, out, int8), nil
+	return newLinear(wt, b, in, out, quantized), nil
 }
 
 // layer is a pre-norm transformer layer:
@@ -95,14 +95,13 @@ type encoder struct {
 	workers int
 }
 
-func loadEncoder(cfg Config, w weights, prefix string, int8 bool) (*encoder, error) {
+func loadEncoder(cfg Config, w weights, prefix string, quantized, outliers bool) (*encoder, error) {
 	H, M := cfg.Hidden, cfg.MLP
 	e := &encoder{cfg: cfg, layers: make([]layer, cfg.Layers), workers: 1}
 	for i := range e.layers {
 		p := fmt.Sprintf("%s.layers.%d.", prefix, i)
 		l := &e.layers[i]
 		var err error
-		defer func() { l.fc2.outliers = true }()
 		if l.ln1, err = loadNorm(w, p+"layer_norm1", H); err != nil {
 			return nil, err
 		}
@@ -122,11 +121,11 @@ func loadEncoder(cfg Config, w weights, prefix string, int8 bool) (*encoder, err
 			}
 			qkvW, qkvB = append(qkvW, wt...), append(qkvB, b...)
 		}
-		l.qkv = newLinear(qkvW, qkvB, H, 3*H, int8)
-		if l.out, err = loadLinear(w, p+"self_attn.out_proj", H, H, int8); err != nil {
+		l.qkv = newLinear(qkvW, qkvB, H, 3*H, quantized)
+		if l.out, err = loadLinear(w, p+"self_attn.out_proj", H, H, quantized); err != nil {
 			return nil, err
 		}
-		if l.fc1, err = loadLinear(w, p+"mlp.fc1", H, M, int8); err != nil {
+		if l.fc1, err = loadLinear(w, p+"mlp.fc1", H, M, quantized); err != nil {
 			return nil, err
 		}
 		// fc2 reads the GELU output, where a few channels reach a hundred
@@ -134,9 +133,10 @@ func loadEncoder(cfg Config, w weights, prefix string, int8 bool) (*encoder, err
 		// transformers). Plain per-token int8 flattens the rest of the row:
 		// alone, it moved the logits by up to 1.5 on the fixtures. Those
 		// channels are split off and computed in float32.
-		if l.fc2, err = loadLinear(w, p+"mlp.fc2", M, H, int8); err != nil {
+		if l.fc2, err = loadLinear(w, p+"mlp.fc2", M, H, quantized); err != nil {
 			return nil, err
 		}
+		l.fc2.outliers = outliers
 		// Each layer's weights are decoded in float32, then packed: the
 		// float32 copies are garbage at once. Collecting after each layer
 		// keeps the startup peak near the final size, for a few ms.

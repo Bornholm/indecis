@@ -20,7 +20,7 @@ type Text struct {
 	head  *linear
 }
 
-func loadText(cfg Config, w weights, int8 bool) (*Text, error) {
+func loadText(cfg Config, w weights, quantized bool) (*Text, error) {
 	H := cfg.Hidden
 	t := &Text{cfg: cfg, work: &workPool{cfg: cfg, T: cfg.TextLen}}
 	dtype, shape, raw, ok := w.f.Raw("text_model.embeddings.token_embedding.weight")
@@ -37,7 +37,10 @@ func loadText(cfg Config, w weights, int8 bool) (*Text, error) {
 	if t.pos, err = w.get("text_model.embeddings.position_embedding.weight", cfg.TextLen, H); err != nil {
 		return nil, err
 	}
-	if t.enc, err = loadEncoder(cfg, w, "text_model.encoder", int8); err != nil {
+	// fc2 splits its massive channels off in the text tower too: on the
+	// fixtures, it halves the gap to float32 embeddings (0.023 against
+	// 0.045 relative) for 9 ms more per text, and texts are cached.
+	if t.enc, err = loadEncoder(cfg, w, "text_model.encoder", quantized, true); err != nil {
 		return nil, err
 	}
 	if t.final, err = loadNorm(w, "text_model.final_layer_norm", H); err != nil {

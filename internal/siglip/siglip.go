@@ -111,7 +111,7 @@ type Model struct {
 	LogitScale float32 // log of the temperature
 	LogitBias  float32
 	file       *safetensors.File
-	int8       bool
+	quantized  bool
 	workers    int
 
 	textOnce sync.Once
@@ -123,7 +123,7 @@ type Model struct {
 // about 85 MB in int8).
 func (m *Model) Text() (*Text, error) {
 	m.textOnce.Do(func() {
-		m.text, m.textErr = loadText(m.Cfg, weights{f: m.file}, m.int8)
+		m.text, m.textErr = loadText(m.Cfg, weights{f: m.file}, m.quantized)
 		if m.text != nil {
 			m.text.enc.workers = m.workers
 		}
@@ -133,7 +133,7 @@ func (m *Model) Text() (*Text, error) {
 
 // Load reads a model directory (config.json, model.safetensors). int8
 // computes the layer products in int8 (see linalg.MatMul8).
-func Load(dir string, int8 bool) (*Model, error) {
+func Load(dir string, quantized bool) (*Model, error) {
 	cfg, err := ReadConfig(dir)
 	if err != nil {
 		return nil, err
@@ -143,8 +143,8 @@ func Load(dir string, int8 bool) (*Model, error) {
 		return nil, err
 	}
 	w := weights{f: f}
-	m := &Model{Cfg: cfg, file: f, int8: int8, workers: 1}
-	if m.Vision, err = loadVision(cfg, w, int8); err != nil {
+	m := &Model{Cfg: cfg, file: f, quantized: quantized, workers: 1}
+	if m.Vision, err = loadVision(cfg, w, quantized); err != nil {
 		return nil, err
 	}
 	scale, err := w.get("logit_scale", 1)

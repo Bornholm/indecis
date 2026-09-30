@@ -26,7 +26,7 @@ type Vision struct {
 	headFC1, headFC2 *linear
 }
 
-func loadVision(cfg Config, w weights, int8 bool) (*Vision, error) {
+func loadVision(cfg Config, w weights, quantized bool) (*Vision, error) {
 	H, P := cfg.Hidden, cfg.PatchSize
 	v := &Vision{cfg: cfg, work: &workPool{cfg: cfg, T: cfg.Patches(), rows: cfg.Patches() * 3 * P * P}}
 	var err error
@@ -40,7 +40,7 @@ func loadVision(cfg Config, w weights, int8 bool) (*Vision, error) {
 	if v.pos, err = w.get("vision_model.embeddings.position_embedding.weight", cfg.Patches(), H); err != nil {
 		return nil, err
 	}
-	if v.enc, err = loadEncoder(cfg, w, "vision_model.encoder", int8); err != nil {
+	if v.enc, err = loadEncoder(cfg, w, "vision_model.encoder", quantized, true); err != nil {
 		return nil, err
 	}
 	if v.post, err = loadNorm(w, "vision_model.post_layernorm", H); err != nil {

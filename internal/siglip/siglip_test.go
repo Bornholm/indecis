@@ -28,19 +28,19 @@ var (
 	modelsMu sync.Mutex
 )
 
-func load(t testing.TB, int8 bool) *Model {
+func load(t testing.TB, quantized bool) *Model {
 	t.Helper()
 	dir := modelDir(t)
 	modelsMu.Lock()
 	defer modelsMu.Unlock()
-	if m, ok := models[int8]; ok {
+	if m, ok := models[quantized]; ok {
 		return m
 	}
-	m, err := Load(dir, int8)
+	m, err := Load(dir, quantized)
 	if err != nil {
 		t.Fatal(err)
 	}
-	models[int8] = m
+	models[quantized] = m
 	return m
 }
 
@@ -179,8 +179,8 @@ func TestInt8(t *testing.T) {
 	}
 }
 
-func benchVision(b *testing.B, int8 bool) {
-	m := load(b, int8)
+func benchVision(b *testing.B, quantized bool) {
+	m := load(b, quantized)
 	px := make([]float32, 3*m.Cfg.ImageSize*m.Cfg.ImageSize)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -190,8 +190,8 @@ func benchVision(b *testing.B, int8 bool) {
 	}
 }
 
-func benchText(b *testing.B, int8 bool) {
-	m := load(b, int8)
+func benchText(b *testing.B, quantized bool) {
+	m := load(b, quantized)
 	tt := mustText(b, m)
 	ids := make([]int32, m.Cfg.TextLen)
 	b.ResetTimer()

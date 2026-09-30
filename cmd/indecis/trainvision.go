@@ -45,7 +45,7 @@ func runTrainVision(args []string) error {
 	layer := fs.Int("layer", 0, "encoder layer the head reads (0: the last); the encoder stops there when serving learned questions")
 	seed := fs.Int64("seed", def.Seed, "seed")
 	workers := fs.Int("workers", 2, "images encoded at the same time (at most the performance cores)")
-	int8 := fs.Bool("int8", true, "int8 encoder, as in serving")
+	quantized := fs.Bool("int8", true, "int8 encoder, as in serving")
 	cacheDir := fs.String("cache", "", "directory where the patch features of each image are kept, to train again without encoding")
 	fs.Parse(args)
 	if err := required(fs, "backbone", "schema", "train", "out"); err != nil {
@@ -56,7 +56,7 @@ func runTrainVision(args []string) error {
 		return err
 	}
 	var opts []vision.Option
-	if *int8 {
+	if *quantized {
 		opts = append(opts, vision.WithInt8())
 	}
 	m, err := vision.Load(*backbone, opts...)
@@ -79,7 +79,7 @@ func runTrainVision(args []string) error {
 		train, test = train[cut:], train[:cut]
 	}
 	start := time.Now()
-	enc := encoder{m: m, layer: *layer, cache: *cacheDir, key: fmt.Sprintf("%s|int8=%v|layer=%d", filepath.Clean(*backbone), *int8, *layer)}
+	enc := encoder{m: m, layer: *layer, cache: *cacheDir, key: fmt.Sprintf("%s|int8=%v|layer=%d", filepath.Clean(*backbone), *quantized, *layer)}
 	trainH, err := enc.images(train, *workers)
 	if err != nil {
 		return err
