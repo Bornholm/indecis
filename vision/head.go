@@ -229,6 +229,9 @@ func (h *Head) targets(examples []HeadExample) ([]target, error) {
 // entropy over the options or levels otherwise; an absent label does not
 // count. The result is the same bit for bit from one run to the next.
 func (h *Head) Fit(examples []HeadExample, opts HeadTrainOptions) error {
+	if len(examples) == 0 {
+		return fmt.Errorf("vision: no training examples")
+	}
 	targets, err := h.targets(examples)
 	if err != nil {
 		return err

@@ -50,7 +50,16 @@ func SaveHead(dir, backbone string, h *Head) error {
 	if err != nil {
 		return err
 	}
-	f, err := os.Create(filepath.Join(dir, "head.safetensors"))
+	// A model directory is one whose manifest exists: the old manifest goes
+	// first, each file is written aside then renamed, the new manifest
+	// last. An interrupted save leaves no model rather than a manifest
+	// over other weights.
+	manifestPath := filepath.Join(dir, manifestFile)
+	if err := os.Remove(manifestPath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	weights := filepath.Join(dir, "head.safetensors")
+	f, err := os.Create(weights + ".tmp")
 	if err != nil {
 		return err
 	}
@@ -64,12 +73,18 @@ func SaveHead(dir, backbone string, h *Head) error {
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
+	if err == nil {
+		err = os.Rename(weights+".tmp", weights)
+	}
 	if err != nil {
+		os.Remove(weights + ".tmp")
 		return err
 	}
-	// The manifest comes last: IsModel sees a model only once its weights
-	// are written.
-	return os.WriteFile(filepath.Join(dir, manifestFile), append(b, '\n'), 0o644)
+	if err := os.WriteFile(manifestPath+".tmp", append(b, '\n'), 0o644); err != nil {
+		os.Remove(manifestPath + ".tmp")
+		return err
+	}
+	return os.Rename(manifestPath+".tmp", manifestPath)
 }
 
 // readManifest returns the manifest of a trained model directory, or nil

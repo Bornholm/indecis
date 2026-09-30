@@ -2,6 +2,7 @@ package vision
 
 import (
 	"math/rand"
+	"path/filepath"
 	"testing"
 
 	"github.com/bornholm/indecis"
@@ -68,5 +69,45 @@ func TestHeadLearnsPositions(t *testing.T) {
 		if h.W1[i] != h2.W1[i] {
 			t.Fatalf("training not reproducible at W1[%d]", i)
 		}
+	}
+}
+
+func TestFitRefusesNoExamples(t *testing.T) {
+	h, err := NewHead(indecis.Schema{indecis.NewNoul("signal", "")}, 4, 2, 2, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Fit(nil, DefaultHeadTrainOptions()); err == nil {
+		t.Fatal("Fit without examples: no error")
+	}
+}
+
+// Saving over a model replaces it whole and leaves no temporary file.
+func TestSaveHeadOverwrites(t *testing.T) {
+	dir := t.TempDir()
+	schema := indecis.Schema{indecis.NewNoul("signal", "")}
+	for _, k := range []int{2, 3} {
+		h, err := NewHead(schema, 4, 2, k, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := SaveHead(dir, "backbone", h); err != nil {
+			t.Fatal(err)
+		}
+		m, err := readManifest(dir)
+		if err != nil || m == nil {
+			t.Fatalf("manifest after save: %v, %v", m, err)
+		}
+		got, err := loadHead(dir, m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.K != k {
+			t.Errorf("K = %d after saving K = %d", got.K, k)
+		}
+	}
+	tmp, _ := filepath.Glob(filepath.Join(dir, "*.tmp"))
+	if len(tmp) > 0 {
+		t.Errorf("temporary files left: %v", tmp)
 	}
 }
