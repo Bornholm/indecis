@@ -465,11 +465,15 @@ func dot(a, b []float32) float32 {
 func sigmoid(x float64) float64 { return 1 / (1 + math.Exp(-x)) }
 
 func softmax(z []float64) []float64 {
+	return softmaxInto(make([]float64, len(z)), z)
+}
+
+// softmaxInto writes the softmax of z to p, which may be z.
+func softmaxInto(p, z []float64) []float64 {
 	mx := math.Inf(-1)
 	for _, v := range z {
 		mx = math.Max(mx, v)
 	}
-	p := make([]float64, len(z))
 	var s float64
 	for i, v := range z {
 		p[i] = math.Exp(v - mx)

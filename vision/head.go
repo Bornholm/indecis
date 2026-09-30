@@ -241,6 +241,7 @@ func (h *Head) Fit(examples []HeadExample, opts HeadTrainOptions) error {
 	B := max(1, opts.BatchSize)
 	F := h.features()
 	x := make([]float32, B*T*H)
+	zbuf := make([]float64, O) // one question's logits, then probabilities
 	z := make([]float32, B*T*K)
 	f := make([]float32, B*F)
 	arg := make([]int, B*K)
@@ -284,11 +285,11 @@ func (h *Head) Fit(examples []HeadExample, opts HeadTrainOptions) error {
 						db[o] = float32((p - t[0]) / float64(n))
 						continue
 					}
-					zq := make([]float64, len(t))
-					for j := range zq {
-						zq[j] = float64(lb[o+j])
+					p := zbuf[:len(t)]
+					for j := range p {
+						p[j] = float64(lb[o+j])
 					}
-					p := softmax(zq)
+					softmaxInto(p, p)
 					for j := range p {
 						if t[j] > 0 {
 							total -= t[j] * math.Log(max(p[j], 1e-12))
