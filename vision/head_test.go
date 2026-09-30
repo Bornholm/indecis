@@ -50,7 +50,10 @@ func TestHeadLearnsPositions(t *testing.T) {
 	if err := h.Fit(train, opts); err != nil {
 		t.Fatal(err)
 	}
-	acc := h.Evaluate(test)
+	acc, err := h.Evaluate(test)
+	if err != nil {
+		t.Fatal(err)
+	}
 	t.Logf("accuracy: side %.3f, signal %.3f", acc["side"], acc["signal"])
 	if acc["side"] < 0.95 || acc["signal"] < 0.95 {
 		t.Fatalf("accuracy %v", acc)

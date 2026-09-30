@@ -132,20 +132,6 @@ func (v *Vision) forward(pixels []float32, layer int, wantPatches, pool bool) (p
 	return patches, pooled, nil
 }
 
-// EmbedPatches returns both the patch features and the pooled embedding,
-// with one pass of the encoder.
-func (v *Vision) EmbedPatches(pixels []float32) (patches, pooled []float32, err error) {
-	return v.Forward(pixels, 0, true)
-}
-
-// Patches returns the features of each patch, [Patches, H] in raster
-// order, after the final LayerNorm and before pooling: where the pooled
-// embedding summarizes the image, they keep the position of what they see.
-func (v *Vision) Patches(pixels []float32) ([]float32, error) {
-	x, _, err := v.Forward(pixels, 0, false)
-	return x, err
-}
-
 // patchify cuts [3, S, S] pixels into P×P patches, one row per patch in
 // raster order, each flattened in (channel, y, x) order.
 func patchify(rows, pixels []float32, S, P int) {

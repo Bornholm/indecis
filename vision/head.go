@@ -330,10 +330,10 @@ func (h *Head) Fit(examples []HeadExample, opts HeadTrainOptions) error {
 // Evaluate returns, per question, the share of labeled examples answered
 // right: p >= 0.5 against the label for a noul, the most likely option or
 // level against the labeled one otherwise.
-func (h *Head) Evaluate(examples []HeadExample) map[string]float64 {
+func (h *Head) Evaluate(examples []HeadExample) (map[string]float64, error) {
 	targets, err := h.targets(examples)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	right := make([]int, len(h.Schema))
 	count := make([]int, len(h.Schema))
@@ -371,5 +371,5 @@ func (h *Head) Evaluate(examples []HeadExample) map[string]float64 {
 			out[q.Name] = float64(right[i]) / float64(count[i])
 		}
 	}
-	return out
+	return out, nil
 }

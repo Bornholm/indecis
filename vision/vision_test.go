@@ -6,6 +6,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/bornholm/indecis"
@@ -126,6 +127,15 @@ func TestTrainedModel(t *testing.T) {
 	}
 	if !IsModel(dir) {
 		t.Fatal("IsModel(trained dir) = false")
+	}
+
+	// A head reading a layer the encoder does not have is refused at load.
+	bad := t.TempDir()
+	if err := SaveHead(bad, backbone, &Head{Schema: h.Schema, T: h.T, H: h.H, K: h.K, Layer: 99, W1: h.W1, B1: h.B1, W2: h.W2, B2: h.B2}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(bad); err == nil || !strings.Contains(err.Error(), "layer 99") {
+		t.Errorf("layer 99: %v", err)
 	}
 	trained, err := Load(dir, WithInt8())
 	if err != nil {

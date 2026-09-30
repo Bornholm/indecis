@@ -100,6 +100,9 @@ func Load(dir string, opts ...Option) (*Model, error) {
 	if head != nil && (head.T != m.Cfg.Patches() || head.H != m.Cfg.Hidden) {
 		return nil, fmt.Errorf("vision: the head expects %d×%d patch features, the encoder gives %d×%d", head.T, head.H, m.Cfg.Patches(), m.Cfg.Hidden)
 	}
+	if head != nil && (head.Layer < 0 || head.Layer > m.Cfg.Layers) {
+		return nil, fmt.Errorf("vision: the head reads layer %d, the encoder has %d", head.Layer, m.Cfg.Layers)
+	}
 	return &Model{m: m, tokPath: filepath.Join(dir, "tokenizer.json"), head: head, cache: map[string][]float32{}, maxCache: c.cache}, nil
 }
 
@@ -139,6 +142,9 @@ func (m *Model) Decide(ctx context.Context, img image.Image, learned []string, o
 	if len(learned) > 0 && m.head == nil {
 		return nil, fmt.Errorf("vision: this model has no learned questions")
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	px, err := m.preprocess(img)
 	if err != nil {
 		return nil, err
@@ -172,7 +178,7 @@ func (m *Model) Decide(ctx context.Context, img image.Image, learned []string, o
 	}
 	ie := normalize(pooled)
 	for _, q := range open {
-		a, err := m.decide(ie, q)
+		a, err := m.decide(ctx, ie, q)
 		if err != nil {
 			return nil, fmt.Errorf("vision: %s: %w", q.Name, err)
 		}
@@ -268,16 +274,19 @@ func (m *Model) ChooseNearest(ctx context.Context, cands []indecis.Candidate, im
 	if err != nil {
 		return indecis.Answer{}, err
 	}
-	return m.choose(ie, cands)
+	return m.choose(ctx, ie, cands)
 }
 
-func (m *Model) choose(ie []float32, cands []indecis.Candidate) (indecis.Answer, error) {
+func (m *Model) choose(ctx context.Context, ie []float32, cands []indecis.Candidate) (indecis.Answer, error) {
 	if len(cands) < 2 {
 		return indecis.Answer{}, fmt.Errorf("vision: at least two options")
 	}
 	logits := make([]float64, len(cands))
 	cos := make([]float64, len(cands))
 	for i, c := range cands {
+		if err := ctx.Err(); err != nil { // an option out of the cache costs a text pass
+			return indecis.Answer{}, err
+		}
 		te, err := m.EmbedText(optionText(c))
 		if err != nil {
 			return indecis.Answer{}, err
@@ -320,13 +329,16 @@ func (m *Model) choose(ie []float32, cands []indecis.Candidate) (indecis.Answer,
 func (m *Model) DecideOpen(ctx context.Context, questions []indecis.OpenQuestion, images ...image.Image) ([]indecis.Decision, error) {
 	out := make([]indecis.Decision, len(images))
 	for i, img := range images {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		ie, err := m.EmbedImage(img)
 		if err != nil {
 			return nil, err
 		}
 		out[i] = indecis.Decision{}
 		for _, q := range questions {
-			a, err := m.decide(ie, q)
+			a, err := m.decide(ctx, ie, q)
 			if err != nil {
 				return nil, fmt.Errorf("vision: %s: %w", q.Name, err)
 			}
@@ -337,7 +349,7 @@ func (m *Model) DecideOpen(ctx context.Context, questions []indecis.OpenQuestion
 	return out, nil
 }
 
-func (m *Model) decide(ie []float32, q indecis.OpenQuestion) (indecis.Answer, error) {
+func (m *Model) decide(ctx context.Context, ie []float32, q indecis.OpenQuestion) (indecis.Answer, error) {
 	switch q.Kind {
 	case indecis.Noul:
 		if len(q.Options) != 2 {
@@ -348,14 +360,14 @@ func (m *Model) decide(ie []float32, q indecis.OpenQuestion) (indecis.Answer, er
 		// under 0.5 for most animals. Opposing the two criteria, by default
 		// the instructions and indecis.NoulAnchor, answered 86 to 97% right
 		// at 0.5; a described negation ("a photo of an object"), 92 to 98%.
-		a, err := m.choose(ie, q.Options)
+		a, err := m.choose(ctx, ie, q.Options)
 		if err != nil {
 			return indecis.Answer{}, err
 		}
 		p := a.Probs[q.Options[0].Name]
 		return indecis.Answer{Kind: indecis.Noul, P: p, Confidence: math.Max(p, 1-p)}, nil
 	case indecis.Choice, indecis.Score:
-		a, err := m.choose(ie, q.Options)
+		a, err := m.choose(ctx, ie, q.Options)
 		if err != nil {
 			return a, err
 		}

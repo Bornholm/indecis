@@ -79,7 +79,14 @@ func runTrainVision(args []string) error {
 		train, test = train[cut:], train[:cut]
 	}
 	start := time.Now()
-	enc := encoder{m: m, layer: *layer, cache: *cacheDir, key: fmt.Sprintf("%s|int8=%v|layer=%d", filepath.Clean(*backbone), *quantized, *layer)}
+	// The key names the encoder's weights, not only their directory: a model
+	// replaced in place must not reuse features of the old one.
+	weights, err := os.Stat(filepath.Join(*backbone, "model.safetensors"))
+	if err != nil {
+		return err
+	}
+	enc := encoder{m: m, layer: *layer, cache: *cacheDir, warn: &sync.Once{},
+		key: fmt.Sprintf("%s|%d|%d|int8=%v|layer=%d", filepath.Clean(*backbone), weights.Size(), weights.ModTime().UnixNano(), *quantized, *layer)}
 	trainH, err := enc.images(train, *workers)
 	if err != nil {
 		return err
@@ -107,7 +114,10 @@ func runTrainVision(args []string) error {
 	}
 	log.Printf("model written to %s", *out)
 	if len(testH) > 0 {
-		acc := head.Evaluate(testH)
+		acc, err := head.Evaluate(testH)
+		if err != nil {
+			return fmt.Errorf("test examples: %w", err)
+		}
 		for _, q := range sf.schema {
 			if a, ok := acc[q.Name]; ok {
 				fmt.Printf("%-12s n=%-6d acc=%.3f\n", q.Name, len(testH), a)
@@ -163,6 +173,7 @@ type encoder struct {
 	layer int
 	cache string
 	key   string
+	warn  *sync.Once // a failing cache is reported once
 }
 
 func (e encoder) cachePath(path string) (string, bool) {
@@ -237,8 +248,13 @@ func (e encoder) image(ex imageExample) (vision.HeadExample, error) {
 		}
 		// Written aside then renamed: a crash leaves no half file.
 		tmp := cp + ".tmp"
-		if werr := os.WriteFile(tmp, b, 0o644); werr == nil {
-			os.Rename(tmp, cp)
+		werr := os.WriteFile(tmp, b, 0o644)
+		if werr == nil {
+			werr = os.Rename(tmp, cp)
+		}
+		if werr != nil {
+			os.Remove(tmp)
+			e.warn.Do(func() { log.Printf("feature cache not written, images will be encoded again next time: %v", werr) })
 		}
 	}
 	return h, err
