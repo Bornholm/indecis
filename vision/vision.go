@@ -43,6 +43,7 @@ type Model struct {
 	mu       sync.Mutex
 	cache    map[string][]float32 // text embeddings: options recur from call to call
 	maxCache int
+	inflight map[string]*textCall // texts being embedded, see EmbedText
 
 	pixels sync.Pool // *[]float32: normalized pixels, reused from image to image
 }
@@ -209,13 +210,53 @@ func (m *Model) EmbedImage(img image.Image) ([]float32, error) {
 // EmbedText returns the normalized embedding of a text, in the image
 // embeddings' space. Texts longer than the tower (64 tokens) are truncated.
 // The slice is shared with the model's cache: do not modify it.
-func (m *Model) EmbedText(text string) ([]float32, error) {
+//
+// Simultaneous calls for the same text share one pass of the text tower:
+// requests arriving together at a fresh server carry the same options.
+func (m *Model) EmbedText(text string) (e []float32, err error) {
 	m.mu.Lock()
-	e, ok := m.cache[text]
-	m.mu.Unlock()
-	if ok {
+	if e, ok := m.cache[text]; ok {
+		m.mu.Unlock()
 		return e, nil
 	}
+	if c, ok := m.inflight[text]; ok {
+		m.mu.Unlock()
+		<-c.done
+		return c.e, c.err
+	}
+	c := &textCall{done: make(chan struct{})}
+	if m.inflight == nil {
+		m.inflight = map[string]*textCall{}
+	}
+	m.inflight[text] = c
+	m.mu.Unlock()
+	defer func() {
+		if r := recover(); r != nil {
+			e, err = nil, fmt.Errorf("vision: embedding %q: panic: %v", text, r)
+		}
+		c.e, c.err = e, err
+		m.mu.Lock()
+		delete(m.inflight, text)
+		if err == nil && m.maxCache > 0 {
+			if len(m.cache) >= m.maxCache {
+				m.cache = map[string][]float32{}
+			}
+			m.cache[text] = e
+		}
+		m.mu.Unlock()
+		close(c.done)
+	}()
+	return m.embedText(text)
+}
+
+// textCall is a text embedding in progress.
+type textCall struct {
+	done chan struct{}
+	e    []float32
+	err  error
+}
+
+func (m *Model) embedText(text string) ([]float32, error) {
 	m.tokOnce.Do(func() { m.tok, m.tokErr = tokenizer.LoadShared(m.tokPath) })
 	if m.tokErr != nil {
 		return nil, m.tokErr
@@ -225,22 +266,11 @@ func (m *Model) EmbedText(text string) ([]float32, error) {
 		return nil, err
 	}
 	ids := tt.Pad(m.tok.Encode(text), m.tok.EosID(), m.tok.PadID())
-	e, err = tt.Embed(ids)
+	e, err := tt.Embed(ids)
 	if err != nil {
 		return nil, err
 	}
-	e = normalize(e)
-	m.mu.Lock()
-	if m.maxCache == 0 {
-		m.mu.Unlock()
-		return e, nil
-	}
-	if len(m.cache) >= m.maxCache {
-		m.cache = map[string][]float32{}
-	}
-	m.cache[text] = e
-	m.mu.Unlock()
-	return e, nil
+	return normalize(e), nil
 }
 
 // Logit is the model's score for an (image, text) pair of normalized

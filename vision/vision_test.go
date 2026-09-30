@@ -7,12 +7,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/bornholm/indecis"
 )
 
-func load(t *testing.T) *Model {
+func load(t *testing.T, opts ...Option) *Model {
 	t.Helper()
 	dir := os.Getenv("INDECIS_SIGLIP2_DIR")
 	if dir == "" {
@@ -22,7 +23,7 @@ func load(t *testing.T) *Model {
 	if _, err := os.Stat(filepath.Join(dir, "model.safetensors")); err != nil {
 		t.Skipf("SigLIP 2 model absent (%s): set INDECIS_SIGLIP2_DIR", dir)
 	}
-	m, err := Load(dir, WithInt8())
+	m, err := Load(dir, append([]Option{WithInt8()}, opts...)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,5 +160,36 @@ func TestTrainedModel(t *testing.T) {
 	}
 	if d["circle"].P > 0.5 {
 		t.Errorf("circle on noise: P = %.3f", d["circle"].P)
+	}
+}
+
+// Simultaneous requests for a text out of the cache share one pass of the
+// text tower. The cache is off: only that sharing gives them one slice.
+func TestEmbedTextShared(t *testing.T) {
+	m := load(t, WithEmbedCache(0))
+	if _, err := m.EmbedText("warm-up"); err != nil { // loads the text tower
+		t.Fatal(err)
+	}
+	start := make(chan struct{})
+	got := make([][]float32, 4)
+	var wg sync.WaitGroup
+	for i := range got {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			got[i], _ = m.EmbedText("a photo of a dog")
+		}()
+	}
+	close(start)
+	wg.Wait()
+	for i, e := range got {
+		if len(e) == 0 || &e[0] != &got[0][0] {
+			t.Fatalf("call %d computed its own embedding", i)
+		}
+	}
+	later, err := m.EmbedText("a photo of a dog")
+	if err != nil || &later[0] == &got[0][0] {
+		t.Fatalf("a later call, cache off, reused the shared result (err %v)", err)
 	}
 }
