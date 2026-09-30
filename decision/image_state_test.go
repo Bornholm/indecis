@@ -7,6 +7,7 @@ import (
 	"hash/crc32"
 	"image"
 	"image/color"
+	"image/jpeg"
 	"image/png"
 	"strings"
 	"testing"
@@ -39,6 +40,46 @@ func hugePNG(w, h uint32) []byte {
 	return b.Bytes()
 }
 
+// jpegHeader is the start of a JPEG of w×h pixels, as far as
+// image.DecodeConfig reads: a comment segment, a baseline (SOF0) or
+// progressive (SOF2) frame header, then the start of the scan.
+func jpegHeader(w, h uint16, progressive bool) []byte {
+	sof := byte(0xc0)
+	if progressive {
+		sof = 0xc2
+	}
+	b := []byte{0xff, 0xd8, 0xff, 0xfe, 0x00, 0x04, 'h', 'i', 0xff, sof, 0x00, 17, 8}
+	b = binary.BigEndian.AppendUint16(b, h)
+	b = binary.BigEndian.AppendUint16(b, w)
+	b = append(b, 3)
+	for id := byte(1); id <= 3; id++ {
+		b = append(b, id, 0x11, 0)
+	}
+	return append(b, 0xff, 0xda, 0x00, 0x02) // start of scan: DecodeConfig stops
+}
+
+func TestProgressiveJPEG(t *testing.T) {
+	var baseline bytes.Buffer
+	if err := jpeg.Encode(&baseline, image.NewGray(image.Rect(0, 0, 8, 8)), nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name string
+		b    []byte
+		want bool
+	}{
+		{"encoded baseline", baseline.Bytes(), false},
+		{"baseline header", jpegHeader(64, 64, false), false},
+		{"progressive header", jpegHeader(64, 64, true), true},
+		{"PNG", pngBytes(t, 4, 3), false},
+		{"truncated", []byte{0xff, 0xd8, 0xff}, false},
+	} {
+		if got := progressiveJPEG(c.b); got != c.want {
+			t.Errorf("%s: progressiveJPEG = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
 // stateImage needs no model: every branch runs in CI.
 func TestStateImage(t *testing.T) {
 	small := base64.StdEncoding.EncodeToString(pngBytes(t, 4, 3))
@@ -61,6 +102,7 @@ func TestStateImage(t *testing.T) {
 		{"not an image", "data:image/png;base64," + base64.StdEncoding.EncodeToString([]byte("hello")), 0, "unreadable"},
 		{"beyond the default bound", "data:image/png;base64," + base64.StdEncoding.EncodeToString(hugePNG(8192, 8192)), 0, "at most"},
 		{"beyond a set bound", "data:image/png;base64," + small, 10, "at most"},
+		{"progressive JPEG beyond a quarter of the bound", "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(jpegHeader(4096, 2048, true)), 0, "progressive JPEG"},
 	} {
 		img, err := stateImage(c.state, c.max)
 		switch {

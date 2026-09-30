@@ -39,7 +39,7 @@ A question named like a learned question goes through the model's head, which is
 | `-memory-limit` | none | soft memory limit, in MiB |
 | `-memory-headroom` | 64 | garbage allowed above the loaded models before a collection, in MiB; 0 keeps Go's default, where the heap may double |
 | `-embed-cache` | 4,096 | option embeddings kept in memory, text and image models |
-| `-max-pixels` | 16,777,216 | image models: largest image accepted, in pixels |
+| `-max-pixels` | 16,777,216 | image models: largest image accepted, in pixels (a quarter for a progressive JPEG) |
 | `-max-body` | 4 MiB, 24 with an image model | largest request body, in MiB |
 | `-batching` | false | groups simultaneous requests (see [inference.md](inference.md)) |
 

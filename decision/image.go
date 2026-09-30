@@ -21,8 +21,10 @@ import (
 // DefaultMaxImagePixels bounds the size of a decoded image when
 // Client.MaxImagePixels is 0: a small compressed file can declare a huge
 // image. The encoder reads 256×256; 16 megapixels leaves room for camera
-// photos. A decoded image then takes at most 64 MB (RGBA PNG), 24 MB for a
-// JPEG, and resizing streams its rows: about 3 MB more.
+// photos. A decoded image then takes at most 64 MB (RGBA PNG), 48 MB for a
+// JPEG, and resizing streams its rows: about 3 MB more. A progressive JPEG
+// is bounded to a quarter of that, its coefficients taking 12 bytes per
+// pixel while it decodes.
 const DefaultMaxImagePixels = 16 << 20
 
 // FromVision wraps an image model (SigLIP), designated by name. Its state
@@ -113,10 +115,42 @@ func stateImage(state any, maxPixels int) (image.Image, error) {
 	if int64(cfg.Width)*int64(cfg.Height) > int64(maxPixels) {
 		return nil, llm.NewValidationError("state", fmt.Sprintf("image of %d×%d pixels, at most %d", cfg.Width, cfg.Height, maxPixels))
 	}
+	// A progressive JPEG is decoded through all its DCT coefficients, 256
+	// bytes per 8×8 block and component: up to 12 bytes per pixel, eight
+	// times the final image. It gets a quarter of the bound.
+	if progressiveJPEG(raw) && int64(cfg.Width)*int64(cfg.Height) > int64(maxPixels/4) {
+		return nil, llm.NewValidationError("state", fmt.Sprintf("progressive JPEG of %d×%d pixels, at most %d", cfg.Width, cfg.Height, maxPixels/4))
+	}
 	r.Seek(0, io.SeekStart)
 	img, _, err := image.Decode(r)
 	if err != nil {
 		return nil, llm.NewValidationError("state", "unreadable image: "+err.Error())
 	}
 	return img, nil
+}
+
+// progressiveJPEG reports whether b is a JPEG whose frame is progressive
+// (SOF2), reading the markers up to the first frame header.
+func progressiveJPEG(b []byte) bool {
+	if len(b) < 4 || b[0] != 0xff || b[1] != 0xd8 {
+		return false
+	}
+	for i := 2; i+4 <= len(b); {
+		if b[i] != 0xff {
+			return false
+		}
+		m := b[i+1]
+		switch {
+		case m == 0xff: // fill byte
+			i++
+			continue
+		case m == 0xd8 || m == 0x01 || (m >= 0xd0 && m <= 0xd7): // no length
+			i += 2
+			continue
+		case m >= 0xc0 && m <= 0xcf && m != 0xc4 && m != 0xc8 && m != 0xcc:
+			return m == 0xc2 || m == 0xc6 || m == 0xca || m == 0xce
+		}
+		i += 2 + (int(b[i+2])<<8 | int(b[i+3]))
+	}
+	return false
 }
