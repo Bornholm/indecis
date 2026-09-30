@@ -50,9 +50,6 @@ func SaveHead(dir, backbone string, h *Head) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(dir, manifestFile), append(b, '\n'), 0o644); err != nil {
-		return err
-	}
 	f, err := os.Create(filepath.Join(dir, "head.safetensors"))
 	if err != nil {
 		return err
@@ -67,7 +64,12 @@ func SaveHead(dir, backbone string, h *Head) error {
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	// The manifest comes last: IsModel sees a model only once its weights
+	// are written.
+	return os.WriteFile(filepath.Join(dir, manifestFile), append(b, '\n'), 0o644)
 }
 
 // readManifest returns the manifest of a trained model directory, or nil

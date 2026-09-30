@@ -113,6 +113,9 @@ func main() {
 			}
 		}
 	}
+	if total == 0 {
+		log.Fatal("no image found")
+	}
 	fmt.Printf("%d images, int8=%v, %.1f ms per image\n", total, *int8, float64(elapsed.Milliseconds())/float64(total))
 	for _, p := range names {
 		fmt.Printf("  %-9s accuracy %.1f%%  (e.g. %q)\n", p, 100*float64(correct[p])/float64(total), prompts[p](0))

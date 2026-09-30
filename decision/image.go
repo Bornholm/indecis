@@ -126,7 +126,10 @@ func stateImage(state any, maxPixels int) (image.Image, error) {
 	if err != nil {
 		return nil, llm.NewValidationError("state", "unreadable image: "+err.Error())
 	}
-	if cfg.Width*cfg.Height > maxPixels {
+	if cfg.Width <= 0 || cfg.Height <= 0 {
+		return nil, llm.NewValidationError("state", fmt.Sprintf("image of %d×%d pixels", cfg.Width, cfg.Height))
+	}
+	if int64(cfg.Width)*int64(cfg.Height) > int64(maxPixels) {
 		return nil, llm.NewValidationError("state", fmt.Sprintf("image of %d×%d pixels, at most %d", cfg.Width, cfg.Height, maxPixels))
 	}
 	r.Seek(0, io.SeekStart)

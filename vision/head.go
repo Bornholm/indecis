@@ -340,7 +340,10 @@ func (h *Head) Evaluate(examples []HeadExample) (map[string]float64, error) {
 	x := make([]float32, h.T*h.H)
 	for e, ex := range examples {
 		fromBF16(x, ex.Patches)
-		d, _ := h.Decide(x)
+		d, err := h.Decide(x)
+		if err != nil {
+			return nil, err
+		}
 		for i, q := range h.Schema {
 			t := targets[e][i]
 			if t == nil {

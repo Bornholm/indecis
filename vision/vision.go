@@ -135,6 +135,9 @@ func (m *Model) PatchesAt(img image.Image, layer int) ([]float32, error) {
 // PatchShape returns the number of patches and their width.
 func (m *Model) PatchShape() (patches, hidden int) { return m.m.Cfg.Patches(), m.m.Cfg.Hidden }
 
+// Layers returns the number of encoder layers.
+func (m *Model) Layers() int { return m.m.Cfg.Layers }
+
 // Decide answers for img, with one pass of the encoder, the learned
 // questions named in learned (the model's head) and open questions (see
 // DecideOpen).
@@ -204,6 +207,7 @@ func (m *Model) EmbedImage(img image.Image) ([]float32, error) {
 
 // EmbedText returns the normalized embedding of a text, in the image
 // embeddings' space. Texts longer than the tower (64 tokens) are truncated.
+// The slice is shared with the model's cache: do not modify it.
 func (m *Model) EmbedText(text string) ([]float32, error) {
 	m.mu.Lock()
 	e, ok := m.cache[text]

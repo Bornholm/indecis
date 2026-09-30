@@ -66,7 +66,7 @@ type Client struct {
 	models     map[string]*indecis.Model
 	visions    map[string]*vision.Model // image models (SigLIP), see image.go
 	// MaxImagePixels bounds the images an image model accepts (0:
-	// DefaultMaxImagePixels).
+	// DefaultMaxImagePixels). Set it before the first decision.
 	MaxImagePixels int
 }
 

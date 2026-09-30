@@ -55,6 +55,9 @@ func runTrainVision(args []string) error {
 	if err != nil {
 		return err
 	}
+	if *k <= 0 {
+		return fmt.Errorf("-k must be positive, got %d", *k)
+	}
 	var opts []vision.Option
 	if *quantized {
 		opts = append(opts, vision.WithInt8())
@@ -62,6 +65,9 @@ func runTrainVision(args []string) error {
 	m, err := vision.Load(*backbone, opts...)
 	if err != nil {
 		return err
+	}
+	if *layer < 0 || *layer > m.Layers() {
+		return fmt.Errorf("-layer %d: the encoder has %d layers", *layer, m.Layers())
 	}
 	train, err := readImageExamples(*trainPath)
 	if err != nil {
