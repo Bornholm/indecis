@@ -12,15 +12,99 @@ func RGB(img image.Image) (rgb []uint8, w, h int) {
 	b := img.Bounds()
 	w, h = b.Dx(), b.Dy()
 	rgb = make([]uint8, w*h*3)
-	i := 0
-	for y := b.Min.Y; y < b.Max.Y; y++ {
-		for x := b.Min.X; x < b.Max.X; x++ {
-			c := color.NRGBAModel.Convert(img.At(x, y)).(color.NRGBA)
-			rgb[i], rgb[i+1], rgb[i+2] = c.R, c.G, c.B
-			i += 3
-		}
+	for y := 0; y < h; y++ {
+		rgbRow(rgb[y*w*3:(y+1)*w*3], img, b.Min.Y+y)
 	}
 	return rgb, w, h
+}
+
+// rgbRow writes row y of img to dst as interleaved RGB. The image types
+// the decoders return are read directly, with the same bytes as
+// color.NRGBAModel: img.At would allocate for each pixel.
+func rgbRow(dst []uint8, img image.Image, y int) {
+	b := img.Bounds()
+	switch m := img.(type) {
+	case *image.NRGBA:
+		src := m.Pix[m.PixOffset(b.Min.X, y):]
+		for i := 0; i < b.Dx(); i++ {
+			dst[3*i], dst[3*i+1], dst[3*i+2] = src[4*i], src[4*i+1], src[4*i+2]
+		}
+	case *image.RGBA:
+		for i, x := 0, b.Min.X; x < b.Max.X; i, x = i+3, x+1 {
+			dst[i], dst[i+1], dst[i+2] = unpremultiply(m.RGBAAt(x, y).RGBA())
+		}
+	case *image.YCbCr:
+		for i, x := 0, b.Min.X; x < b.Max.X; i, x = i+3, x+1 {
+			dst[i], dst[i+1], dst[i+2] = unpremultiply(m.YCbCrAt(x, y).RGBA())
+		}
+	case *image.Gray:
+		for i, x := 0, b.Min.X; x < b.Max.X; i, x = i+3, x+1 {
+			v := m.GrayAt(x, y).Y
+			dst[i], dst[i+1], dst[i+2] = v, v, v
+		}
+	default:
+		rgbRowGeneric(dst, img, y)
+	}
+}
+
+func rgbRowGeneric(dst []uint8, img image.Image, y int) {
+	b := img.Bounds()
+	for i, x := 0, b.Min.X; x < b.Max.X; i, x = i+3, x+1 {
+		c := color.NRGBAModel.Convert(img.At(x, y)).(color.NRGBA)
+		dst[i], dst[i+1], dst[i+2] = c.R, c.G, c.B
+	}
+}
+
+// unpremultiply is color.NRGBAModel's conversion, without the alpha.
+func unpremultiply(r, g, b, a uint32) (uint8, uint8, uint8) {
+	switch a {
+	case 0xffff:
+		return uint8(r >> 8), uint8(g >> 8), uint8(b >> 8)
+	case 0:
+		return 0, 0, 0
+	}
+	return uint8(r * 0xffff / a >> 8), uint8(g * 0xffff / a >> 8), uint8(b * 0xffff / a >> 8)
+}
+
+// resizeImage is Resize(RGB(img)) without the RGB copy of the whole image:
+// each row is converted, then resampled horizontally, one at a time. For a
+// 16-megapixel photo, that saves 48 MB.
+func resizeImage(img image.Image, outW, outH int) []uint8 {
+	b := img.Bounds()
+	w, h := b.Dx(), b.Dy()
+	row := make([]uint8, w*3)
+	cur := make([]uint8, outW*h*3)
+	var bounds []int
+	var k [][]int32
+	if outW != w {
+		bounds, k = coeffs(w, outW)
+	}
+	for y := 0; y < h; y++ {
+		dst := cur[y*outW*3 : (y+1)*outW*3]
+		if outW == w {
+			rgbRow(dst, img, b.Min.Y+y)
+			continue
+		}
+		rgbRow(row, img, b.Min.Y+y)
+		resampleRow(dst, row, bounds, k)
+	}
+	if outH != h {
+		cur = resizePass(cur, outW, h, outH, false)
+	}
+	return cur
+}
+
+// resampleRow resamples one row of RGB bytes horizontally.
+func resampleRow(dst, row []uint8, bounds []int, k [][]int32) {
+	for xx := range bounds {
+		for c := 0; c < 3; c++ {
+			ss := int32(1 << (precisionBits - 1))
+			for x, kv := range k[xx] {
+				ss += int32(row[(bounds[xx]+x)*3+c]) * kv
+			}
+			dst[xx*3+c] = clip8(ss)
+		}
+	}
 }
 
 // Resize scales interleaved RGB bytes, [h, w, 3], to [outH, outW, 3] with
@@ -111,16 +195,7 @@ func resizePass(src []uint8, w, h, out int, horizontal bool) []uint8 {
 		bounds, k := coeffs(w, out)
 		dst := make([]uint8, out*h*3)
 		for y := 0; y < h; y++ {
-			row := src[y*w*3:]
-			for xx := 0; xx < out; xx++ {
-				for c := 0; c < 3; c++ {
-					ss := int32(1 << (precisionBits - 1))
-					for x, kv := range k[xx] {
-						ss += int32(row[(bounds[xx]+x)*3+c]) * kv
-					}
-					dst[(y*out+xx)*3+c] = clip8(ss)
-				}
-			}
+			resampleRow(dst[y*out*3:(y+1)*out*3], src[y*w*3:(y+1)*w*3], bounds, k)
 		}
 		return dst
 	}
@@ -149,6 +224,5 @@ func (c Config) Preprocess(img image.Image) ([]float32, error) {
 // PreprocessInto is Preprocess writing the pixels into dst when it is
 // large enough.
 func (c Config) PreprocessInto(dst []float32, img image.Image) ([]float32, error) {
-	rgb, w, h := RGB(img)
-	return PixelsInto(dst, Resize(rgb, w, h, c.ImageSize, c.ImageSize), c.ImageSize)
+	return PixelsInto(dst, resizeImage(img, c.ImageSize, c.ImageSize), c.ImageSize)
 }

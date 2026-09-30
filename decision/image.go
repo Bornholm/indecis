@@ -21,7 +21,8 @@ import (
 // DefaultMaxImagePixels bounds the size of a decoded image when
 // Client.MaxImagePixels is 0: a small compressed file can declare a huge
 // image. The encoder reads 256×256; 16 megapixels leaves room for camera
-// photos while a decoded image stays under about 64 MB (RGBA).
+// photos. A decoded image then takes at most 64 MB (RGBA PNG), 24 MB for a
+// JPEG, and resizing streams its rows: about 3 MB more.
 const DefaultMaxImagePixels = 16 << 20
 
 // FromVision wraps an image model (SigLIP), designated by name. Its state
