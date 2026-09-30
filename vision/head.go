@@ -185,7 +185,8 @@ type HeadTrainOptions struct {
 	LR          float64
 	WeightDecay float64
 	Seed        int64
-	// Progress, if not nil, receives the mean loss of each epoch.
+	// Progress, if not nil, receives the mean loss of each epoch, over the
+	// labels present (an example may leave a question unlabeled).
 	Progress func(epoch int, loss float64)
 }
 
@@ -263,6 +264,7 @@ func (h *Head) Fit(examples []HeadExample, opts HeadTrainOptions) error {
 	for epoch := 1; epoch <= opts.Epochs; epoch++ {
 		r.Shuffle(len(order), func(i, j int) { order[i], order[j] = order[j], order[i] })
 		var total float64
+		labels := 0 // (example, question) pairs with a label
 		for start := 0; start < len(order); start += B {
 			batch := order[start:min(start+B, len(order))]
 			n := len(batch)
@@ -278,6 +280,7 @@ func (h *Head) Fit(examples []HeadExample, opts HeadTrainOptions) error {
 					if t == nil {
 						continue
 					}
+					labels++
 					o := offs[i]
 					if q.Kind == indecis.Noul {
 						p := sigmoid(float64(lb[o]))
@@ -325,7 +328,7 @@ func (h *Head) Fit(examples []HeadExample, opts HeadTrainOptions) error {
 			opt.Step(opts.LR, params, nil)
 		}
 		if opts.Progress != nil {
-			opts.Progress(epoch, total/float64(len(examples)))
+			opts.Progress(epoch, total/float64(max(labels, 1)))
 		}
 	}
 	return nil

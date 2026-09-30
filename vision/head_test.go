@@ -1,6 +1,7 @@
 package vision
 
 import (
+	"context"
 	"math/rand"
 	"path/filepath"
 	"testing"
@@ -121,5 +122,32 @@ func TestTokenizerLoadRetries(t *testing.T) {
 	m.tokPath = "../testdata/siglip2-tiny/tokenizer.json"
 	if tok, err := m.textTokenizer(); err != nil || tok == nil {
 		t.Fatalf("second call: %v, %v", tok, err)
+	}
+}
+
+func TestChooseRefusesDuplicateOptions(t *testing.T) {
+	m := &Model{}
+	cands := []indecis.Candidate{{Name: "cat"}, {Name: "cat", Description: "a photo of a cat"}}
+	if _, err := m.choose(context.Background(), nil, cands); err == nil {
+		t.Fatal("duplicate options: accepted")
+	}
+}
+
+func TestLoadHeadRefusesEmptyDimensions(t *testing.T) {
+	dir := t.TempDir()
+	h, err := NewHead(indecis.Schema{indecis.NewNoul("signal", "")}, 4, 2, 2, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveHead(dir, "backbone", h); err != nil {
+		t.Fatal(err)
+	}
+	m, err := readManifest(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.K = 0
+	if _, err := loadHead(dir, m); err == nil {
+		t.Fatal("k 0: accepted")
 	}
 }

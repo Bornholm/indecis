@@ -354,6 +354,13 @@ func (m *Model) choose(ctx context.Context, ie []float32, cands []indecis.Candid
 	if len(cands) < 2 {
 		return indecis.Answer{}, fmt.Errorf("vision: at least two options")
 	}
+	seen := make(map[string]bool, len(cands))
+	for _, c := range cands {
+		if c.Name == "" || seen[c.Name] {
+			return indecis.Answer{}, fmt.Errorf("vision: option %q empty or duplicate", c.Name)
+		}
+		seen[c.Name] = true
+	}
 	logits := make([]float64, len(cands))
 	cos := make([]float64, len(cands))
 	for i, c := range cands {
