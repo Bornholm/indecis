@@ -31,28 +31,6 @@ func FromVision(name string, v *vision.Model) *Client {
 	return &Client{defaultDir: name, models: map[string]*indecis.Model{}, visions: map[string]*vision.Model{name: v}}
 }
 
-// visionModel returns the image model of dir, loading it if dir holds a
-// SigLIP checkpoint, or nil for a text model.
-func (c *Client) visionModel(dir string) (*vision.Model, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if v, ok := c.visions[dir]; ok {
-		return v, nil
-	}
-	if _, ok := c.models[dir]; ok || !vision.IsModel(dir) {
-		return nil, nil
-	}
-	v, err := vision.Load(dir, vision.WithInt8())
-	if err != nil {
-		return nil, fmt.Errorf("indecis: loading %s: %w", dir, err)
-	}
-	if c.visions == nil {
-		c.visions = map[string]*vision.Model{}
-	}
-	c.visions[dir] = v
-	return v, nil
-}
-
 func decideImage(ctx context.Context, name string, v *vision.Model, state any, questions llm.Questions, maxPixels int) (llm.DecisionResponse, error) {
 	img, err := stateImage(state, maxPixels)
 	if err != nil {

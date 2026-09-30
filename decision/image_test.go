@@ -8,22 +8,17 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
+	"github.com/bornholm/indecis"
 	"github.com/bornholm/indecis/vision"
 )
 
 // An image model behind the decision API: the state is a data URL, the
 // questions are open.
 func TestServerImage(t *testing.T) {
-	dir := os.Getenv("INDECIS_SIGLIP2_DIR")
-	if dir == "" {
-		home, _ := os.UserHomeDir()
-		dir = filepath.Join(home, ".cache/indecis/models/siglip2-base-patch32-256")
-	}
-	if !vision.IsModel(dir) {
-		t.Skipf("SigLIP 2 model absent (%s): set INDECIS_SIGLIP2_DIR", dir)
-	}
+	dir := siglipDir(t)
 	v, err := vision.Load(dir, vision.WithInt8())
 	if err != nil {
 		t.Fatal(err)
@@ -78,5 +73,49 @@ func TestServerImage(t *testing.T) {
 	res2.Body.Close()
 	if res2.StatusCode != http.StatusUnprocessableEntity {
 		t.Errorf("text state: status %d, want 422", res2.StatusCode)
+	}
+}
+
+func siglipDir(t *testing.T) string {
+	t.Helper()
+	dir := os.Getenv("INDECIS_SIGLIP2_DIR")
+	if dir == "" {
+		home, _ := os.UserHomeDir()
+		dir = filepath.Join(home, ".cache/indecis/models/siglip2-base-patch32-256")
+	}
+	if !vision.IsModel(dir) {
+		t.Skipf("SigLIP 2 model absent (%s): set INDECIS_SIGLIP2_DIR", dir)
+	}
+	return dir
+}
+
+// New accepts an image model, and concurrent requests for a model being
+// loaded wait for that one load.
+func TestNewImageModel(t *testing.T) {
+	dir := siglipDir(t)
+	c, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, want, err := c.load(dir)
+	if err != nil || want == nil {
+		t.Fatalf("load(%s) = %v, %v; want an image model", dir, want, err)
+	}
+
+	c = &Client{models: map[string]*indecis.Model{}}
+	got := make([]*vision.Model, 4)
+	var wg sync.WaitGroup
+	for i := range got {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, got[i], _ = c.load(dir)
+		}()
+	}
+	wg.Wait()
+	for i, v := range got {
+		if v == nil || v != got[0] {
+			t.Fatalf("request %d got %p, request 0 got %p: one load expected", i, v, got[0])
+		}
 	}
 }

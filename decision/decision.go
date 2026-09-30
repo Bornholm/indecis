@@ -65,9 +65,76 @@ type Client struct {
 	mu         sync.Mutex
 	models     map[string]*indecis.Model
 	visions    map[string]*vision.Model // image models (SigLIP), see image.go
+	loading    map[string]*pending      // models being loaded, outside mu
 	// MaxImagePixels bounds the images an image model accepts (0:
 	// DefaultMaxImagePixels). Set it before the first decision.
 	MaxImagePixels int
+	// VisionOptions configures the image models loaded on demand (default:
+	// vision.WithInt8()). Set it before the first decision.
+	VisionOptions []vision.Option
+}
+
+// pending is a model being loaded: other requests for the same directory
+// wait on done instead of loading it again.
+type pending struct {
+	done   chan struct{}
+	text   *indecis.Model
+	vision *vision.Model
+	err    error
+}
+
+// load returns the model of dir, loading it once. The load, seconds long
+// for a large checkpoint, runs outside mu: decisions on models already
+// loaded go on meanwhile.
+func (c *Client) load(dir string) (*indecis.Model, *vision.Model, error) {
+	c.mu.Lock()
+	if m, ok := c.models[dir]; ok {
+		c.mu.Unlock()
+		return m, nil, nil
+	}
+	if v, ok := c.visions[dir]; ok {
+		c.mu.Unlock()
+		return nil, v, nil
+	}
+	if p, ok := c.loading[dir]; ok {
+		c.mu.Unlock()
+		<-p.done
+		return p.text, p.vision, p.err
+	}
+	p := &pending{done: make(chan struct{})}
+	if c.loading == nil {
+		c.loading = map[string]*pending{}
+	}
+	c.loading[dir] = p
+	c.mu.Unlock()
+
+	if vision.IsModel(dir) {
+		opts := c.VisionOptions
+		if opts == nil {
+			opts = []vision.Option{vision.WithInt8()}
+		}
+		p.vision, p.err = vision.Load(dir, opts...)
+	} else {
+		p.text, p.err = indecis.Load(dir)
+	}
+	if p.err != nil {
+		p.err = fmt.Errorf("indecis: loading %s: %w", dir, p.err)
+	}
+
+	c.mu.Lock()
+	delete(c.loading, dir)
+	switch {
+	case p.text != nil:
+		c.models[dir] = p.text
+	case p.vision != nil:
+		if c.visions == nil {
+			c.visions = map[string]*vision.Model{}
+		}
+		c.visions[dir] = p.vision
+	}
+	c.mu.Unlock()
+	close(p.done)
+	return p.text, p.vision, p.err
 }
 
 // New loads the model from dir, which serves when the call does not
@@ -77,7 +144,7 @@ func New(dir string) (*Client, error) {
 		return nil, fmt.Errorf("indecis: model directory not configured (GENAI_DECISION_INDECIS_MODEL)")
 	}
 	c := &Client{defaultDir: dir, models: map[string]*indecis.Model{}}
-	if _, err := c.model(dir); err != nil {
+	if _, _, err := c.load(dir); err != nil {
 		return nil, err
 	}
 	return c, nil
@@ -86,20 +153,6 @@ func New(dir string) (*Client, error) {
 // FromModel wraps an already loaded model, designated by name.
 func FromModel(name string, m *indecis.Model) *Client {
 	return &Client{defaultDir: name, models: map[string]*indecis.Model{name: m}}
-}
-
-func (c *Client) model(dir string) (*indecis.Model, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if m, ok := c.models[dir]; ok {
-		return m, nil
-	}
-	m, err := indecis.Load(dir)
-	if err != nil {
-		return nil, fmt.Errorf("indecis: loading %s: %w", dir, err)
-	}
-	c.models[dir] = m
-	return m, nil
 }
 
 // Decision implements llm.DecisionClient.
@@ -111,14 +164,12 @@ func (c *Client) Decision(ctx context.Context, state any, questions llm.Question
 	if opts := llm.NewDecisionOptions(funcs...); opts.Model != "" {
 		dir = opts.Model
 	}
-	if v, err := c.visionModel(dir); err != nil {
-		return nil, err
-	} else if v != nil {
-		return decideImage(ctx, filepath.Base(dir), v, state, questions, c.MaxImagePixels)
-	}
-	m, err := c.model(dir)
+	m, v, err := c.load(dir)
 	if err != nil {
 		return nil, err
+	}
+	if v != nil {
+		return decideImage(ctx, filepath.Base(dir), v, state, questions, c.MaxImagePixels)
 	}
 	in, err := stateInput(state, m.Paired())
 	if err != nil {
