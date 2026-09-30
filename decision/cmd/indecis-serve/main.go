@@ -48,7 +48,8 @@ func main() {
 	flag.Var(&models, "model", "model to serve: directory, or name=directory (repeatable; the first is the default model)")
 	addr := flag.String("addr", "127.0.0.1:8080", "listen address")
 	apiKey := flag.String("api-key", os.Getenv("INDECIS_API_KEY"), "key required as Authorization: Bearer (empty: none)")
-	threads := flag.Int("threads", 0, "cores at most per request (0: all); a text under 1024 tokens always uses a single one")
+	threads := flag.Int("threads", 0, "cores at most per request (0: all for a text model, where a text under 1024 tokens uses a single one anyway; one for an image model)")
+	maxPixels := flag.Int("max-pixels", decision.DefaultMaxImagePixels, "image models: largest image accepted, in pixels")
 	int8 := flag.Bool("int8", true, "layers in int8 if the processor has AVX-VNNI")
 	cache := flag.Int("embed-cache", 4096, "option embeddings kept in cache (open questions)")
 	maxConcurrent := flag.Int("max-concurrent", runtime.GOMAXPROCS(0), "decisions in flight at most, others wait (0: no bound)")
@@ -89,13 +90,16 @@ func main() {
 			if *threads > 0 { // 0 keeps one core per image, the fastest default
 				vopts = append(vopts, vision.WithThreads(*threads))
 			}
+			vopts = append(vopts, vision.WithEmbedCache(*cache))
 			v, err := vision.Load(dir, vopts...)
 			if err != nil {
 				log.Error("loading", "model", dir, "error", err)
 				os.Exit(1)
 			}
 			debug.FreeOSMemory()
-			s.Models[name] = decision.FromVision(name, v)
+			c := decision.FromVision(name, v)
+			c.MaxImagePixels = *maxPixels
+			s.Models[name] = c
 			if s.Default == "" {
 				s.Default = name
 			}

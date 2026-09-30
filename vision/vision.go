@@ -40,18 +40,20 @@ type Model struct {
 	tok     *tokenizer.Tokenizer
 	tokErr  error
 
-	mu    sync.Mutex
-	cache map[string][]float32 // text embeddings: options recur from call to call
+	mu       sync.Mutex
+	cache    map[string][]float32 // text embeddings: options recur from call to call
+	maxCache int
 
 	pixels sync.Pool // *[]float32: normalized pixels, reused from image to image
 }
 
-// maxCache bounds the text embedding cache; beyond, it starts over.
-const maxCache = 4096
+// defaultCache bounds the text embedding cache; beyond, it starts over.
+const defaultCache = 4096
 
 type config struct {
 	int8    bool
 	threads int
+	cache   int
 }
 
 // Option configures Load.
@@ -66,11 +68,15 @@ func WithInt8() Option { return func(c *config) { c.int8 = true } }
 // use at most the number of performance cores.
 func WithThreads(n int) Option { return func(c *config) { c.threads = n } }
 
+// WithEmbedCache keeps the embeddings of up to n texts (the options of the
+// questions), 4,096 by default; 0 disables the cache.
+func WithEmbedCache(n int) Option { return func(c *config) { c.cache = max(n, 0) } }
+
 // Load reads a SigLIP model directory (config.json, model.safetensors and
 // tokenizer.json), or a trained model directory (see SaveHead), which
 // loads its encoder and its head.
 func Load(dir string, opts ...Option) (*Model, error) {
-	c := config{threads: 1}
+	c := config{threads: 1, cache: defaultCache}
 	for _, o := range opts {
 		o(&c)
 	}
@@ -94,7 +100,7 @@ func Load(dir string, opts ...Option) (*Model, error) {
 	if head != nil && (head.T != m.Cfg.Patches() || head.H != m.Cfg.Hidden) {
 		return nil, fmt.Errorf("vision: the head expects %d×%d patch features, the encoder gives %d×%d", head.T, head.H, m.Cfg.Patches(), m.Cfg.Hidden)
 	}
-	return &Model{m: m, tokPath: filepath.Join(dir, "tokenizer.json"), head: head, cache: map[string][]float32{}}, nil
+	return &Model{m: m, tokPath: filepath.Join(dir, "tokenizer.json"), head: head, cache: map[string][]float32{}, maxCache: c.cache}, nil
 }
 
 // Schema returns the learned questions, nil for a bare encoder.
@@ -214,7 +220,11 @@ func (m *Model) EmbedText(text string) ([]float32, error) {
 	}
 	e = normalize(e)
 	m.mu.Lock()
-	if len(m.cache) >= maxCache {
+	if m.maxCache == 0 {
+		m.mu.Unlock()
+		return e, nil
+	}
+	if len(m.cache) >= m.maxCache {
 		m.cache = map[string][]float32{}
 	}
 	m.cache[text] = e

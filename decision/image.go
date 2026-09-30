@@ -1,6 +1,7 @@
 package decision
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	_ "image/gif" // formats accepted in the state
 	_ "image/jpeg"
 	_ "image/png"
+	"io"
 	"strings"
 
 	"github.com/bornholm/genai/llm"
@@ -16,9 +18,11 @@ import (
 	"github.com/bornholm/indecis/vision"
 )
 
-// maxPixels bounds the size of a decoded image (64 megapixels): a small
-// compressed file can declare a huge image.
-const maxPixels = 64 << 20
+// DefaultMaxImagePixels bounds the size of a decoded image when
+// Client.MaxImagePixels is 0: a small compressed file can declare a huge
+// image. The encoder reads 256×256; 16 megapixels leaves room for camera
+// photos while a decoded image stays under about 64 MB (RGBA).
+const DefaultMaxImagePixels = 16 << 20
 
 // FromVision wraps an image model (SigLIP), designated by name. Its state
 // is an image and all its questions are open: their criteria are compared
@@ -49,8 +53,8 @@ func (c *Client) visionModel(dir string) (*vision.Model, error) {
 	return v, nil
 }
 
-func decideImage(ctx context.Context, name string, v *vision.Model, state any, questions llm.Questions) (llm.DecisionResponse, error) {
-	img, err := stateImage(state)
+func decideImage(ctx context.Context, name string, v *vision.Model, state any, questions llm.Questions, maxPixels int) (llm.DecisionResponse, error) {
+	img, err := stateImage(state, maxPixels)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +94,12 @@ func decideImage(ctx context.Context, name string, v *vision.Model, state any, q
 // stateImage decodes the image of a request's state: a data URL
 // ("data:image/png;base64,..."), or an object {"image": ...} holding a data
 // URL or bare base64. PNG, JPEG and GIF are accepted; URLs are not fetched.
-func stateImage(state any) (image.Image, error) {
+// Images beyond maxPixels (0: DefaultMaxImagePixels) are refused before
+// being decoded.
+func stateImage(state any, maxPixels int) (image.Image, error) {
+	if maxPixels <= 0 {
+		maxPixels = DefaultMaxImagePixels
+	}
 	var s string
 	switch v := state.(type) {
 	case string:
@@ -112,14 +121,16 @@ func stateImage(state any) (image.Image, error) {
 	if err != nil {
 		return nil, llm.NewValidationError("state", "invalid base64: "+err.Error())
 	}
-	cfg, _, err := image.DecodeConfig(strings.NewReader(string(raw)))
+	r := bytes.NewReader(raw)
+	cfg, _, err := image.DecodeConfig(r)
 	if err != nil {
 		return nil, llm.NewValidationError("state", "unreadable image: "+err.Error())
 	}
 	if cfg.Width*cfg.Height > maxPixels {
 		return nil, llm.NewValidationError("state", fmt.Sprintf("image of %d×%d pixels, at most %d", cfg.Width, cfg.Height, maxPixels))
 	}
-	img, _, err := image.Decode(strings.NewReader(string(raw)))
+	r.Seek(0, io.SeekStart)
+	img, _, err := image.Decode(r)
 	if err != nil {
 		return nil, llm.NewValidationError("state", "unreadable image: "+err.Error())
 	}

@@ -65,6 +65,9 @@ type Client struct {
 	mu         sync.Mutex
 	models     map[string]*indecis.Model
 	visions    map[string]*vision.Model // image models (SigLIP), see image.go
+	// MaxImagePixels bounds the images an image model accepts (0:
+	// DefaultMaxImagePixels).
+	MaxImagePixels int
 }
 
 // New loads the model from dir, which serves when the call does not
@@ -111,7 +114,7 @@ func (c *Client) Decision(ctx context.Context, state any, questions llm.Question
 	if v, err := c.visionModel(dir); err != nil {
 		return nil, err
 	} else if v != nil {
-		return decideImage(ctx, filepath.Base(dir), v, state, questions)
+		return decideImage(ctx, filepath.Base(dir), v, state, questions, c.MaxImagePixels)
 	}
 	m, err := c.model(dir)
 	if err != nil {
