@@ -139,7 +139,10 @@ func loadEncoder(cfg Config, w weights, prefix string, quantized, outliers bool)
 		l.fc2.outliers = outliers
 		// Each layer's weights are decoded in float32, then packed: the
 		// float32 copies are garbage at once. Collecting after each layer
-		// keeps the startup peak near the final size, for a few ms.
+		// keeps the startup peak near the final size, for a few ms. That
+		// holds for the text tower too, loaded at the first open question:
+		// without these collections, it took 0.1 s less (1.2 s in all) but
+		// peaked 50 MB higher and kept 50 MB more resident.
 		runtime.GC()
 	}
 	return e, nil
