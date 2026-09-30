@@ -38,7 +38,8 @@ type Server struct {
 	MaxConcurrent int
 	// MaxRequestSize bounds a request body, in bytes (0:
 	// DefaultMaxRequestSize). An image travels in base64: 4 MiB carries a
-	// JPEG of about 3 MB.
+	// JPEG of about 3 MB. A server of image models sets it, as
+	// indecis-serve does (24 MiB).
 	MaxRequestSize int64
 	slots          chan struct{}
 	Logger         *slog.Logger
@@ -112,7 +113,7 @@ func (s *Server) decide(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if int64(len(body)) > limit {
-		writeError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("request larger than %d bytes (indecis-serve -max-body)", limit))
+		writeError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("request larger than %d bytes (Server.MaxRequestSize; indecis-serve -max-body)", limit))
 		return
 	}
 	var req wireRequest

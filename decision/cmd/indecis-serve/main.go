@@ -145,7 +145,7 @@ func main() {
 	if *headroom > 0 {
 		var ms runtime.MemStats
 		runtime.ReadMemStats(&ms)
-		pct := max(10, int(int64(*headroom)<<20*100/max(int64(ms.HeapAlloc), 1)))
+		pct := max(10, int((int64(*headroom)<<20)*100/max(int64(ms.HeapAlloc), 1)))
 		if pct < 100 {
 			debug.SetGCPercent(pct)
 			log.Info("garbage collection", "GOGC", pct, "live MiB", ms.HeapAlloc>>20)
