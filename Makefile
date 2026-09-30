@@ -49,6 +49,8 @@ fixtures:
 	cd tools/oracle && ../../$(ORACLE) forward_fixtures.py --model $(BEKKO_DIR) --out ../../testdata/bekko
 	cd tools/oracle && ../../$(ORACLE) train_step_fixtures.py --model $(BEKKO_DIR) --out ../../testdata/bekko
 	$(ORACLE) tools/oracle/siglip_fixtures.py --model $(SIGLIP2_DIR) --out testdata/siglip2
+	$(ORACLE) tools/oracle/tiny_tokenizer.py --model $(SIGLIP2_DIR) --out testdata/siglip2-tiny
+	$(ORACLE) tools/oracle/tokenizer_fixtures.py --model testdata/siglip2-tiny --random 1000 --out testdata/siglip2-tiny/tokenizer_cases.jsonl
 
 clean:
 	rm -rf bin dist

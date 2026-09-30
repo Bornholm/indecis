@@ -1,6 +1,7 @@
 package tokenizer
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -37,5 +38,54 @@ func TestSiglip2Template(t *testing.T) {
 	// "a photo of a cat": no <bos>, <eos> at the end, as the reference.
 	if got, want := tok.Encode("a photo of a cat"), []int32{235250, 2686, 576, 476, 4401, 1}; !slices.Equal(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
+// The raw pipeline without the checkpoint: a small tokenizer cut from
+// SigLIP 2's (tools/oracle/tiny_tokenizer.py), against the tokenizers
+// library.
+func TestParitySiglip2Tiny(t *testing.T) {
+	tok, err := Load("../testdata/siglip2-tiny/tokenizer.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := tok.Encode("a"); got[0] == tok.BosID() {
+		t.Fatalf("Encode(a) = %v: the raw pipeline starts without <bos>", got)
+	}
+	checkParity(t, tok, "../testdata/siglip2-tiny/tokenizer_cases.jsonl")
+}
+
+// Near misses of the two known pipelines are refused, not misread.
+func TestPipelineNearMisses(t *testing.T) {
+	b, err := os.ReadFile("../testdata/siglip2-tiny/tokenizer.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name   string
+		mutate func(j map[string]any)
+	}{
+		{"inverted split", func(j map[string]any) { j["pre_tokenizer"].(map[string]any)["invert"] = true }},
+		{"other split behavior", func(j map[string]any) { j["pre_tokenizer"].(map[string]any)["behavior"] = "Isolated" }},
+		{"no normalizer", func(j map[string]any) { j["normalizer"] = nil }},
+		{"template with <bos>", func(j map[string]any) {
+			pp := j["post_processor"].(map[string]any)
+			pp["single"] = append([]any{map[string]any{"SpecialToken": map[string]any{"id": "<bos>", "type_id": 0}}}, pp["single"].([]any)...)
+		}},
+		{"no post-processor", func(j map[string]any) { j["post_processor"] = nil }},
+	} {
+		var j map[string]any
+		if err := json.Unmarshal(b, &j); err != nil {
+			t.Fatal(err)
+		}
+		c.mutate(j)
+		out, _ := json.Marshal(j)
+		path := filepath.Join(t.TempDir(), "tokenizer.json")
+		if err := os.WriteFile(path, out, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(path); err == nil {
+			t.Errorf("%s: accepted", c.name)
+		}
 	}
 }
