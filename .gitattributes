@@ -1,0 +1,5 @@
+# Binary fixtures compared byte for byte: no end-of-line conversion.
+*.u8 binary
+*.f32 binary
+*.png binary
+*.safetensors binary
