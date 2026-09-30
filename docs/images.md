@@ -45,7 +45,7 @@ bin/indecis train-vision -backbone $M -schema schema.json \
 
 Each line of the JSONL is `{"image": "frames/000123.png", "labels": {"fire": true, "turn": "left"}}`, with paths relative to the file, and the schema is the one of a text model (see [concepts.md](concepts.md)). Encoding takes about 65 ms per image and core (`-workers`); training the head, a few seconds to a minute. The output directory holds `vision.json` and a head of about 100 KB; `vision.Load` and `indecis-serve` read it like an encoder, and answer its questions with the head, any other in open mode, with one pass of the encoder.
 
-`-layer n` trains the head on the patches after n layers instead of the last: when a model has only learned questions, the encoder then stops there. In indecis-vizdoom, layer 8 of 12 kept the accuracy, cut the latency by 29% and raised the score in play.
+`-layer n` trains the head on the patches after n layers instead of the last: when a model has only learned questions, the encoder then stops there. In indecis-vizdoom, layer 8 of 12 kept the accuracy, cut the latency by 29% and raised the score in play. `-layer 0`, the default, reads the final features, after the encoder's last LayerNorm; `-layer 12` on a 12-layer encoder reads the hidden states before it. Both run every layer, but they are different features.
 
 On Imagenette (1,000 training images, 300 test), the head gets 99.3%, against 99.0% zero-shot. In [indecis-vizdoom](../../indecis-vizdoom), a head trained on 13,342 Doom frames (half of them mirrored), reading layer 8, plays from pixels alone at 97% of the scripted policy's score, deciding in 52 ms.
 

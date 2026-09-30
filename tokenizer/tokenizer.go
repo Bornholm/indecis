@@ -346,8 +346,8 @@ func (t *Tokenizer) PadID() int32 { return t.pad }
 func (t *Tokenizer) BosID() int32 { return t.bos }
 func (t *Tokenizer) EosID() int32 { return t.eos }
 
-// Encode tokenizes text and frames the result with <bos> and <eos>
-// (<eos> only for the raw pipeline).
+// Encode tokenizes text and ends the result with <eos>, preceded by <bos>
+// except for the raw pipeline.
 func (t *Tokenizer) Encode(text string) []int32 {
 	var ids []int32
 	if !t.raw {
@@ -380,7 +380,8 @@ func (t *Tokenizer) EncodeMax(text string, maxLen int) []int32 {
 // before the text: the text is what is being judged, the context is what
 // sheds light on it. The context keeps at least a third of the budget if
 // it is long enough, and it is its beginning that is kept: a system
-// prompt sets the assistant's role up front.
+// prompt sets the assistant's role up front. The framing is Encode's, with
+// <eos> between the two.
 func (t *Tokenizer) EncodePair(context, text string, maxLen int) []int32 {
 	a := t.appendText(nil, context)
 	b := t.appendText(nil, text)

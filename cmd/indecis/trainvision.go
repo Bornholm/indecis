@@ -42,7 +42,7 @@ func runTrainVision(args []string) error {
 	batch := fs.Int("batch", def.BatchSize, "examples per batch")
 	lr := fs.Float64("lr", def.LR, "learning rate")
 	k := fs.Int("k", 16, "values per patch read by the head")
-	layer := fs.Int("layer", 0, "encoder layer the head reads (0: the last); the encoder stops there when serving learned questions")
+	layer := fs.Int("layer", 0, "encoder layer the head reads (0: the final features, after the last LayerNorm; n: the hidden states after n layers); the encoder stops there when serving learned questions")
 	seed := fs.Int64("seed", def.Seed, "seed")
 	workers := fs.Int("workers", 2, "images encoded at the same time (at most the performance cores)")
 	quantized := fs.Bool("int8", true, "int8 encoder, as in serving")
