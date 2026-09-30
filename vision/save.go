@@ -70,6 +70,9 @@ func SaveHead(dir, backbone string, h *Head) error {
 		"w2": {Shape: []int{o, h.features()}, Data: h.W2},
 		"b2": {Shape: []int{o}, Data: h.B2},
 	}, nil)
+	if err == nil {
+		err = f.Sync() // the bytes are durable before the rename is
+	}
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
@@ -80,11 +83,26 @@ func SaveHead(dir, backbone string, h *Head) error {
 		os.Remove(weights + ".tmp")
 		return err
 	}
-	if err := os.WriteFile(manifestPath+".tmp", append(b, '\n'), 0o644); err != nil {
+	if err := writeSynced(manifestPath+".tmp", append(b, '\n')); err != nil {
 		os.Remove(manifestPath + ".tmp")
 		return err
 	}
 	return os.Rename(manifestPath+".tmp", manifestPath)
+}
+
+func writeSynced(path string, b []byte) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(b)
+	if err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	return err
 }
 
 // readManifest returns the manifest of a trained model directory, or nil

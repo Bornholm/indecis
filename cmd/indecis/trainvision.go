@@ -58,6 +58,9 @@ func runTrainVision(args []string) error {
 	if *k <= 0 {
 		return fmt.Errorf("-k must be positive, got %d", *k)
 	}
+	if *epochs < 1 || *lr <= 0 {
+		return fmt.Errorf("-epochs %d, -lr %g: at least one epoch and a positive rate", *epochs, *lr)
+	}
 	var opts []vision.Option
 	if *quantized {
 		opts = append(opts, vision.WithInt8())
@@ -83,6 +86,9 @@ func runTrainVision(args []string) error {
 		r.Shuffle(len(train), func(i, j int) { train[i], train[j] = train[j], train[i] })
 		cut := len(train) / 10
 		train, test = train[cut:], train[:cut]
+		if cut == 0 {
+			log.Printf("%d training examples: none kept for testing, the accuracy is not measured", len(train))
+		}
 	}
 	start := time.Now()
 	// The key names the encoder's weights, not only their directory: a model
