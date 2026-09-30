@@ -32,6 +32,8 @@ a.Choice // "truck"
 
 Describe each option as a caption: "a photo of a garbage truck" rather than "truck". The text encoder reads the description, or the name when there is none; the question's instructions are not read for a choice.
 
+An option's `Examples` are other captions of it: the option is scored with the average of their embeddings and its description's. On Imagenette, averaging the English, French and bare-name captions did not beat the best single one (98.6% against 99.0%); examples help when one caption is ambiguous or a little off.
+
 ## Trained questions
 
 When describing the options is not enough, or a question depends on where something is in the image, train a head on examples. The encoder stays frozen; the head reads the features of each of the 64 patches (32×32 pixels) at its position, and their maxima over the image for questions about anywhere.

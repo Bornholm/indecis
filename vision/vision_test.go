@@ -74,6 +74,15 @@ func TestDecide(t *testing.T) {
 		}
 	}
 
+	// An option's examples count: they outweigh a misleading description.
+	withExamples := []indecis.Candidate{
+		{Name: "shapes", Description: "a photo of a cat", Examples: []string{"a red circle on a blue background", "un cercle rouge sur fond bleu", "a red disk"}},
+		{Name: "noise", Description: "random colored noise"},
+	}
+	if a, err := m.ChooseNearest(ctx, withExamples, shapes); err != nil || a.Choice != "shapes" {
+		t.Errorf("ChooseNearest with examples = %s (%v, %v), want shapes", a.Choice, a.Probs, err)
+	}
+
 	qs := []indecis.OpenQuestion{
 		indecis.OpenNoul("circle", "a red circle"),
 		{Name: "content", Kind: indecis.Choice, Options: cands},

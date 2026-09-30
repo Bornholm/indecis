@@ -271,6 +271,30 @@ func optionText(c indecis.Candidate) string {
 	return c.Name
 }
 
+// optionEmbedding is the embedding of an option: that of optionText, or,
+// when the option has examples (other captions), the normalized average of
+// all of them, as the text models' prototypes.
+func (m *Model) optionEmbedding(ctx context.Context, c indecis.Candidate) ([]float32, error) {
+	e, err := m.EmbedText(optionText(c))
+	if err != nil || len(c.Examples) == 0 {
+		return e, err
+	}
+	sum := append([]float32(nil), e...)
+	for _, x := range c.Examples {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		e, err := m.EmbedText(x)
+		if err != nil {
+			return nil, err
+		}
+		for i, v := range e {
+			sum[i] += v
+		}
+	}
+	return normalize(sum), nil
+}
+
 // ChooseNearest picks the option that best describes img: the softmax of
 // the model's logits over the options gives Probs.
 func (m *Model) ChooseNearest(ctx context.Context, cands []indecis.Candidate, img image.Image) (indecis.Answer, error) {
@@ -291,7 +315,7 @@ func (m *Model) choose(ctx context.Context, ie []float32, cands []indecis.Candid
 		if err := ctx.Err(); err != nil { // an option out of the cache costs a text pass
 			return indecis.Answer{}, err
 		}
-		te, err := m.EmbedText(optionText(c))
+		te, err := m.optionEmbedding(ctx, c)
 		if err != nil {
 			return indecis.Answer{}, err
 		}
