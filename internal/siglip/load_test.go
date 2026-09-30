@@ -53,6 +53,8 @@ func TestReadConfigTowerShapes(t *testing.T) {
 		{`{"hidden_size": 1024}`, false},
 		{`{"layer_norm_eps": 1e-6}`, true},
 		{`{"layer_norm_eps": 1e-5}`, false},
+		{`{"intermediate_size": 3072}`, true},
+		{`{"intermediate_size": 4096}`, false},
 	} {
 		dir := t.TempDir()
 		cfg := `{"model_type": "siglip", "vision_config": {"hidden_size": 768, "num_hidden_layers": 12, "num_attention_heads": 12}, "text_config": ` + c.text + `}`
