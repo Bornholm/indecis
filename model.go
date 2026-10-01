@@ -78,9 +78,10 @@ type Model struct {
 	maxLen        int
 	paired        bool
 	info          Info
-	embedCache    *lru     // see WithEmbedCache
-	embedInt8     bool     // see WithInt8Embeddings
-	batcher       *batcher // see WithBatching
+	spanBias      map[string]float64 // see WithSpanBias
+	embedCache    *lru               // see WithEmbedCache
+	embedInt8     bool               // see WithInt8Embeddings
+	batcher       *batcher           // see WithBatching
 }
 
 // Input is a text to judge and its optional context.
@@ -158,6 +159,21 @@ func WithBatching(workers, maxRows int) Option {
 // recognized on load and stays that way. Hugging Face tools do not read
 // this format.
 func WithInt8Embeddings() Option { return func(m *Model) { m.embedInt8 = true } }
+
+// WithSpanBias favors passages in the decoding of a Spans question:
+// bias is added to the log-probability of every passage tag against the
+// outside tag. A positive bias finds more passages and longer ones, more
+// recall for less precision, the trade-off masking personal data asks
+// for; it plays the part of a heavier loss weight on passages, without
+// training again. Confidences stay those of the model.
+func WithSpanBias(question string, bias float64) Option {
+	return func(m *Model) {
+		if m.spanBias == nil {
+			m.spanBias = map[string]float64{}
+		}
+		m.spanBias[question] = bias
+	}
+}
 
 // WithPairs makes the model read pairs (context, text): the system prompt
 // and the message, for example. All inputs are then encoded as a pair,

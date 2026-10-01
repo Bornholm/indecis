@@ -146,25 +146,33 @@ func tagTokens(text string, offs []tokenizer.Offset, spans []goldSpan) []int8 {
 
 // decodeSpans picks the most probable consistent tag sequence from the
 // per-token log-probabilities and returns its passages.
-func decodeSpans(q Question, text string, offs []tokenizer.Offset, logp [][]float64) []Span {
+func decodeSpans(q Question, text string, offs []tokenizer.Offset, logp [][]float64, bias float64) []Span {
 	n := len(logp)
 	if n == 0 {
 		return nil
 	}
 	C := len(logp[0])
+	// The path is chosen on the biased scores, the confidences read the
+	// model's probabilities.
+	score := func(t, c int) float64 {
+		if c > 0 {
+			return logp[t][c] + bias
+		}
+		return logp[t][c]
+	}
 	allowed := func(prev, cur int) bool {
 		if !isInside(cur) {
 			return true
 		}
 		return prev > 0 && tagType(prev) == tagType(cur)
 	}
-	score := make([]float64, C)
+	cur := make([]float64, C)
 	next := make([]float64, C)
 	back := make([][]int16, n)
 	for c := range C {
-		score[c] = logp[0][c]
+		cur[c] = score(0, c)
 		if isInside(c) {
-			score[c] = math.Inf(-1)
+			cur[c] = math.Inf(-1)
 		}
 	}
 	for t := 1; t < n; t++ {
@@ -172,18 +180,18 @@ func decodeSpans(q Question, text string, offs []tokenizer.Offset, logp [][]floa
 		for c := range C {
 			best, arg := math.Inf(-1), 0
 			for p := range C {
-				if allowed(p, c) && score[p] > best {
-					best, arg = score[p], p
+				if allowed(p, c) && cur[p] > best {
+					best, arg = cur[p], p
 				}
 			}
-			next[c] = best + logp[t][c]
+			next[c] = best + score(t, c)
 			back[t][c] = int16(arg)
 		}
-		score, next = next, score
+		cur, next = next, cur
 	}
 	tags := make([]int, n)
 	for c := range C {
-		if score[c] > score[tags[n-1]] {
+		if cur[c] > cur[tags[n-1]] {
 			tags[n-1] = c
 		}
 	}
@@ -436,7 +444,7 @@ func (m *Model) answerSpans(qi int, text string, r inference) Answer {
 	for t, z := range r.tokens[qi] {
 		logp[t] = logSoftmax(z, m.temps[qi])
 	}
-	spans := decodeSpans(q, text, r.offs, logp)
+	spans := decodeSpans(q, text, r.offs, logp, m.spanBias[q.Name])
 	if spans == nil {
 		spans = []Span{}
 	}

@@ -119,7 +119,7 @@ func TestTagDecodeRoundTrip(t *testing.T) {
 			}
 			logp[i][tag] = 0
 		}
-		got := decodeSpans(q, c.text, offs, logp)
+		got := decodeSpans(q, c.text, offs, logp, 0)
 		var want []Span
 		for _, g := range c.spans {
 			want = append(want, Span{Type: q.Options[g.k], Start: g.start, End: g.end, Text: c.text[g.start:g.end], Confidence: 1})
@@ -162,7 +162,7 @@ func TestDecodeSpansConsistent(t *testing.T) {
 		lp(0.10, 0.10, 0.10, 0.10, 0.60), // I-LOC after PER: not allowed
 		lp(0.90, 0.025, 0.025, 0.025, 0.025),
 	}
-	for _, s := range decodeSpans(q, text, offs, logp) {
+	for _, s := range decodeSpans(q, text, offs, logp, 0) {
 		if s.Start == 0 && s.Type == "PER" && s.End == 1 {
 			continue // B-PER on the first token is a valid reading
 		}
@@ -187,7 +187,7 @@ func TestDecodeSpansConsistent(t *testing.T) {
 			}
 		}
 	}
-	got := decodeSpans(q, text, offs, logp)
+	got := decodeSpans(q, text, offs, logp, 0)
 	t.Logf("brute force: %v, decoded: %+v", bestTags, got)
 	var want []Span
 	for i := 0; i < 3; {
@@ -332,5 +332,20 @@ func TestFitSpans(t *testing.T) {
 func TestSpansRefusePairs(t *testing.T) {
 	if _, err := New(bekkoDir(t), Schema{NewSpans("entities", "", "PER")}, 1, WithPairs()); err == nil {
 		t.Fatal("Spans question accepted with WithPairs")
+	}
+}
+
+// A positive bias turns a hesitant token into a passage, without changing
+// its confidence.
+func TestDecodeSpansBias(t *testing.T) {
+	q := NewSpans("entities", "", "PER")
+	offs := []tokenizer.Offset{{Start: 0, End: 4}}
+	logp := [][]float64{{math.Log(0.6), math.Log(0.3), math.Log(0.1)}} // O, B-PER, I-PER
+	if got := decodeSpans(q, "Jean", offs, logp, 0); len(got) != 0 {
+		t.Fatalf("without bias: %+v", got)
+	}
+	got := decodeSpans(q, "Jean", offs, logp, 1)
+	if len(got) != 1 || got[0].Text != "Jean" || math.Abs(got[0].Confidence-0.3) > 1e-9 {
+		t.Fatalf("with bias: %+v", got)
 	}
 }
