@@ -101,6 +101,6 @@ Text embeddings are cached, so an option costs once; an image costs every time. 
 | Tokenizer (original Gemma pipeline, no `<bos>`) | 3,053 texts | identical ids |
 | Resize (PIL's bilinear filter) | downscale and upscale | identical bytes |
 | Image and text embeddings, float32 | 2 images, 5 texts | max relative difference 2.4·10⁻⁶ |
-| Logits, int8 | 12 pairs | within 0.75 for captions, 0.85 for a truncated 64-token text; same ranking |
+| Logits, int8 | 12 pairs | within 0.75 for captions, 0.85 to 0.92 for a truncated 64-token text; same ranking |
 
 Fixtures come from `tools/oracle/siglip_fixtures.py`, with synthetic images.
