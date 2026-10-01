@@ -7,7 +7,9 @@
 //   - choice ([NewChoice]): one option among several, answered with a
 //     distribution;
 //   - score ([NewScore]): a level on an ordered scale, answered with the
-//     expected level and its distribution.
+//     expected level and its distribution;
+//   - spans ([NewSpans]): typed passages of the text, such as named
+//     entities, answered with their positions.
 //
 // One pass of the encoder answers every question of a schema: each question
 // is one more head on the same representation of the text.
@@ -41,6 +43,8 @@ const (
 	Noul   Kind = "noul"
 	Choice Kind = "choice"
 	Score  Kind = "score"
+	// Spans finds typed passages of the text (see NewSpans).
+	Spans Kind = "spans"
 )
 
 // Question describes a decision that the model learns to make.
@@ -50,8 +54,8 @@ type Question struct {
 	// Instructions documents the question. The model does not read it: its
 	// heads are learned, the question is in the data.
 	Instructions string `json:"instructions,omitempty"`
-	// Options lists the options of a Choice, or the levels of a Score in
-	// increasing order.
+	// Options lists the options of a Choice, the levels of a Score in
+	// increasing order, or the passage types of a Spans question.
 	Options []string `json:"options,omitempty"`
 }
 
@@ -92,8 +96,11 @@ func (s Schema) Validate() error {
 			if len(q.Options) != 0 {
 				return fmt.Errorf("indecis: %s: a noul question has no options", q.Name)
 			}
-		case Choice, Score:
-			if len(q.Options) < 2 {
+		case Choice, Score, Spans:
+			if q.Kind == Spans && len(q.Options) < 1 {
+				return fmt.Errorf("indecis: %s: at least one passage type", q.Name)
+			}
+			if q.Kind != Spans && len(q.Options) < 2 {
 				return fmt.Errorf("indecis: %s: at least two options", q.Name)
 			}
 			opts := map[string]bool{}
@@ -190,6 +197,8 @@ func (q Question) target(v any) (t []float64, ok bool, err error) {
 			}
 			return nil, false, fmt.Errorf("%s: unknown level %q", q.Name, x)
 		}
+	case Spans:
+		return nil, false, fmt.Errorf("%s: a spans label is not a target of the pooled vector", q.Name)
 	}
 	return nil, false, fmt.Errorf("%s: label %v (%T) incompatible with type %s", q.Name, v, v, q.Kind)
 }

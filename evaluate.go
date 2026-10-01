@@ -28,6 +28,11 @@ type Metrics struct {
 	MacroF1 float64 `json:"macro_f1,omitempty"`
 	// Score: mean absolute deviation between expected level and actual level.
 	MAE float64 `json:"mae,omitempty"`
+	// Spans: Precision, Recall and F1 count the passages found with their
+	// exact type and bounds, F2 weighs recall twice, Types details each
+	// type. Accuracy, NLL and ECE are per token.
+	F2    float64       `json:"f2,omitempty"`
+	Types []SpanMetrics `json:"types,omitempty"`
 	// NLL is the mean negative log-likelihood, Brier the Brier score
 	// (Noul), ECE the calibration error over 10 confidence bins.
 	NLL   float64 `json:"nll"`
@@ -41,12 +46,22 @@ func (m *Model) Evaluate(ctx context.Context, examples []dataset.Example) ([]Met
 	if err != nil {
 		return nil, err
 	}
-	logits, err := m.logits(ctx, examplesToInputs(examples), 32)
+	res, err := m.infer(ctx, examplesToInputs(examples), 32)
 	if err != nil {
 		return nil, err
 	}
+	logits := make([][][]float64, len(res))
+	texts := make([]string, len(examples))
+	for i, r := range res {
+		logits[i] = r.pooled
+		texts[i] = examples[i].Text
+	}
 	var out []Metrics
 	for qi, h := range m.heads {
+		if h.q.Kind == Spans {
+			out = append(out, m.spanMetrics(qi, data, texts, res))
+			continue
+		}
 		var answers []Answer
 		var targets [][]float64
 		var zs [][]float64
@@ -242,7 +257,12 @@ func (mt Metrics) String() string {
 		fmt.Fprintf(&b, " macroF1=%.3f", mt.MacroF1)
 	case Score:
 		fmt.Fprintf(&b, " MAE=%.3f", mt.MAE)
+	case Spans:
+		fmt.Fprintf(&b, " P=%.3f R=%.3f F1=%.3f F2=%.3f", mt.Precision, mt.Recall, mt.F1, mt.F2)
 	}
 	fmt.Fprintf(&b, " NLL=%.4f ECE=%.4f", mt.NLL, mt.ECE)
+	for _, s := range mt.Types {
+		fmt.Fprintf(&b, "\n  %-10s gold=%-6d found=%-6d P=%.3f R=%.3f F1=%.3f F2=%.3f", s.Type, s.Gold, s.Found, s.Precision, s.Recall, s.F1, s.F2)
+	}
 	return b.String()
 }

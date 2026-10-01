@@ -130,7 +130,7 @@ func loadHead(dir string, m *manifest) (*Head, error) {
 		return nil, fmt.Errorf("vision: manifest with patches %d, hidden %d, k %d, layer %d", m.Patches, m.Hidden, m.K, m.Layer)
 	}
 	h := &Head{Schema: m.Schema, T: m.Patches, H: m.Hidden, K: m.K, Layer: m.Layer}
-	if err := h.Schema.Validate(); err != nil {
+	if err := validateSchema(h.Schema); err != nil {
 		return nil, err
 	}
 	f, err := safetensors.Open(filepath.Join(dir, "head.safetensors"))
