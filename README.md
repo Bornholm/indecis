@@ -12,7 +12,7 @@ echo "Mon colis n'est pas arrivé, je veux parler à quelqu'un." | bin/indecis p
 {"answers": {"sujet": {"choice": "livraison", …}, "urgence": {"score": 2.0, …}, "humain": {"p": 1.0, …}}, …}
 ```
 
-There are three question types: yes/no (`noul`), one option among several (`choice`), and a level on an ordered scale (`score`). One pass of the model answers all of them.
+There are four question types: yes/no (`noul`), one option among several (`choice`), a level on an ordered scale (`score`), and typed passages of the text (`spans`), such as named entities. One pass of the model answers all of them.
 
 ## In numbers
 
@@ -26,7 +26,7 @@ Measured on a laptop (Core Ultra 7 265U) with the bekko-embedding-v1-a8m backbon
 ## Documentation
 
 - [Creating a model in five steps](docs/creating-a-model.md): schema, data, training, evaluation, deployment.
-- [Concepts](docs/concepts.md): question types, calibration, (context, text) pairs, fixed answers or open options.
+- [Concepts](docs/concepts.md): question types, passages in a text, calibration, (context, text) pairs, fixed answers or open options.
 - [Producing data](docs/data.md): templates, labeling by LLMs, consensus.
 - [Open categories](docs/open-categories.md): classify among a list that changes with every request.
 - [Serving a model](docs/serving.md): HTTP server compatible with TypeSafe and OpenRouter, provider for genai.

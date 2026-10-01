@@ -2,13 +2,14 @@
 
 An indecis model answers questions about a text with probabilities. It does not generate text. It is a small pretrained encoder, fully fine-tuned, with one head per question.
 
-## The three question types
+## The question types
 
 | Type | Answer | Label in the examples |
 | --- | --- | --- |
 | `noul` | `P`, the probability of "yes" | boolean, or probability (soft label) |
 | `choice` | `Choice` and the distribution `Probs` | option name, or distribution |
 | `score` | `Score` (expected level), `Choice` (most likely level), `Probs` | level, by name or index |
+| `spans` | `Spans`: the passages found, with type, byte offsets and confidence | list of passages `{"start", "end", "type"}` |
 
 One pass of the encoder answers every question of a schema. An example may label only some of the questions; the others do not count in its loss.
 
@@ -25,6 +26,27 @@ _ = m.Save("model")
 ```
 
 A `score` learns one threshold per level ("above low", "above medium"), so the order of the levels matters: mistaking low for high costs more than mistaking low for medium.
+
+## Passages in a text
+
+A `spans` question finds passages and types them: the people, places and organizations of a text, its personal data. Its options are the types.
+
+```go
+schema := indecis.Schema{indecis.NewSpans("entities", "Named entities", "PER", "LOC", "ORG", "MISC")}
+```
+
+```json
+{"text": "Jean Dupont habite à Paris.", "labels": {"entities": [
+  {"start": 0, "end": 11, "type": "PER"}, {"start": 22, "end": 27, "type": "LOC"}]}}
+```
+
+Offsets are bytes of the UTF-8 text, as Go slices them. An empty list says the text has no passage; passages may not overlap.
+
+The head reads every token instead of the pooled vector and tags it: outside, beginning or inside of a passage of each type. Decoding keeps the most probable sequence where an inside tag follows a tag of the same type, then turns the tokens back into byte offsets (`tokenizer.EncodeOffsets`, identical to the reference library). A token sometimes carries punctuation next to a name, as in `Lamy,`: opening and closing punctuation at the edges of a passage is trimmed, dots excepted.
+
+Texts longer than the model's length (`WithMaxLen`) are read in windows that overlap by a quarter, in training as in inference. Each token takes its tags from the window where it is furthest from an edge. The other questions of the schema read the first window, the truncation they always had. A model with a `spans` question reads no (context, text) pairs.
+
+`Evaluate` counts a passage when its type and both bounds are exact, and reports precision, recall, F1 and F2 (recall weighed twice) per type. `Calibrate` sets the temperature of the tags.
 
 ## Calibrated probabilities
 
