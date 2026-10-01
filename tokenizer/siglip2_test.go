@@ -89,3 +89,12 @@ func TestPipelineNearMisses(t *testing.T) {
 		}
 	}
 }
+
+// Offsets of the raw pipeline, on the small tokenizer.
+func TestOffsetsParitySiglip2Tiny(t *testing.T) {
+	tok, err := Load("../testdata/siglip2-tiny/tokenizer.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkOffsets(t, tok, "../testdata/siglip2-tiny/offset_cases.jsonl")
+}
