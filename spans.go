@@ -224,8 +224,9 @@ func decodeSpans(q Question, text string, offs []tokenizer.Offset, logp [][]floa
 
 // trimPunct removes from a passage the opening and closing punctuation
 // that BPE glues to its edge tokens: "Lamy," is one token, the comma is
-// not part of the name. Dots stay ("J.-P.", "Inc."), and so does a
-// passage made only of punctuation.
+// not part of the name. Dots stay ("J.-P.", "Inc."), so does a closing
+// bracket opened inside the passage, and so does a passage made only of
+// punctuation.
 func trimPunct(text string, start, end int) (int, int) {
 	s, e := start, end
 	for s < e {
@@ -237,7 +238,7 @@ func trimPunct(text string, start, end int) (int, int) {
 	}
 	for s < e {
 		r, size := utf8.DecodeLastRuneInString(text[s:e])
-		if !strings.ContainsRune(closePunct, r) && !unicode.IsSpace(r) {
+		if !unicode.IsSpace(r) && (!strings.ContainsRune(closePunct, r) || paired(text[s:e-size], r)) {
 			break
 		}
 		e -= size
@@ -247,6 +248,18 @@ func trimPunct(text string, start, end int) (int, int) {
 	}
 	return s, e
 }
+
+// paired reports whether a closing bracket ends a pair opened in the
+// passage, as in "Mme Martin (née Roux)": it then stays.
+func paired(span string, closing rune) bool {
+	open, ok := pairs[closing]
+	if !ok {
+		return false
+	}
+	return strings.Count(span, string(open)) > strings.Count(span, string(closing))
+}
+
+var pairs = map[rune]rune{')': '(', ']': '[', '}': '{', '»': '«', '›': '‹', '”': '“'}
 
 const (
 	openPunct  = "([{«‹“‘\"'¿¡"

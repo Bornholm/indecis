@@ -99,6 +99,7 @@ func TestTagDecodeRoundTrip(t *testing.T) {
 		// "C," and "y," are single tokens: the comma is trimmed off.
 		{"Le directeur de l'OMC, Pascal Lamy, est à Genève", []goldSpan{{18, 21, 2}, {23, 34, 0}, {43, 50, 1}}},
 		{"(Lyon) « Marseille »", []goldSpan{{1, 5, 1}, {10, 19, 1}}},
+		{"Mme Roux (née Martin), à Lyon", []goldSpan{{0, 22, 0}, {27, 31, 1}}},
 		{"Marie Curie Marie Curie", []goldSpan{{0, 11, 0}, {12, 23, 0}}},
 		{"  Lyon  ", []goldSpan{{2, 6, 1}}},
 		{"rien à signaler", nil},
