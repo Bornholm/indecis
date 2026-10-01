@@ -1,0 +1,251 @@
+package siglip
+
+import (
+	"fmt"
+	"math"
+	"runtime"
+	"sync"
+
+	"github.com/bornholm/indecis/internal/linalg"
+)
+
+// linear is y = x·Wᵀ + b, with W stored [out, in] as in PyTorch and
+// packed once for the matrix products.
+type linear struct {
+	in, out int
+	bias    []float32
+	p       *linalg.PackedB
+	p8      *linalg.PackedB8
+	// outliers takes massive input channels out of the int8 product (see
+	// linalg.MatMul8Outliers).
+	outliers bool
+}
+
+func newLinear(w, b []float32, in, out int, quantized bool) *linear {
+	l := &linear{in: in, out: out, bias: b}
+	if quantized {
+		l.p8 = linalg.PackB8(w, in, out, true)
+	} else {
+		l.p = linalg.PackB(w, in, out, true)
+	}
+	return l
+}
+
+// apply writes dst = x·Wᵀ + b for rows rows of x, with at most workers
+// goroutines.
+func (l *linear) apply(dst, x []float32, rows, workers int) {
+	if l.p8 != nil && l.outliers {
+		linalg.MatMul8Outliers(dst[:rows*l.out], x[:rows*l.in], l.p8, rows, false, outlierRatio, workers)
+	} else if l.p8 != nil {
+		linalg.MatMul8N(dst[:rows*l.out], x[:rows*l.in], l.p8, rows, false, workers)
+	} else {
+		linalg.MatMulPackedN(dst[:rows*l.out], x[:rows*l.in], l.p, rows, false, workers)
+	}
+	if l.bias != nil {
+		for r := 0; r < rows; r++ {
+			linalg.AddTo(dst[r*l.out:(r+1)*l.out], l.bias)
+		}
+	}
+}
+
+// layerNorm is a LayerNorm with scale and bias.
+type layerNorm struct{ gamma, beta []float32 }
+
+func (n layerNorm) apply(dst, x []float32, rows, width int, eps float64) {
+	for r := 0; r < rows; r++ {
+		o := dst[r*width : (r+1)*width]
+		linalg.LayerNormRow(o, x[r*width:(r+1)*width], n.gamma, eps)
+		linalg.AddTo(o, n.beta)
+	}
+}
+
+func loadNorm(w weights, prefix string, width int) (layerNorm, error) {
+	g, err := w.get(prefix+".weight", width)
+	if err != nil {
+		return layerNorm{}, err
+	}
+	b, err := w.get(prefix+".bias", width)
+	return layerNorm{g, b}, err
+}
+
+func loadLinear(w weights, prefix string, in, out int, quantized bool) (*linear, error) {
+	wt, err := w.get(prefix+".weight", out, in)
+	if err != nil {
+		return nil, err
+	}
+	b, err := w.get(prefix+".bias", out)
+	if err != nil {
+		return nil, err
+	}
+	return newLinear(wt, b, in, out, quantized), nil
+}
+
+// layer is a pre-norm transformer layer:
+// x += attn(ln1(x)); x += fc2(gelu(fc1(ln2(x)))).
+type layer struct {
+	ln1, ln2 layerNorm
+	qkv, out *linear // q, k and v fused into one [3H, H] product
+	fc1, fc2 *linear
+}
+
+// encoder is the stack of layers shared by both towers.
+type encoder struct {
+	cfg     Config
+	layers  []layer
+	workers int
+}
+
+func loadEncoder(cfg Config, w weights, prefix string, quantized, outliers bool) (*encoder, error) {
+	H, M := cfg.Hidden, cfg.MLP
+	e := &encoder{cfg: cfg, layers: make([]layer, cfg.Layers), workers: 1}
+	for i := range e.layers {
+		p := fmt.Sprintf("%s.layers.%d.", prefix, i)
+		l := &e.layers[i]
+		var err error
+		if l.ln1, err = loadNorm(w, p+"layer_norm1", H); err != nil {
+			return nil, err
+		}
+		if l.ln2, err = loadNorm(w, p+"layer_norm2", H); err != nil {
+			return nil, err
+		}
+		qkvW := make([]float32, 0, 3*H*H)
+		qkvB := make([]float32, 0, 3*H)
+		for _, name := range []string{"q_proj", "k_proj", "v_proj"} {
+			wt, err := w.get(p+"self_attn."+name+".weight", H, H)
+			if err != nil {
+				return nil, err
+			}
+			b, err := w.get(p+"self_attn."+name+".bias", H)
+			if err != nil {
+				return nil, err
+			}
+			qkvW, qkvB = append(qkvW, wt...), append(qkvB, b...)
+		}
+		l.qkv = newLinear(qkvW, qkvB, H, 3*H, quantized)
+		if l.out, err = loadLinear(w, p+"self_attn.out_proj", H, H, quantized); err != nil {
+			return nil, err
+		}
+		if l.fc1, err = loadLinear(w, p+"mlp.fc1", H, M, quantized); err != nil {
+			return nil, err
+		}
+		// fc2 reads the GELU output, where a few channels reach a hundred
+		// times the others (the "massive activations" of vision
+		// transformers). Plain per-token int8 flattens the rest of the row:
+		// alone, it moved the logits by up to 1.5 on the fixtures. Those
+		// channels are split off and computed in float32.
+		if l.fc2, err = loadLinear(w, p+"mlp.fc2", M, H, quantized); err != nil {
+			return nil, err
+		}
+		l.fc2.outliers = outliers
+		// Each layer's weights are decoded in float32, then packed: the
+		// float32 copies are garbage at once. Collecting after each layer
+		// keeps the startup peak near the final size, for a few ms. That
+		// holds for the text tower too, loaded at the first open question:
+		// without these collections, it took 0.1 s less (1.2 s in all) but
+		// peaked 50 MB higher and kept 50 MB more resident.
+		runtime.GC()
+	}
+	return e, nil
+}
+
+// outlierRatio: an input channel of fc2 is split off when its maximum
+// exceeds this many times the mean of the channel maxima.
+const outlierRatio = 6
+
+// buffers holds the working memory of one forward pass over T rows.
+type buffers struct {
+	h, qkv, attn, tmp, mlp []float32
+	q, k, v, s, o          []float32 // one head
+}
+
+// work is the memory of one pass of a tower: activations, patch rows and
+// buffers. A pool keeps it from pass to pass, so that a server deciding on
+// image after image does not allocate megabytes each time.
+type work struct {
+	x, rows []float32
+	b       *buffers
+}
+
+type workPool struct {
+	cfg     Config
+	T, rows int
+	p       sync.Pool
+}
+
+func (wp *workPool) get() *work {
+	if w, ok := wp.p.Get().(*work); ok {
+		return w
+	}
+	return &work{x: make([]float32, wp.T*wp.cfg.Hidden), rows: make([]float32, wp.rows), b: newBuffers(wp.cfg, wp.T)}
+}
+
+func (wp *workPool) put(w *work) { wp.p.Put(w) }
+
+func newBuffers(cfg Config, T int) *buffers {
+	H, d := cfg.Hidden, cfg.headDim()
+	return &buffers{
+		h: make([]float32, T*H), qkv: make([]float32, T*3*H), attn: make([]float32, T*H),
+		tmp: make([]float32, T*H), mlp: make([]float32, T*cfg.MLP),
+		q: make([]float32, T*d), k: make([]float32, T*d), v: make([]float32, T*d),
+		s: make([]float32, T*T), o: make([]float32, T*d),
+	}
+}
+
+// forward runs the layers on x, [T, H], in place.
+func (e *encoder) forward(x []float32, T int, b *buffers) {
+	e.forwardN(x, T, b, len(e.layers), 0, nil)
+}
+
+// forwardN runs the first n layers on x, in place; with capture > 0, it
+// copies x into dst after that many layers.
+func (e *encoder) forwardN(x []float32, T int, b *buffers, n, capture int, dst []float32) {
+	cfg := e.cfg
+	H := cfg.Hidden
+	for i := range e.layers[:n] {
+		l := &e.layers[i]
+		l.ln1.apply(b.h, x, T, H, cfg.Eps)
+		l.qkv.apply(b.qkv, b.h, T, e.workers)
+		attention(b.attn, b.qkv, T, cfg, b)
+		l.out.apply(b.tmp, b.attn, T, e.workers)
+		linalg.AddTo(x[:T*H], b.tmp[:T*H])
+
+		l.ln2.apply(b.h, x, T, H, cfg.Eps)
+		l.fc1.apply(b.mlp, b.h, T, e.workers)
+		linalg.GeluTanh(b.mlp[:T*cfg.MLP], b.mlp[:T*cfg.MLP])
+		l.fc2.apply(b.tmp, b.mlp, T, e.workers)
+		linalg.AddTo(x[:T*H], b.tmp[:T*H])
+		if i+1 == capture {
+			copy(dst, x[:T*H])
+		}
+	}
+}
+
+// attention computes the full (unmasked) multi-head attention of the
+// fused q, k, v rows, [T, 3H], into dst, [T, H].
+func attention(dst, qkv []float32, T int, cfg Config, b *buffers) {
+	H, d := cfg.Hidden, cfg.headDim()
+	scale := float32(1 / math.Sqrt(float64(d)))
+	for h := 0; h < cfg.Heads; h++ {
+		for t := 0; t < T; t++ {
+			row := qkv[t*3*H:]
+			copy(b.q[t*d:(t+1)*d], row[h*d:(h+1)*d])
+			copy(b.k[t*d:(t+1)*d], row[H+h*d:H+(h+1)*d])
+			copy(b.v[t*d:(t+1)*d], row[2*H+h*d:2*H+(h+1)*d])
+		}
+		linalg.MatMulSerial(b.s[:T*T], b.q[:T*d], b.k[:T*d], T, d, T, false, true, false)
+		for t := 0; t < T; t++ {
+			softmax(b.s[t*T:(t+1)*T], scale)
+		}
+		linalg.MatMulSerial(b.o[:T*d], b.s[:T*T], b.v[:T*d], T, T, d, false, false, false)
+		for t := 0; t < T; t++ {
+			copy(dst[t*H+h*d:t*H+(h+1)*d], b.o[t*d:(t+1)*d])
+		}
+	}
+}
+
+// softmax replaces the raw scores s by softmax(s·scale).
+func softmax(s []float32, scale float32) {
+	linalg.Scale(s, scale)
+	sum := linalg.ExpShift(s, linalg.MaxOf(s))
+	linalg.Scale(s, 1/sum)
+}

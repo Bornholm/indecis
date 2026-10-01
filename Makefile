@@ -6,6 +6,7 @@ export GOEXPERIMENT
 # Varied templates (multilingual, obfuscations) for the tokenizer
 # fixtures: those of the injection detector, in the neighboring repo.
 FIXTURE_TEMPLATES ?= ../xolo-plugin-injection-guard/model/templates
+SIGLIP2_DIR ?= $(HOME)/.cache/indecis/models/siglip2-base-patch32-256
 BEKKO_DIR ?= $(HOME)/.cache/indecis/models/bekko-embedding-v1-a8m
 ORACLE := tools/oracle/.venv/bin/python
 
@@ -44,8 +45,12 @@ oracle:
 fixtures:
 	go run ./cmd/indecis synth -templates $(FIXTURE_TEMPLATES) -n 600 -seed 42 -out /tmp/indecis-synth-sample.jsonl
 	$(ORACLE) tools/oracle/tokenizer_fixtures.py --model $(BEKKO_DIR) --corpus /tmp/indecis-synth-sample.jsonl --out testdata/bekko/tokenizer_cases.jsonl
+	$(ORACLE) tools/oracle/tokenizer_fixtures.py --model $(SIGLIP2_DIR) --out testdata/siglip2/tokenizer_cases.jsonl
 	cd tools/oracle && ../../$(ORACLE) forward_fixtures.py --model $(BEKKO_DIR) --out ../../testdata/bekko
 	cd tools/oracle && ../../$(ORACLE) train_step_fixtures.py --model $(BEKKO_DIR) --out ../../testdata/bekko
+	$(ORACLE) tools/oracle/siglip_fixtures.py --model $(SIGLIP2_DIR) --out testdata/siglip2
+	$(ORACLE) tools/oracle/tiny_tokenizer.py --model $(SIGLIP2_DIR) --out testdata/siglip2-tiny
+	$(ORACLE) tools/oracle/tokenizer_fixtures.py --model testdata/siglip2-tiny --random 1000 --out testdata/siglip2-tiny/tokenizer_cases.jsonl
 
 clean:
 	rm -rf bin dist

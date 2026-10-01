@@ -12,7 +12,10 @@
 //
 // -model also accepts a raw backbone (config.json, model.safetensors,
 // tokenizer.json, without indecis.json), such as bekko: it then answers
-// only open questions, without training.
+// only open questions, without training. A SigLIP checkpoint (config.json
+// of type "siglip") is served as an image model: the state is an image,
+// "data:image/png;base64,..." or {"image": "..."}, and every question is
+// open.
 //
 // Clients: genai (openrouter provider with GENAI_…_BASE_URL=http://…/api/v1,
 // or typesafe with http://…/v1), the TypeSafe SDK, curl.
@@ -32,6 +35,7 @@ import (
 
 	"github.com/bornholm/indecis"
 	"github.com/bornholm/indecis/decision"
+	"github.com/bornholm/indecis/vision"
 )
 
 type modelFlags []string
@@ -44,13 +48,16 @@ func main() {
 	flag.Var(&models, "model", "model to serve: directory, or name=directory (repeatable; the first is the default model)")
 	addr := flag.String("addr", "127.0.0.1:8080", "listen address")
 	apiKey := flag.String("api-key", os.Getenv("INDECIS_API_KEY"), "key required as Authorization: Bearer (empty: none)")
-	threads := flag.Int("threads", 0, "cores at most per request (0: all); a text under 1024 tokens always uses a single one")
+	threads := flag.Int("threads", 0, "cores at most per request (0: all for a text model, where a text under 1024 tokens uses a single one anyway; one for an image model)")
+	maxPixels := flag.Int("max-pixels", decision.DefaultMaxImagePixels, "image models: largest image accepted, in pixels")
+	maxBody := flag.Int("max-body", 0, "largest request body, in MiB (0: 4, or 24 when an image model is served, enough for a 16-megapixel JPEG in base64)")
 	int8 := flag.Bool("int8", true, "layers in int8 if the processor has AVX-VNNI")
 	cache := flag.Int("embed-cache", 4096, "option embeddings kept in cache (open questions)")
 	maxConcurrent := flag.Int("max-concurrent", runtime.GOMAXPROCS(0), "decisions in flight at most, others wait (0: no bound)")
 	batching := flag.Bool("batching", false, "group the computation of simultaneous requests (a few % gain on short requests, more memory; also raise -max-concurrent)")
 	maxLen := flag.Int("max-len", 0, "tokens read at most per text (0: the model's value, 256 generally); quadratic cost beyond 1024")
 	memLimit := flag.Int("memory-limit", 0, "soft heap memory limit, in MiB (0: none); the garbage collector works harder as it approaches")
+	headroom := flag.Int("memory-headroom", 64, "garbage allowed above the loaded models before collecting, in MiB (0: Go's default, as much as the live heap)")
 	flag.Parse()
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	if len(models) == 0 {
@@ -71,10 +78,36 @@ func main() {
 		debug.SetMemoryLimit(int64(*memLimit) << 20)
 	}
 	s := &decision.Server{Models: map[string]*decision.Client{}, APIKey: *apiKey, Logger: log, MaxConcurrent: *maxConcurrent}
+	hasImages := false
 	for _, spec := range models {
 		name, dir, ok := strings.Cut(spec, "=")
 		if !ok {
 			name, dir = filepath.Base(spec), spec
+		}
+		if vision.IsModel(dir) {
+			var vopts []vision.Option
+			if *int8 {
+				vopts = append(vopts, vision.WithInt8())
+			}
+			if *threads > 0 { // 0 keeps one core per image, the fastest default
+				vopts = append(vopts, vision.WithThreads(*threads))
+			}
+			vopts = append(vopts, vision.WithEmbedCache(*cache))
+			v, err := vision.Load(dir, vopts...)
+			if err != nil {
+				log.Error("loading", "model", dir, "error", err)
+				os.Exit(1)
+			}
+			debug.FreeOSMemory()
+			c := decision.FromVision(name, v)
+			c.MaxImagePixels = *maxPixels
+			hasImages = true
+			s.Models[name] = c
+			if s.Default == "" {
+				s.Default = name
+			}
+			log.Info("image model loaded", "name", name, "dir", dir, "memory", memory())
+			continue
 		}
 		m, err := indecis.Open(dir, opts...)
 		if err != nil {
@@ -95,6 +128,28 @@ func main() {
 			s.Default = name
 		}
 		log.Info("model loaded", "name", name, "dir", dir, "paired", m.Paired(), "memory", memory())
+	}
+	switch {
+	case *maxBody > 0:
+		s.MaxRequestSize = int64(*maxBody) << 20
+	case hasImages:
+		s.MaxRequestSize = 24 << 20
+	}
+	// By default Go lets the heap grow to twice its live part before
+	// collecting: here the live part is mostly model weights, so hundreds
+	// of MB of garbage would pile up between collections. The collection
+	// threshold is set to about headroom above the loaded models; it stays
+	// proportional, so a model part loaded later (SigLIP's text tower)
+	// cannot make the collector run without end. The weights hold no
+	// pointers: the extra collections cost little.
+	if *headroom > 0 {
+		var ms runtime.MemStats
+		runtime.ReadMemStats(&ms)
+		pct := max(10, int((int64(*headroom)<<20)*100/max(int64(ms.HeapAlloc), 1)))
+		if pct < 100 {
+			debug.SetGCPercent(pct)
+			log.Info("garbage collection", "GOGC", pct, "live MiB", ms.HeapAlloc>>20)
+		}
 	}
 	log.Info("listening", "addr", *addr, "endpoints", "POST /api/alpha/decisions, POST /v1/systemone, GET /api/alpha/models")
 	if err := http.ListenAndServe(*addr, s.Handler()); err != nil {

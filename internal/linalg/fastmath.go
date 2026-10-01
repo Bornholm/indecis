@@ -25,6 +25,13 @@ func erf32(x float32) float32 {
 
 func geluScalar(x float32) float32 { return 0.5 * x * (1 + erf32(x*0.7071067811865476)) }
 
+// geluTanhScalar is the tanh approximation of GELU (PyTorch's "tanh" GELU),
+// written x * sigmoid(2u) with u = sqrt(2/pi) * (x + 0.044715 x^3).
+func geluTanhScalar(x float32) float32 {
+	u := 0.7978845608028654 * (x + 0.044715*x*x*x)
+	return x / (1 + exp32(-2*u))
+}
+
 // exp32 is Cephes' expf (relative error ~ 2e-7); 0 below -87.3.
 func exp32(x float32) float32 {
 	if x < -87.3 {

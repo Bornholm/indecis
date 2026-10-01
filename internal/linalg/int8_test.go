@@ -88,7 +88,57 @@ func BenchmarkMatMul8(b *testing.B) {
 func TestRoundHalfEven(t *testing.T) {
 	for _, v := range []float32{0, 0.5, 1.5, 2.5, -0.5, -1.5, 126.7, -127, 3.49999, -3.5000002} {
 		if got, want := roundHalfEven(v), float32(math.RoundToEven(float64(v))); got != want {
-			t.Errorf("roundHalfEven(%v) = %v, attendu %v", v, got, want)
+			t.Errorf("roundHalfEven(%v) = %v, want %v", v, got, want)
+		}
+	}
+}
+
+// With a few massive input channels, splitting them off keeps the int8
+// product close to float32, where per-row quantization loses the rest.
+func TestMatMul8Outliers(t *testing.T) {
+	r := rand.New(rand.NewSource(3))
+	m, k, n := 64, 3072, 96
+	a := make([]float32, m*k)
+	for i := range a {
+		a[i] = float32(r.NormFloat64())
+	}
+	for i := 0; i < m; i++ {
+		a[i*k+1038] = 1000 * float32(r.NormFloat64())
+		a[i*k+7] = 150
+	}
+	b := make([]float32, k*n)
+	for i := range b {
+		b[i] = float32(r.NormFloat64() * 0.02)
+	}
+	want := make([]float32, m*n)
+	MatMul(want, a, b, m, k, n, false, false, false)
+	p := PackB8(b, k, n, false)
+	plain, split := make([]float32, m*n), make([]float32, m*n)
+	MatMul8(plain, a, p, m, false)
+	MatMul8Outliers(split, a, p, m, false, 6, 0)
+	errOf := func(got []float32) float64 {
+		var e, s float64
+		for i := range want {
+			d := float64(got[i] - want[i])
+			e += d * d
+			s += float64(want[i]) * float64(want[i])
+		}
+		return math.Sqrt(e / s)
+	}
+	ep, es := errOf(plain), errOf(split)
+	t.Logf("relative error: MatMul8 %.2e, MatMul8Outliers %.2e", ep, es)
+	if es > ep/5 || es > 1e-2 {
+		t.Fatalf("MatMul8Outliers error %.2e, MatMul8 %.2e", es, ep)
+	}
+	// Without outliers, the same result as MatMul8.
+	for i := 0; i < m; i++ {
+		a[i*k+1038], a[i*k+7] = 0, 0
+	}
+	MatMul8(plain, a, p, m, false)
+	MatMul8Outliers(split, a, p, m, false, 6, 0)
+	for i := range plain {
+		if plain[i] != split[i] {
+			t.Fatalf("without outliers, [%d] %v vs %v", i, split[i], plain[i])
 		}
 	}
 }

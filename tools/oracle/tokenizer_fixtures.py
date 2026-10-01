@@ -54,6 +54,10 @@ def main():
     args = ap.parse_args()
 
     tok = Tokenizer.from_file(f"{args.model}/tokenizer.json")
+    # Some tokenizer.json files (SigLIP 2) pad and truncate to a fixed
+    # length: that belongs to the model, not to the tokenization.
+    tok.no_padding()
+    tok.no_truncation()
     texts = list(HANDCRAFTED) + random_texts(args.random)
     if args.corpus:
         rows = [json.loads(l) for l in open(args.corpus, encoding="utf-8")]

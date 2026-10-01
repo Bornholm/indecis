@@ -38,14 +38,17 @@ const metaspace = "▁"
 
 // Tokenizer is safe for concurrent use.
 type Tokenizer struct {
-	vocab   *strTable        // BPE vocabulary strings, by id
-	names   map[int32]string // added tokens, if they differ from the vocabulary
-	size    int              // number of ids
-	merges  mergeTable
-	bytes   [256]int32 // id of <0xXX>, -1 if absent
-	unk     int32
-	bos     int32
-	eos     int32
+	vocab  *strTable        // BPE vocabulary strings, by id
+	names  map[int32]string // added tokens, if they differ from the vocabulary
+	size   int              // number of ids
+	merges mergeTable
+	bytes  [256]int32 // id of <0xXX>, -1 if absent
+	unk    int32
+	bos    int32
+	eos    int32
+	// raw is the original Gemma pipeline (SigLIP 2): no leading ▁, no split
+	// before BPE, and templates without <bos>.
+	raw     bool
 	pad     int32
 	added   map[byte][]addedToken // by first byte, longest to shortest
 	cacheMu sync.RWMutex
@@ -132,6 +135,11 @@ type fileJSON struct {
 		Replacement   string `json:"replacement"`
 		PrependScheme string `json:"prepend_scheme"`
 		Split         bool   `json:"split"`
+		Pattern       struct {
+			String string `json:"String"`
+		} `json:"pattern"`
+		Behavior string `json:"behavior"`
+		Invert   bool   `json:"invert"`
 	} `json:"pre_tokenizer"`
 	PostProcessor *struct {
 		Type   string          `json:"type"`
@@ -186,8 +194,10 @@ func read(r io.Reader) (*Tokenizer, error) {
 	if err := checkSupported(&f); err != nil {
 		return nil, err
 	}
+	raw, _ := pipeline(&f)
 
 	t := &Tokenizer{
+		raw:   raw,
 		names: make(map[int32]string),
 		added: make(map[byte][]addedToken),
 		cache: make(map[string][]int32),
@@ -269,16 +279,36 @@ func checkSupported(f *fileJSON) error {
 	if n := f.Normalizer; n != nil && (n.Type != "Replace" || n.Pattern.String != " " || n.Content != metaspace) {
 		return fmt.Errorf("tokenizer: normalizer not supported")
 	}
-	p := f.PreTokenizer
-	if p == nil || p.Type != "Metaspace" || p.Replacement != metaspace || p.PrependScheme != "always" || !p.Split {
-		return fmt.Errorf("tokenizer: expected pre-tokenizer: Metaspace(▁, always, split)")
+	_, err := pipeline(f)
+	return err
+}
+
+// pipeline recognizes the two supported pipelines and reports whether it
+// is the raw one:
+//   - Metaspace(▁, always, split), templates <bos> A <eos> and
+//     <bos> A <eos> B <eos> (Gemma 3, bekko);
+//   - raw: Split on " " (a no-op, since the normalizer already replaced
+//     spaces), templates A <eos> and A <eos> B <eos> (the original Gemma
+//     tokenizer, SigLIP 2).
+func pipeline(f *fileJSON) (raw bool, err error) {
+	p, pp := f.PreTokenizer, f.PostProcessor
+	if pp == nil || pp.Type != "TemplateProcessing" {
+		return false, fmt.Errorf("tokenizer: expected a TemplateProcessing post-processor")
 	}
-	pp := f.PostProcessor
-	if pp == nil || pp.Type != "TemplateProcessing" || !matches(pp.Single, "<bos>", "", "<eos>") ||
-		!matches(pp.Pair, "<bos>", "", "<eos>", "", "<eos>") {
-		return fmt.Errorf("tokenizer: expected templates: <bos> A <eos> and <bos> A <eos> B <eos>")
+	switch {
+	case p != nil && p.Type == "Metaspace" && p.Replacement == metaspace && p.PrependScheme == "always" && p.Split:
+		if !matches(pp.Single, "<bos>", "", "<eos>") || !matches(pp.Pair, "<bos>", "", "<eos>", "", "<eos>") {
+			return false, fmt.Errorf("tokenizer: expected templates: <bos> A <eos> and <bos> A <eos> B <eos>")
+		}
+		return false, nil
+	case p != nil && p.Type == "Split" && p.Pattern.String == " " && p.Behavior == "MergedWithPrevious" && !p.Invert &&
+		f.Normalizer != nil:
+		if !matches(pp.Single, "", "<eos>") || !matches(pp.Pair, "", "<eos>", "", "<eos>") {
+			return false, fmt.Errorf("tokenizer: expected templates: A <eos> and A <eos> B <eos>")
+		}
+		return true, nil
 	}
-	return nil
+	return false, fmt.Errorf("tokenizer: expected pre-tokenizer: Metaspace(▁, always, split) or Split(\" \", merged with previous)")
 }
 
 func pairKey(a, b int32) uint64 { return uint64(uint32(a))<<32 | uint64(uint32(b)) }
@@ -316,9 +346,13 @@ func (t *Tokenizer) PadID() int32 { return t.pad }
 func (t *Tokenizer) BosID() int32 { return t.bos }
 func (t *Tokenizer) EosID() int32 { return t.eos }
 
-// Encode tokenizes text and frames the result with <bos> and <eos>.
+// Encode tokenizes text and ends the result with <eos>, preceded by <bos>
+// except for the raw pipeline.
 func (t *Tokenizer) Encode(text string) []int32 {
-	ids := []int32{t.bos}
+	var ids []int32
+	if !t.raw {
+		ids = append(ids, t.bos)
+	}
 	ids = t.appendText(ids, text)
 	return append(ids, t.eos)
 }
@@ -346,7 +380,8 @@ func (t *Tokenizer) EncodeMax(text string, maxLen int) []int32 {
 // before the text: the text is what is being judged, the context is what
 // sheds light on it. The context keeps at least a third of the budget if
 // it is long enough, and it is its beginning that is kept: a system
-// prompt sets the assistant's role up front.
+// prompt sets the assistant's role up front. The framing is Encode's, with
+// <eos> between the two.
 func (t *Tokenizer) EncodePair(context, text string, maxLen int) []int32 {
 	a := t.appendText(nil, context)
 	b := t.appendText(nil, text)
@@ -360,7 +395,9 @@ func (t *Tokenizer) EncodePair(context, text string, maxLen int) []int32 {
 		}
 	}
 	ids := make([]int32, 0, len(a)+len(b)+3)
-	ids = append(ids, t.bos)
+	if !t.raw {
+		ids = append(ids, t.bos)
+	}
 	ids = append(ids, a...)
 	ids = append(ids, t.eos)
 	ids = append(ids, b...)
@@ -426,6 +463,10 @@ func (t *Tokenizer) walkSegment(seg string, word func(string)) {
 		return
 	}
 	s := strings.ReplaceAll(seg, " ", metaspace)
+	if t.raw {
+		word(s) // no leading ▁, no split: the whole segment goes to BPE
+		return
+	}
 	if !strings.HasPrefix(s, metaspace) {
 		s = metaspace + s
 	}

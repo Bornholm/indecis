@@ -77,3 +77,15 @@ func MaxOf(x []float32) float32 {
 	}
 	return m
 }
+
+func GeluTanh(o, a []float32) {
+	for i, x := range a[:len(o)] {
+		o[i] = geluTanhScalar(x)
+	}
+}
+
+func AddTo(o, b []float32) {
+	for i := range o {
+		o[i] += b[i]
+	}
+}
