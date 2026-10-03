@@ -175,6 +175,12 @@ func WithSpanBias(question string, bias float64) Option {
 	}
 }
 
+// SetSpanBias changes the decoding bias of a Spans question (see
+// WithSpanBias). It must not run during a decision.
+func (m *Model) SetSpanBias(question string, bias float64) {
+	WithSpanBias(question, bias)(m)
+}
+
 // WithPairs makes the model read pairs (context, text): the system prompt
 // and the message, for example. All inputs are then encoded as a pair,
 // including an empty context, so that training and inference see the same
