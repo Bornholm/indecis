@@ -660,7 +660,10 @@ func (m *Model) calibrateSpans(qi int, examples []encoded, res []inference) {
 			ts = append(ts, int(tag))
 		}
 	}
-	if len(zs) == 0 {
+	if len(zs) == 0 || tagsSeparated(zs, ts) {
+		// Every tag already wins: the likelihood keeps decreasing down to
+		// T -> 0, as for the other questions (see separable). The
+		// temperature stays unchanged.
 		return
 	}
 	nll := func(T float64) float64 {
@@ -671,4 +674,17 @@ func (m *Model) calibrateSpans(qi int, examples []encoded, res []inference) {
 		return sum / float64(len(zs))
 	}
 	m.temps[qi] = goldenLog(nll, 0.05, 20)
+}
+
+// tagsSeparated reports whether the gold tag of every token has the highest
+// logit.
+func tagsSeparated(zs [][]float64, ts []int) bool {
+	for i, z := range zs {
+		for k, v := range z {
+			if k != ts[i] && v >= z[ts[i]] {
+				return false
+			}
+		}
+	}
+	return true
 }

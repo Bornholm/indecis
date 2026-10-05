@@ -363,3 +363,20 @@ func TestDecodeSpansBias(t *testing.T) {
 		t.Fatalf("with bias: %+v", got)
 	}
 }
+
+// Perfectly tagged calibration tokens leave the temperature unchanged, as
+// for the other questions; otherwise the temperature moves.
+func TestCalibrateSpansSeparated(t *testing.T) {
+	m := &Model{schema: Schema{NewSpans("entities", "", "PER")}, temps: []float64{1}}
+	ex := []encoded{{tags: [][]int8{{0, 1, 2}}}}
+	res := []inference{{tokens: [][][]float64{{{2, 0, 0}, {0, 2, 0}, {0, 0, 2}}}}}
+	m.calibrateSpans(0, ex, res)
+	if m.temps[0] != 1 {
+		t.Fatalf("temperature %v after perfectly tagged tokens, want 1", m.temps[0])
+	}
+	res[0].tokens[0][2] = []float64{0, 2, 1} // a mistake
+	m.calibrateSpans(0, ex, res)
+	if m.temps[0] == 1 {
+		t.Fatal("temperature unchanged after a mistake")
+	}
+}
