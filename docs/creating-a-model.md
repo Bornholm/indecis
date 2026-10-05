@@ -25,11 +25,12 @@ done
 
 ## 1. Write the schema
 
-The schema lists the questions the model answers. There are three types (see [concepts.md](concepts.md)):
+The schema lists the questions the model answers. There are four types (see [concepts.md](concepts.md)):
 
 - `noul`: yes or no, answered with a probability;
 - `choice`: one option among several;
-- `score`: a level on an ordered scale.
+- `score`: a level on an ordered scale;
+- `spans`: typed passages of the text, such as named entities (see [Passages in a text](concepts.md#passages-in-a-text)).
 
 ```json
 [

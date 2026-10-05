@@ -2,7 +2,7 @@
 // fully fine-tuned in pure Go, that answers typed questions with calibrated
 // probabilities instead of generated text.
 //
-// A [Schema] lists the questions, of three types:
+// A [Schema] lists the questions, of four types:
 //   - noul ([NewNoul]): a yes/no question, answered with P(yes);
 //   - choice ([NewChoice]): one option among several, answered with a
 //     distribution;
