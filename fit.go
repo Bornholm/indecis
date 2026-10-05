@@ -27,7 +27,8 @@ type TrainOptions struct {
 	Warmup float64
 	// ClipNorm bounds the global gradient norm (0: no clipping).
 	ClipNorm float64
-	// Dropout applies to the pooled vector, before the heads.
+	// Dropout applies to the pooled vector before the heads, and to the
+	// state of each token before the heads of Spans questions.
 	Dropout float64
 	Seed    int64
 	// Symmetric (FitEmbeddings) also optimizes the option -> texts

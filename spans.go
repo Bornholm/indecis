@@ -28,9 +28,11 @@ import (
 // An empty list says the text has none. Passages must not overlap.
 //
 // Texts longer than the model (WithMaxLen) are read in overlapping
-// windows, in training as in inference: each token is tagged by the window
-// where it is furthest from an edge. The other questions of the schema
-// read the first window, the truncation they always had.
+// windows, in training as in inference. Training tags every token of every
+// window, so the head also learns passages cut by an edge; inference tags
+// each token from the window where it is furthest from an edge. The other
+// questions of the schema read the first window, the truncation they
+// always had.
 
 // Span is a passage found by a Spans question: text[Start:End].
 type Span struct {

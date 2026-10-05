@@ -44,7 +44,9 @@ Offsets are bytes of the UTF-8 text, as Go slices them. An empty list says the t
 
 The head reads every token instead of the pooled vector and tags it: outside, beginning or inside of a passage of each type. Decoding keeps the most probable sequence where an inside tag follows a tag of the same type, then turns the tokens back into byte offsets (`tokenizer.EncodeOffsets`, identical to the reference library). A token sometimes carries punctuation next to a name, as in `Lamy,`: opening and closing punctuation at the edges of a passage is trimmed, dots excepted.
 
-Texts longer than the model's length (`WithMaxLen`) are read in windows that overlap by a quarter, in training as in inference. Each token takes its tags from the window where it is furthest from an edge. The other questions of the schema read the first window, the truncation they always had. A model with a `spans` question reads no (context, text) pairs.
+Texts longer than the model's length (`WithMaxLen`) are read in windows that overlap by a quarter, in training as in inference. Training tags every token of every window, so the head also learns passages cut by an edge. In inference, each token takes its tags from the window where it is furthest from an edge. The other questions of the schema read the first window, the truncation they always had. A model with a `spans` question reads no (context, text) pairs.
+
+`WithSpanBias` favors passages in the decoding: more passages and longer ones, more recall for less precision, without training again. `Save` keeps the bias, and `SetSpanBias` or an option given to `Load` changes it.
 
 `Evaluate` counts a passage when its type and both bounds are exact, and reports precision, recall, F1 and F2 (recall weighed twice) per type. `Calibrate` sets the temperature of the tags.
 

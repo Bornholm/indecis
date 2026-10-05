@@ -203,13 +203,15 @@ func (m *Model) tokenize(context, text string) ([]int32, error) {
 }
 
 // TokenIDs returns the ids of the tokens the model reads for an input,
-// truncation included.
+// truncation included. A model with a Spans question reads long texts in
+// several windows: TokenIDs returns the first one.
 func (m *Model) TokenIDs(in Input) ([]int32, error) {
 	return m.tokenize(in.Context, in.Text)
 }
 
 // Tokens returns the number of tokens an input occupies, truncation
-// included: what the model actually reads.
+// included: what the model actually reads. A model with a Spans question
+// reads long texts in several windows: Tokens counts the first one.
 func (m *Model) Tokens(in Input) (int, error) {
 	ids, err := m.tokenize(in.Context, in.Text)
 	return len(ids), err
