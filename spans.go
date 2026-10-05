@@ -606,7 +606,8 @@ func (m *Model) spanMetrics(qi int, examples []encoded, texts []string, res []in
 			k := indexOf(q.Options, s.Type)
 			per[k].Found++
 			all.Found++
-			if gold[[3]int{s.Start, s.End, k}] {
+			if key := [3]int{s.Start, s.End, k}; gold[key] {
+				delete(gold, key) // a gold passage matches once
 				tp[k]++
 				tpAll++
 			}
