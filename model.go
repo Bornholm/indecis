@@ -165,7 +165,8 @@ func WithInt8Embeddings() Option { return func(m *Model) { m.embedInt8 = true } 
 // outside tag. A positive bias finds more passages and longer ones, more
 // recall for less precision, the trade-off masking personal data asks
 // for; it plays the part of a heavier loss weight on passages, without
-// training again. Confidences stay those of the model.
+// training again. Confidences stay those of the model. Save keeps the
+// bias, and an option given to Load overrides the saved one.
 func WithSpanBias(question string, bias float64) Option {
 	return func(m *Model) {
 		if m.spanBias == nil {
@@ -410,6 +411,7 @@ type metaJSON struct {
 	Temperatures map[string]float64 `json:"temperatures"`
 	MaxLen       int                `json:"max_len"`
 	Paired       bool               `json:"paired,omitempty"`
+	SpanBias     map[string]float64 `json:"span_bias,omitempty"`
 	Info         Info               `json:"info"`
 }
 
@@ -536,7 +538,8 @@ func (m *Model) Save(dir string) error {
 		return err
 	}
 	meta, err := json.MarshalIndent(metaJSON{
-		Format: formatVersion, Schema: m.schema, Temperatures: m.Temperatures(), MaxLen: m.maxLen, Paired: m.paired, Info: m.info,
+		Format: formatVersion, Schema: m.schema, Temperatures: m.Temperatures(), MaxLen: m.maxLen, Paired: m.paired,
+		SpanBias: m.spanBias, Info: m.info,
 	}, "", "  ")
 	if err != nil {
 		return err
@@ -701,7 +704,7 @@ func Load(dir string, opts ...Option) (*Model, error) {
 	if err != nil {
 		return nil, err
 	}
-	m := &Model{schema: meta.Schema, enc: enc, tok: tok, tokenizerPath: tokPath, embedInt8: embedInt8, maxLen: meta.MaxLen, paired: meta.Paired, info: meta.Info}
+	m := &Model{schema: meta.Schema, enc: enc, tok: tok, tokenizerPath: tokPath, embedInt8: embedInt8, maxLen: meta.MaxLen, paired: meta.Paired, spanBias: meta.SpanBias, info: meta.Info}
 	H := cfg.Hidden
 	for _, q := range meta.Schema {
 		h := newHead(q, H, rand.New(rand.NewSource(0)))

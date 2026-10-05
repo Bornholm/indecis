@@ -328,6 +328,19 @@ func TestFitSpans(t *testing.T) {
 	if logits, err := loaded.Logits(ctx, long); err != nil || logits[0]["entities"] != nil || logits[0]["has_city"] == nil {
 		t.Fatalf("Logits: %v %v", logits, err)
 	}
+
+	// The decoding bias survives Save, and a Load option overrides it.
+	m.SetSpanBias("entities", 1.5)
+	biased := t.TempDir()
+	if err := m.Save(biased); err != nil {
+		t.Fatal(err)
+	}
+	if loaded, err = Load(biased); err != nil || loaded.spanBias["entities"] != 1.5 {
+		t.Fatalf("bias after loading: %v %v", loaded.spanBias, err)
+	}
+	if loaded, err = Load(biased, WithSpanBias("entities", 3)); err != nil || loaded.spanBias["entities"] != 3 {
+		t.Fatalf("bias given to Load: %v %v", loaded.spanBias, err)
+	}
 }
 
 func TestSpansRefusePairs(t *testing.T) {
