@@ -2,6 +2,7 @@ package indecis
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"math/rand"
@@ -361,6 +362,37 @@ func TestDecodeSpansBias(t *testing.T) {
 	got := decodeSpans(q, "Jean", offs, logp, 1)
 	if len(got) != 1 || got[0].Text != "Jean" || math.Abs(got[0].Confidence-0.3) > 1e-9 {
 		t.Fatalf("with bias: %+v", got)
+	}
+}
+
+// Offsets built in Go are integers, not the float64 of decoded JSON.
+func TestSpansLabelGoIntegers(t *testing.T) {
+	q := NewSpans("entities", "", "PER")
+	for _, v := range []any{
+		[]any{map[string]any{"start": 0, "end": 4, "type": "PER"}},
+		[]any{map[string]any{"start": int64(0), "end": int64(4), "type": "PER"}},
+		[]any{map[string]any{"start": json.Number("0"), "end": json.Number("4"), "type": "PER"}},
+	} {
+		got, ok, err := q.spans(v, "Jean")
+		if err != nil || !ok || len(got) != 1 || got[0] != (goldSpan{0, 4, 0}) {
+			t.Fatalf("%v: %v %v %v", v, got, ok, err)
+		}
+	}
+	if _, _, err := q.spans([]any{map[string]any{"start": 0.5, "end": 4.0, "type": "PER"}}, "Jean"); err == nil {
+		t.Fatal("fractional offset accepted")
+	}
+}
+
+func TestSpansTooManyTypes(t *testing.T) {
+	types := make([]string, MaxSpanTypes+1)
+	for i := range types {
+		types[i] = fmt.Sprintf("T%d", i)
+	}
+	if err := (Schema{NewSpans("entities", "", types[:MaxSpanTypes]...)}).Validate(); err != nil {
+		t.Fatalf("%d types refused: %v", MaxSpanTypes, err)
+	}
+	if err := (Schema{NewSpans("entities", "", types...)}).Validate(); err == nil {
+		t.Fatalf("%d types accepted", len(types))
 	}
 }
 

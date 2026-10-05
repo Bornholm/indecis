@@ -2,6 +2,7 @@ package indecis
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"sort"
@@ -91,13 +92,29 @@ func (q Question) spans(v any, text string) (out []goldSpan, ok bool, err error)
 	return out, true, nil
 }
 
+// intField reads an offset: a JSON number, or a Go integer when the
+// labels are built in code.
 func intField(v any) (int, bool) {
-	f, ok := v.(float64)
-	if !ok || f != math.Trunc(f) {
-		return 0, false
+	switch n := v.(type) {
+	case int:
+		return n, true
+	case int64:
+		return int(n), true
+	case json.Number:
+		i, err := n.Int64()
+		return int(i), err == nil
+	case float64:
+		if n != math.Trunc(n) {
+			return 0, false
+		}
+		return int(n), true
 	}
-	return int(f), true
+	return 0, false
 }
+
+// MaxSpanTypes bounds the passage types of a Spans question: the tags of
+// a token are stored on a signed byte.
+const MaxSpanTypes = 63
 
 // Tags: 0 is outside, 1+2k the beginning of a passage of type k, 2+2k its
 // inside.

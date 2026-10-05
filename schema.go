@@ -100,6 +100,9 @@ func (s Schema) Validate() error {
 			if q.Kind == Spans && len(q.Options) < 1 {
 				return fmt.Errorf("indecis: %s: at least one passage type", q.Name)
 			}
+			if q.Kind == Spans && len(q.Options) > MaxSpanTypes {
+				return fmt.Errorf("indecis: %s: at most %d passage types", q.Name, MaxSpanTypes)
+			}
 			if q.Kind != Spans && len(q.Options) < 2 {
 				return fmt.Errorf("indecis: %s: at least two options", q.Name)
 			}
