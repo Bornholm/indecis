@@ -11,6 +11,7 @@ import (
 	"github.com/bornholm/indecis/dataset"
 	"github.com/bornholm/indecis/internal/modernbert"
 	"github.com/bornholm/indecis/internal/optim"
+	"github.com/bornholm/indecis/tokenizer"
 )
 
 // TrainOptions configures the fine-tuning.
@@ -26,7 +27,8 @@ type TrainOptions struct {
 	Warmup float64
 	// ClipNorm bounds the global gradient norm (0: no clipping).
 	ClipNorm float64
-	// Dropout applies to the pooled vector, before the heads.
+	// Dropout applies to the pooled vector before the heads, and to the
+	// state of each token before the heads of Spans questions.
 	Dropout float64
 	Seed    int64
 	// Symmetric (FitEmbeddings) also optimizes the option -> texts
@@ -55,20 +57,35 @@ type Progress struct {
 }
 
 // encoded is a tokenized example and its targets, one per question (nil if
-// the label is missing).
+// the label is missing). In a model with Spans questions, ids are the
+// text's tokens without the template, and tags their BIO tags for each
+// Spans question (see spanWindows).
 type encoded struct {
 	ids     []int32
 	targets [][]float64
+	tags    [][]int8
+	spans   [][]goldSpan
 }
 
 func (m *Model) encode(examples []dataset.Example) ([]encoded, error) {
 	out := make([]encoded, len(examples))
+	withSpans := m.hasSpans()
 	for i, e := range examples {
-		ids, err := m.tokenize(e.Context, e.Text)
-		if err != nil {
-			return nil, fmt.Errorf("indecis: example %d: %w", i, err)
+		var offs []tokenizer.Offset
+		if withSpans {
+			if e.Context != "" {
+				return nil, fmt.Errorf("indecis: example %d: a model with Spans questions reads no context", i)
+			}
+			out[i].ids, offs = m.tok.AppendOffsets(nil, nil, e.Text)
+			out[i].tags = make([][]int8, len(m.schema))
+			out[i].spans = make([][]goldSpan, len(m.schema))
+		} else {
+			ids, err := m.tokenize(e.Context, e.Text)
+			if err != nil {
+				return nil, fmt.Errorf("indecis: example %d: %w", i, err)
+			}
+			out[i].ids = ids
 		}
-		out[i].ids = ids
 		out[i].targets = make([][]float64, len(m.schema))
 		for name := range e.Labels {
 			if m.schema.Index(name) < 0 {
@@ -76,6 +93,17 @@ func (m *Model) encode(examples []dataset.Example) ([]encoded, error) {
 			}
 		}
 		for qi, q := range m.schema {
+			if q.Kind == Spans {
+				spans, ok, err := q.spans(e.Labels[q.Name], e.Text)
+				if err != nil {
+					return nil, fmt.Errorf("indecis: example %d: %w", i, err)
+				}
+				if ok {
+					out[i].spans[qi] = spans
+					out[i].tags[qi] = tagTokens(e.Text, offs, spans)
+				}
+				continue
+			}
 			t, ok, err := q.target(e.Labels[q.Name])
 			if err != nil {
 				return nil, fmt.Errorf("indecis: example %d: %w", i, err)
@@ -101,6 +129,9 @@ func (m *Model) Fit(ctx context.Context, examples []dataset.Example, opts TrainO
 		return fmt.Errorf("indecis: no examples")
 	}
 	m.recordPriors(data)
+	if m.hasSpans() {
+		data = m.spanWindows(data)
+	}
 
 	H := m.enc.Cfg.Hidden
 	// Training modifies the weights: the embedding table must be in
@@ -238,7 +269,7 @@ func (m *Model) trainStep(batch []*encoded, grads *modernbert.Grads, dropout flo
 		xi := x[i*H : (i+1)*H]
 		for qi, h := range m.heads {
 			t := e.targets[qi]
-			if t == nil {
+			if t == nil || h.q.Kind == Spans {
 				continue
 			}
 			l, dz := h.lossGrad(h.logits(xi), t)
@@ -253,7 +284,11 @@ func (m *Model) trainStep(batch []*encoded, grads *modernbert.Grads, dropout flo
 	for i := range dx {
 		dx[i] *= mask[i]
 	}
-	m.enc.Backward(s, modernbert.MeanPoolBackward(dx, b, H), grads)
+	dHidden := modernbert.MeanPoolBackward(dx, b, H)
+	if m.hasSpans() {
+		loss += m.spanLossGrad(batch, s.Hidden, dHidden, b.T, dropout, rng)
+	}
+	m.enc.Backward(s, dHidden, grads)
 	return loss, tokens
 }
 
@@ -289,15 +324,19 @@ func (m *Model) Calibrate(ctx context.Context, examples []dataset.Example) (map[
 	if err != nil {
 		return nil, err
 	}
-	logits, err := m.logits(ctx, examplesToInputs(examples), 32)
+	res, err := m.infer(ctx, examplesToInputs(examples), 32)
 	if err != nil {
 		return nil, err
 	}
 	for qi, h := range m.heads {
+		if h.q.Kind == Spans {
+			m.calibrateSpans(qi, data, res)
+			continue
+		}
 		var zs, ts [][]float64
 		for i, e := range data {
 			if e.targets[qi] != nil {
-				zs = append(zs, logits[i][qi])
+				zs = append(zs, res[i].pooled[qi])
 				ts = append(ts, e.targets[qi])
 			}
 		}

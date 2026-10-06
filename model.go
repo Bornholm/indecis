@@ -41,6 +41,8 @@ type Answer struct {
 	// average of the others, CLM's confidence: close to 0 when the
 	// options are equally likely, even if there are many of them.
 	Margin float64 `json:"margin,omitempty"`
+	// Spans lists the passages found (Spans), in text order.
+	Spans []Span `json:"spans,omitempty"`
 }
 
 // Decision groups a text's answers, by question name.
@@ -76,9 +78,10 @@ type Model struct {
 	maxLen        int
 	paired        bool
 	info          Info
-	embedCache    *lru     // see WithEmbedCache
-	embedInt8     bool     // see WithInt8Embeddings
-	batcher       *batcher // see WithBatching
+	spanBias      map[string]float64 // see WithSpanBias
+	embedCache    *lru               // see WithEmbedCache
+	embedInt8     bool               // see WithInt8Embeddings
+	batcher       *batcher           // see WithBatching
 }
 
 // Input is a text to judge and its optional context.
@@ -157,6 +160,28 @@ func WithBatching(workers, maxRows int) Option {
 // this format.
 func WithInt8Embeddings() Option { return func(m *Model) { m.embedInt8 = true } }
 
+// WithSpanBias favors passages in the decoding of a Spans question:
+// bias is added to the log-probability of every passage tag against the
+// outside tag. A positive bias finds more passages and longer ones, more
+// recall for less precision, the trade-off masking personal data asks
+// for; it plays the part of a heavier loss weight on passages, without
+// training again. Confidences stay those of the model. Save keeps the
+// bias, and an option given to Load overrides the saved one.
+func WithSpanBias(question string, bias float64) Option {
+	return func(m *Model) {
+		if m.spanBias == nil {
+			m.spanBias = map[string]float64{}
+		}
+		m.spanBias[question] = bias
+	}
+}
+
+// SetSpanBias changes the decoding bias of a Spans question (see
+// WithSpanBias). It must not run during a decision.
+func (m *Model) SetSpanBias(question string, bias float64) {
+	WithSpanBias(question, bias)(m)
+}
+
 // WithPairs makes the model read pairs (context, text): the system prompt
 // and the message, for example. All inputs are then encoded as a pair,
 // including an empty context, so that training and inference see the same
@@ -178,13 +203,15 @@ func (m *Model) tokenize(context, text string) ([]int32, error) {
 }
 
 // TokenIDs returns the ids of the tokens the model reads for an input,
-// truncation included.
+// truncation included. A model with a Spans question reads long texts in
+// several windows: TokenIDs returns the first one.
 func (m *Model) TokenIDs(in Input) ([]int32, error) {
 	return m.tokenize(in.Context, in.Text)
 }
 
 // Tokens returns the number of tokens an input occupies, truncation
-// included: what the model actually reads.
+// included: what the model actually reads. A model with a Spans question
+// reads long texts in several windows: Tokens counts the first one.
 func (m *Model) Tokens(in Input) (int, error) {
 	ids, err := m.tokenize(in.Context, in.Text)
 	return len(ids), err
@@ -229,6 +256,9 @@ func New(backboneDir string, schema Schema, seed int64, opts ...Option) (*Model,
 	for _, o := range opts {
 		o(m)
 	}
+	if m.paired && m.hasSpans() {
+		return nil, fmt.Errorf("indecis: Spans questions do not read pairs (WithPairs)")
+	}
 	rng := rand.New(rand.NewSource(seed))
 	for _, q := range schema {
 		m.heads = append(m.heads, newHead(q, enc.Cfg.Hidden, rng))
@@ -259,7 +289,7 @@ func (m *Model) Decide(ctx context.Context, texts ...string) ([]Decision, error)
 
 // DecideInputs answers all the questions for each input.
 func (m *Model) DecideInputs(ctx context.Context, inputs ...Input) ([]Decision, error) {
-	logits, err := m.logits(ctx, inputs, 32)
+	res, err := m.infer(ctx, inputs, 32)
 	if err != nil {
 		return nil, err
 	}
@@ -267,7 +297,11 @@ func (m *Model) DecideInputs(ctx context.Context, inputs ...Input) ([]Decision, 
 	for i := range inputs {
 		d := Decision{}
 		for qi, h := range m.heads {
-			d[h.q.Name] = h.answer(logits[i][qi], m.temps[qi])
+			if h.q.Kind == Spans {
+				d[h.q.Name] = m.answerSpans(qi, inputs[i].Text, res[i])
+				continue
+			}
+			d[h.q.Name] = h.answer(res[i].pooled[qi], m.temps[qi])
 		}
 		out[i] = d
 	}
@@ -276,7 +310,8 @@ func (m *Model) DecideInputs(ctx context.Context, inputs ...Input) ([]Decision, 
 
 // Logits returns, for each text, the raw logits of each question, before
 // temperature: a caller that applies its own calibration or its own prior
-// correction starts from there (see Temperatures and Info).
+// correction starts from there (see Temperatures and Info). Spans
+// questions are left out.
 func (m *Model) Logits(ctx context.Context, texts ...string) ([]map[string][]float64, error) {
 	return m.LogitsInputs(ctx, textsToInputs(texts)...)
 }
@@ -291,26 +326,26 @@ func (m *Model) LogitsInputs(ctx context.Context, inputs ...Input) ([]map[string
 	for i := range raw {
 		out[i] = make(map[string][]float64, len(m.heads))
 		for qi, h := range m.heads {
-			out[i][h.q.Name] = raw[i][qi]
+			if h.q.Kind != Spans {
+				out[i][h.q.Name] = raw[i][qi]
+			}
 		}
 	}
 	return out, nil
 }
 
-// logits returns, for each text, the raw logits of each question.
+// logits returns, for each text, the raw logits of each question (nil
+// for Spans questions).
 func (m *Model) logits(ctx context.Context, inputs []Input, batchSize int) ([][][]float64, error) {
-	ids, err := m.tokenizeAll(inputs)
+	res, err := m.infer(ctx, inputs, batchSize)
 	if err != nil {
 		return nil, err
 	}
 	out := make([][][]float64, len(inputs))
-	err = m.forEachPooled(ctx, ids, batchSize, func(i int, x []float32) {
-		out[i] = make([][]float64, len(m.heads))
-		for qi, h := range m.heads {
-			out[i][qi] = h.logits(x)
-		}
-	})
-	return out, err
+	for i, r := range res {
+		out[i] = r.pooled
+	}
+	return out, nil
 }
 
 func (m *Model) tokenizeAll(inputs []Input) ([][]int32, error) {
@@ -378,6 +413,7 @@ type metaJSON struct {
 	Temperatures map[string]float64 `json:"temperatures"`
 	MaxLen       int                `json:"max_len"`
 	Paired       bool               `json:"paired,omitempty"`
+	SpanBias     map[string]float64 `json:"span_bias,omitempty"`
 	Info         Info               `json:"info"`
 }
 
@@ -504,7 +540,8 @@ func (m *Model) Save(dir string) error {
 		return err
 	}
 	meta, err := json.MarshalIndent(metaJSON{
-		Format: formatVersion, Schema: m.schema, Temperatures: m.Temperatures(), MaxLen: m.maxLen, Paired: m.paired, Info: m.info,
+		Format: formatVersion, Schema: m.schema, Temperatures: m.Temperatures(), MaxLen: m.maxLen, Paired: m.paired,
+		SpanBias: m.spanBias, Info: m.info,
 	}, "", "  ")
 	if err != nil {
 		return err
@@ -669,7 +706,7 @@ func Load(dir string, opts ...Option) (*Model, error) {
 	if err != nil {
 		return nil, err
 	}
-	m := &Model{schema: meta.Schema, enc: enc, tok: tok, tokenizerPath: tokPath, embedInt8: embedInt8, maxLen: meta.MaxLen, paired: meta.Paired, info: meta.Info}
+	m := &Model{schema: meta.Schema, enc: enc, tok: tok, tokenizerPath: tokPath, embedInt8: embedInt8, maxLen: meta.MaxLen, paired: meta.Paired, spanBias: meta.SpanBias, info: meta.Info}
 	H := cfg.Hidden
 	for _, q := range meta.Schema {
 		h := newHead(q, H, rand.New(rand.NewSource(0)))

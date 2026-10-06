@@ -5,7 +5,8 @@ import (
 	"math/rand"
 )
 
-// head is the output layer of a question, applied to the pooled vector.
+// head is the output layer of a question, applied to the pooled vector,
+// or to each token for Spans (see spans.go).
 //
 //   - Noul: one logit z = w.x + b;
 //   - Choice: K logits z = W.x + b;
@@ -34,6 +35,9 @@ func newHead(q Question, hidden int, rng *rand.Rand) *head {
 		h.rows, h.outs = len(q.Options), len(q.Options)
 	case Score:
 		h.rows, h.outs = len(q.Options)-1, len(q.Options)-1
+	case Spans:
+		h.rows = spanTagCount(len(q.Options))
+		h.outs = h.rows
 	}
 	h.w = make([]float32, h.rows*hidden)
 	h.b = make([]float32, h.outs)

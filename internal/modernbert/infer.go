@@ -249,21 +249,58 @@ func (m *Model) Encode(b Batch) ([]float32, error) {
 // sequence. Combining sequences of different lengths therefore costs no
 // more than computing them separately.
 func (m *Model) EncodeSeqs(seqs [][]int32) ([]float32, error) {
+	H := m.Cfg.Hidden
+	out := make([]float32, len(seqs)*H)
+	err := m.run(seqs, func(xn []float32, offs []int) {
+		// Average of each sequence's states, special tokens included.
+		for i := range seqs {
+			n := offs[i+1] - offs[i]
+			if n == 0 {
+				continue
+			}
+			acc := make([]float64, H)
+			for t := offs[i]; t < offs[i+1]; t++ {
+				for k, v := range xn[t*H : (t+1)*H] {
+					acc[k] += float64(v)
+				}
+			}
+			for k := range acc {
+				out[i*H+k] = float32(acc[k] / float64(n))
+			}
+		}
+	})
+	return out, err
+}
+
+// EncodeTokens returns the final state of every token of the sequences,
+// laid end to end: [sum of the lengths, H].
+func (m *Model) EncodeTokens(seqs [][]int32) ([]float32, error) {
+	var out []float32
+	err := m.run(seqs, func(xn []float32, offs []int) {
+		out = append([]float32(nil), xn[:offs[len(seqs)]*m.Cfg.Hidden]...)
+	})
+	return out, err
+}
+
+// run encodes the sequences laid end to end and passes done the final
+// states, [N, H], and the start of each sequence (offs[len(seqs)] = N).
+// The states live in a pooled buffer: done copies what it keeps.
+func (m *Model) run(seqs [][]int32, done func(xn []float32, offs []int)) error {
 	cfg := m.Cfg
 	H, I := cfg.Hidden, cfg.Intermediate
 	offs := make([]int, len(seqs)+1)
 	for i, sq := range seqs {
 		for _, id := range sq {
 			if id < 0 || int(id) >= cfg.Vocab {
-				return nil, fmt.Errorf("modernbert: id %d out of vocabulary", id)
+				return fmt.Errorf("modernbert: id %d out of vocabulary", id)
 			}
 		}
 		offs[i+1] = offs[i] + len(sq)
 	}
 	N := offs[len(seqs)]
-	out := make([]float32, len(seqs)*H)
 	if N == 0 {
-		return out, nil
+		done(nil, offs)
+		return nil
 	}
 	packs := m.packs()
 	w := 1
@@ -316,24 +353,8 @@ func (m *Model) EncodeSeqs(seqs [][]int32) ([]float32, error) {
 		}
 	}
 	layerNormInfer(xn, x, m.FinalNorm.W, N, H, cfg.NormEps, w)
-
-	// Average of each sequence's states, special tokens included.
-	for i := range seqs {
-		n := offs[i+1] - offs[i]
-		if n == 0 {
-			continue
-		}
-		acc := make([]float64, H)
-		for t := offs[i]; t < offs[i+1]; t++ {
-			for k, v := range xn[t*H : (t+1)*H] {
-				acc[k] += float64(v)
-			}
-		}
-		for k := range acc {
-			out[i*H+k] = float32(acc[k] / float64(n))
-		}
-	}
-	return out, nil
+	done(xn, offs)
+	return nil
 }
 
 // attentionInfer is attentionForward without keeping anything: q, k, v of

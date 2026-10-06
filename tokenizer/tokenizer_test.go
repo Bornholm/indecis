@@ -177,3 +177,49 @@ func BenchmarkBPE(b *testing.B) {
 		}
 	}
 }
+
+type offsetFixture struct {
+	Text    string   `json:"text"`
+	IDs     []int32  `json:"ids"`
+	Offsets [][2]int `json:"offsets"`
+}
+
+// checkOffsets compares EncodeOffsets with the reference library's
+// offsets (tools/oracle/offset_fixtures.py), ids included.
+func checkOffsets(t *testing.T, tok *Tokenizer, path string) {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 1<<20), 1<<24)
+	fails, n := 0, 0
+	for sc.Scan() {
+		var fx offsetFixture
+		if err := json.Unmarshal(sc.Bytes(), &fx); err != nil {
+			t.Fatal(err)
+		}
+		n++
+		ids, offs := tok.EncodeOffsets(fx.Text)
+		got := make([][2]int, len(offs))
+		for i, o := range offs {
+			got[i] = [2]int{o.Start, o.End}
+		}
+		if slices.Equal(ids, fx.IDs) && slices.Equal(got, fx.Offsets) {
+			continue
+		}
+		fails++
+		if fails <= 10 {
+			t.Errorf("%q\n ids  %v\n want %v\n offs %v\n want %v", trunc(fx.Text), ids, fx.IDs, got, fx.Offsets)
+		}
+	}
+	if fails > 0 {
+		t.Fatalf("%d diverging cases out of %d", fails, n)
+	}
+}
+
+func TestOffsetsParity(t *testing.T) {
+	checkOffsets(t, bekko(t), "../testdata/bekko/offset_cases.jsonl")
+}

@@ -46,9 +46,23 @@ func (h *Head) outputs() ([]int, int) {
 	return offs, o
 }
 
+// validateSchema checks the schema of an image head: no Spans questions,
+// an image has no text passages.
+func validateSchema(schema indecis.Schema) error {
+	if err := schema.Validate(); err != nil {
+		return err
+	}
+	for _, q := range schema {
+		if q.Kind == indecis.Spans {
+			return fmt.Errorf("vision: %s: an image head answers no spans questions", q.Name)
+		}
+	}
+	return nil
+}
+
 // NewHead initializes a head for patches of shape [t, hidden].
 func NewHead(schema indecis.Schema, t, hidden, k int, seed int64) (*Head, error) {
-	if err := schema.Validate(); err != nil {
+	if err := validateSchema(schema); err != nil {
 		return nil, err
 	}
 	h := &Head{Schema: schema, T: t, H: hidden, K: k}

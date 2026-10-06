@@ -404,6 +404,80 @@ func (t *Tokenizer) EncodePair(context, text string, maxLen int) []int32 {
 	return append(ids, t.eos)
 }
 
+// Offset is the byte span of a token in the text: text[Start:End]. The
+// span of a token that adds a space includes it ("▁world" in "Hello
+// world" covers " world"). Special tokens of the template are empty
+// spans at 0.
+type Offset struct{ Start, End int }
+
+// EncodeOffsets is Encode, also returning the span of each token in text,
+// identical to the offsets of the reference library.
+func (t *Tokenizer) EncodeOffsets(text string) ([]int32, []Offset) {
+	var ids []int32
+	var offs []Offset
+	if !t.raw {
+		ids, offs = append(ids, t.bos), append(offs, Offset{})
+	}
+	ids, offs = t.AppendOffsets(ids, offs, text)
+	return append(ids, t.eos), append(offs, Offset{})
+}
+
+// AppendOffsets tokenizes text without the template and appends the ids
+// and their spans to ids and offs.
+func (t *Tokenizer) AppendOffsets(ids []int32, offs []Offset, text string) ([]int32, []Offset) {
+	t.walkSpans(text, func(id int32, start, end int) {
+		ids, offs = append(ids, id), append(offs, Offset{start, end})
+	}, func(start, end int) {
+		t.walkSegmentSrc(text, start, end, func(piece string, src []int) {
+			syms := t.bpeSymbols(piece, src, nil)
+			for i := 0; i >= 0 && i < len(syms); i = syms[i].next {
+				ids, offs = append(ids, syms[i].id), append(offs, Offset{syms[i].start, syms[i].end})
+			}
+		})
+	})
+	return ids, offs
+}
+
+// walkSegmentSrc is walkSegment on text[start:end], also passing for each
+// piece the source offset of each of its bytes.
+func (t *Tokenizer) walkSegmentSrc(text string, start, end int, word func(piece string, src []int)) {
+	var b strings.Builder
+	src := make([]int, 0, end-start+len(metaspace))
+	if seg := text[start:end]; !t.raw && seg[0] != ' ' && !strings.HasPrefix(seg, metaspace) {
+		// The added ▁ takes the span of the character it precedes, as in
+		// the reference library: alone, it covers that character.
+		_, w := utf8.DecodeRuneInString(seg)
+		b.WriteString(metaspace)
+		src = append(src, start, start+w-1, start+w-1)
+	}
+	for i := start; i < end; i++ {
+		if text[i] == ' ' {
+			b.WriteString(metaspace)
+			src = append(src, i, i, i)
+			continue
+		}
+		b.WriteByte(text[i])
+		src = append(src, i)
+	}
+	s := b.String()
+	if t.raw {
+		word(s, src)
+		return
+	}
+	// Split before each ▁ but the first, as walkSegment does.
+	from := 0
+	for {
+		next := strings.Index(s[from+len(metaspace):], metaspace)
+		if next < 0 {
+			word(s[from:], src[from:])
+			return
+		}
+		cut := from + len(metaspace) + next
+		word(s[from:cut], src[from:cut])
+		from = cut
+	}
+}
+
 // appendText splits text around added tokens and tokenizes the segments.
 func (t *Tokenizer) appendText(ids []int32, text string) []int32 {
 	t.walk(text, func(id int32) { ids = append(ids, id) }, func(w string) { ids = t.appendWord(ids, w) })
@@ -413,6 +487,13 @@ func (t *Tokenizer) appendText(ids []int32, text string) []int32 {
 // walk splits text: added receives each added token found in the raw
 // text, word each piece to pass to BPE, in order.
 func (t *Tokenizer) walk(text string, added func(int32), word func(string)) {
+	t.walkSpans(text, func(id int32, _, _ int) { added(id) }, func(start, end int) { t.walkSegment(text[start:end], word) })
+}
+
+// walkSpans splits text around added tokens: added receives each one with
+// its byte span in text, segment the spans of the text in between, in
+// order.
+func (t *Tokenizer) walkSpans(text string, added func(id int32, start, end int), segment func(start, end int)) {
 	start := 0 // start of the current segment
 	i := 0
 	for i < len(text) {
@@ -440,11 +521,15 @@ func (t *Tokenizer) walk(text string, added func(int32), word func(string)) {
 				mEnd += size
 			}
 		}
-		t.walkSegment(text[start:mStart], word)
-		added(a.id)
+		if mStart > start {
+			segment(start, mStart)
+		}
+		added(a.id, mStart, mEnd) // stripped spaces included, as in the reference
 		start, i = mEnd, mEnd
 	}
-	t.walkSegment(text[start:], word)
+	if start < len(text) {
+		segment(start, len(text))
+	}
 }
 
 // matchAdded returns the longest added token that starts at text[i].
@@ -517,6 +602,9 @@ type symbol struct {
 	id         int32
 	prev, next int
 	merged     bool // absorbed by its left neighbor
+	// start, end: byte span in the source text (EncodeOffsets), -1
+	// otherwise.
+	start, end int
 }
 
 // bpe applies merges to a word, in the order used by the reference
@@ -526,12 +614,29 @@ func (t *Tokenizer) bpe(word string) []int32 { return t.bpeVisit(word, nil) }
 // bpeVisit is bpe, reporting to visit (if provided) each starting symbol
 // and each merge applied.
 func (t *Tokenizer) bpeVisit(word string, visit func(int32)) []int32 {
+	syms := t.bpeSymbols(word, nil, visit)
+	out := make([]int32, 0, len(syms))
+	for i := 0; i >= 0 && i < len(syms); i = syms[i].next {
+		out = append(out, syms[i].id)
+	}
+	return out
+}
+
+// bpeSymbols runs BPE on word and returns its symbols, linked by next
+// from index 0. src, if provided, gives the source offset of each byte of
+// word (-1: none); the symbols then carry their span.
+func (t *Tokenizer) bpeSymbols(word string, src []int, visit func(int32)) []symbol {
 	syms := make([]symbol, 0, len(word))
 	lastUnk := false
-	for _, r := range word {
+	for bi, r := range word {
+		start, end := -1, -1
+		if src != nil {
+			_, size := utf8.DecodeRuneInString(word[bi:]) // invalid UTF-8: one byte
+			start, end = runeSpan(src, bi, size)
+		}
 		var rb [utf8.UTFMax]byte
 		if id, ok := t.vocab.lookupBytes(rb[:utf8.EncodeRune(rb[:], r)]); ok {
-			syms = append(syms, symbol{id: id})
+			syms = append(syms, symbol{id: id, start: start, end: end})
 			lastUnk = false
 			continue
 		}
@@ -545,14 +650,18 @@ func (t *Tokenizer) bpeVisit(word string, visit func(int32)) []int32 {
 			}
 		}
 		if fallback {
+			// Each byte token covers the whole character, as in the
+			// reference library.
 			for _, b := range buf[:n] {
-				syms = append(syms, symbol{id: t.bytes[b]})
+				syms = append(syms, symbol{id: t.bytes[b], start: start, end: end})
 			}
 			lastUnk = false
 			continue
 		}
-		if !lastUnk { // fuse_unk
-			syms = append(syms, symbol{id: t.unk})
+		if lastUnk { // fuse_unk
+			syms[len(syms)-1].start, syms[len(syms)-1].end = joinSpan(syms[len(syms)-1].start, syms[len(syms)-1].end, start, end)
+		} else {
+			syms = append(syms, symbol{id: t.unk, start: start, end: end})
 		}
 		lastUnk = true
 	}
@@ -585,6 +694,7 @@ func (t *Tokenizer) bpeVisit(word string, visit func(int32)) []int32 {
 			continue
 		}
 		cur.id = top.id
+		cur.start, cur.end = joinSpan(cur.start, cur.end, right.start, right.end)
 		if visit != nil {
 			visit(top.id)
 		}
@@ -605,11 +715,33 @@ func (t *Tokenizer) bpeVisit(word string, visit func(int32)) []int32 {
 		}
 	}
 
-	out := make([]int32, 0, len(syms))
-	for i := 0; i >= 0 && i < len(syms); i = syms[i].next {
-		out = append(out, syms[i].id)
+	return syms
+}
+
+// runeSpan returns the source span of the n bytes of word starting at i.
+func runeSpan(src []int, i, n int) (start, end int) {
+	start, end = -1, -1
+	for _, o := range src[i : i+n] {
+		if o < 0 {
+			continue
+		}
+		if start < 0 || o < start {
+			start = o
+		}
+		end = max(end, o+1)
 	}
-	return out
+	return start, end
+}
+
+// joinSpan returns the union of two spans, ignoring one without source.
+func joinSpan(s1, e1, s2, e2 int) (int, int) {
+	if s1 < 0 {
+		return s2, e2
+	}
+	if s2 < 0 {
+		return s1, e1
+	}
+	return min(s1, s2), max(e1, e2)
 }
 
 type candidate struct {

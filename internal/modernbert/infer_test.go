@@ -64,6 +64,38 @@ func TestEncodeMatchesForward(t *testing.T) {
 	}
 }
 
+// EncodeTokens returns Forward's per-token states, without padding.
+func TestEncodeTokensMatchesForward(t *testing.T) {
+	m, tok := loadBekko(t)
+	fx := readForwardFixtures(t)
+	H := m.Cfg.Hidden
+	var seqs [][]int32
+	for _, c := range fx.Cases {
+		seqs = append(seqs, tok.Encode(c.Text))
+	}
+	b := NewBatch(seqs, m.Cfg.PadID)
+	s, err := m.Forward(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := m.EncodeTokens(seqs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want []float32
+	for bi, n := range b.Lens {
+		want = append(want, s.Hidden[bi*b.T*H:(bi*b.T+n)*H]...)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("%d values, want %d", len(got), len(want))
+	}
+	d := maxAbsDiff(got, want)
+	t.Logf("|EncodeTokens − Forward|max = %.2g", d)
+	if d > 1e-4 {
+		t.Fatalf("|EncodeTokens − Forward|max = %g", d)
+	}
+}
+
 // After a weight change, Invalidate redoes the packs.
 func TestEncodeInvalidate(t *testing.T) {
 	m, tok := loadBekko(t)
