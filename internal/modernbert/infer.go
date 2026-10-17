@@ -220,8 +220,11 @@ func (m *Model) packs() []packedLayer {
 // workspace groups the buffers of an inference pass, reused across
 // requests.
 type workspace struct {
-	x, xn, qkv, ctx, z, g []float32
+	x, xn, qkv, ctx []float32
 }
+
+// mlpBuffers holds the MLP buffers of the workers (see run).
+var mlpBuffers = sync.Pool{New: func() any { return new([]float32) }}
 
 var workspaces sync.Pool
 
@@ -318,9 +321,6 @@ func (m *Model) run(seqs [][]int32, done func(xn []float32, offs []int)) error {
 	ws.xn = grow(ws.xn, N*H)
 	ws.qkv = grow(ws.qkv, N*3*H)
 	ws.ctx = grow(ws.ctx, N*H)
-	chunk := min(N, mlpChunk)
-	ws.z = grow(ws.z, chunk*2*I)
-	ws.g = grow(ws.g, chunk*I)
 	x, xn := ws.x, ws.xn
 
 	r := 0
@@ -334,24 +334,44 @@ func (m *Model) run(seqs [][]int32, done func(xn []float32, offs []int)) error {
 
 	for l, L := range m.Layers {
 		p := packs[l]
-		attnIn := x
-		if L.AttnNorm != nil {
-			layerNormInfer(xn, x, L.AttnNorm.W, N, H, cfg.NormEps, w)
-			attnIn = xn
-		}
-		p.qkv.mul(ws.qkv, attnIn, N, false, w)
+		// Outside the attention, rows are independent: each worker takes
+		// slices of rows through the norm and the QKV projection, then
+		// through the output projection and the MLP, its products on one
+		// core. A layer waits three times for all workers, not at every
+		// product: on a hybrid processor, each wait is for the slowest
+		// core.
+		linalg.ParallelN(w, N, rowSlice, func(lo, hi int) {
+			in := x[lo*H : hi*H]
+			if L.AttnNorm != nil {
+				for r := lo; r < hi; r++ {
+					linalg.LayerNormRow(xn[r*H:(r+1)*H], x[r*H:(r+1)*H], L.AttnNorm.W, cfg.NormEps)
+				}
+				in = xn[lo*H : hi*H]
+			}
+			p.qkv.mul(ws.qkv[lo*3*H:hi*3*H], in, hi-lo, false, 1)
+		})
 		m.attentionInfer(l, offs, ws.qkv, ws.ctx, w)
-		p.o.mul(x, ws.ctx, N, true, w) // x += attention
-
-		layerNormInfer(xn, x, L.MLPNorm.W, N, H, cfg.NormEps, w)
-		// The MLP works in row chunks: its buffers (2·I + I values per row,
-		// more than everything else) do not depend on the text length.
-		for r0 := 0; r0 < N; r0 += chunk {
-			rows := min(chunk, N-r0)
-			p.i.mul(ws.z, xn[r0*H:(r0+rows)*H], rows, false, w)
-			gluInfer(ws.g, ws.z, rows, I, w)
-			p.oMLP.mul(x[r0*H:(r0+rows)*H], ws.g, rows, true, w) // x += MLP
-		}
+		linalg.ParallelN(w, N, rowSlice, func(lo, hi int) {
+			p.o.mul(x[lo*H:hi*H], ws.ctx[lo*H:hi*H], hi-lo, true, 1) // x += attention
+			for r := lo; r < hi; r++ {
+				linalg.LayerNormRow(xn[r*H:(r+1)*H], x[r*H:(r+1)*H], L.MLPNorm.W, cfg.NormEps)
+			}
+			// The MLP works in chunks of rows: its buffers (2·I + I values
+			// per row, more than everything else) do not depend on the
+			// text length.
+			buf := mlpBuffers.Get().(*[]float32)
+			defer mlpBuffers.Put(buf)
+			*buf = grow(*buf, mlpChunk*3*I)
+			z, g := (*buf)[:mlpChunk*2*I], (*buf)[mlpChunk*2*I:]
+			for r0 := lo; r0 < hi; r0 += mlpChunk {
+				rows := min(mlpChunk, hi-r0)
+				p.i.mul(z, xn[r0*H:(r0+rows)*H], rows, false, 1)
+				for r := 0; r < rows; r++ {
+					linalg.GeluMul(g[r*I:(r+1)*I], z[r*2*I:r*2*I+I], z[r*2*I+I:(r+1)*2*I])
+				}
+				p.oMLP.mul(x[r0*H:(r0+rows)*H], g, rows, true, 1) // x += MLP
+			}
+		})
 	}
 	layerNormInfer(xn, x, m.FinalNorm.W, N, H, cfg.NormEps, w)
 	done(xn, offs)
@@ -419,15 +439,6 @@ func layerNormInfer(out, x, gamma []float32, n, h int, eps float64, workers int)
 	})
 }
 
-// gluInfer is gluForward with GELU in float32.
-func gluInfer(g, z []float32, n, inter int, workers int) {
-	linalg.ParallelN(workers, n, rowGrain, func(lo, hi int) {
-		for r := lo; r < hi; r++ {
-			linalg.GeluMul(g[r*inter:(r+1)*inter], z[r*2*inter:r*2*inter+inter], z[r*2*inter+inter:(r+1)*2*inter])
-		}
-	})
-}
-
 // Block attention, FlashAttention-style: queries are processed in blocks
 // of qBlock positions, keys in blocks of kBlock, and the softmax is
 // updated as key blocks are processed (running max and sum per row). The
@@ -439,8 +450,13 @@ const (
 	qBlock = 64
 	kBlock = 128
 
-	// mlpChunk is the number of rows the MLP processes at a time.
-	mlpChunk = 256
+	// mlpChunk is the number of rows the MLP processes at a time, on one
+	// core.
+	mlpChunk = 64
+
+	// rowSlice is the smallest slice of rows a worker takes outside the
+	// attention.
+	rowSlice = 24
 
 	// parallelRows is the number of positions (across all sequences in
 	// the batch) above which Encode spreads its computation over multiple
