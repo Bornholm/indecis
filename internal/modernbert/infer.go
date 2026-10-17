@@ -113,7 +113,8 @@ func (m *Model) SetCompact(source WeightSource) {
 
 // SetInt8 makes the layers compute their products in int8 (per-channel
 // weights, per-token activations). Without a hardware kernel
-// (linalg.Int8Fast), this is exact but slow.
+// (linalg.Int8Fast), this is exact but slow. With it, the attention runs
+// in int8 too (linalg.Attend8).
 func (m *Model) SetInt8(on bool) {
 	m.packMu.Lock()
 	defer m.packMu.Unlock()
@@ -379,6 +380,7 @@ func (m *Model) attentionInfer(l int, offs []int, qkv, ctx []float32, workers in
 		buf := make([]float32, 4*T*D)
 		q, k, v, o := buf[:T*D], buf[T*D:2*T*D], buf[2*T*D:3*T*D], buf[3*T*D:4*T*D]
 		blk := newBlockBuffers()
+		var ab linalg.AttnBuffers
 		for task := lo; task < hi; task++ {
 			bi, h := task/nh, task%nh
 			off, n := offs[bi], offs[bi+1]-offs[bi]
@@ -396,7 +398,11 @@ func (m *Model) attentionInfer(l int, offs []int, qkv, ctx []float32, workers in
 				applyRope(qt, cos, sin)
 				applyRope(kt, cos, sin)
 			}
-			attendBlocks(o, q, k, v, n, D, window, scale, blk)
+			if m.int8 && linalg.Int8Fast() {
+				linalg.Attend8(o, q, k, v, n, D, window, scale, &ab)
+			} else {
+				attendBlocks(o, q, k, v, n, D, window, scale, blk)
+			}
 			for t := 0; t < n; t++ {
 				copy(ctx[(off+t)*H+h*D:(off+t)*H+(h+1)*D], o[t*D:(t+1)*D])
 			}

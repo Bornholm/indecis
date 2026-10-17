@@ -20,6 +20,16 @@ func QuantizeRow(dst []uint8, x []float32, inv float32) {
 	}
 }
 
+func QuantizeRowU8(dst []uint8, x []float32, inv float32) int32 {
+	var sum int32
+	for i, v := range x {
+		q := int32(roundHalfEven(v * inv))
+		dst[i] = uint8(q)
+		sum += q
+	}
+	return sum
+}
+
 func Dequantize(dst []float32, acc []int32, sb, zc []float32, sa float32, accumulate bool) {
 	for j := range dst {
 		v := sa * sb[j] * (float32(acc[j]) - zc[j])
