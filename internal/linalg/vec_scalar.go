@@ -32,7 +32,7 @@ func QuantizeRowU8(dst []uint8, x []float32, inv float32) int32 {
 
 func Dequantize(dst []float32, acc []int32, sb, zc []float32, sa float32, accumulate bool) {
 	for j := range dst {
-		v := sa * sb[j] * (float32(acc[j]) - zc[j])
+		v := (float32(acc[j]) - zc[j]) * sb[j] * sa
 		if accumulate {
 			dst[j] += v
 		} else {

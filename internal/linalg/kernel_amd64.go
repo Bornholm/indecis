@@ -108,3 +108,28 @@ func microKernel8(kq int, ap []uint8, lda int, bp []int8, tile *[mr8 * nr8]int32
 	}
 	microKernel8Go(kq, ap, lda, bp, tile)
 }
+
+//go:noescape
+func microKernelVNNIDeq(kq int, ap *uint8, lda int, bp *int8, c *float32, ldc int, sb, zc, sa *float32, accumulate int)
+
+// microKernel8Deq computes a whole 6×16 tile of C, rows ldc apart:
+// c[r][j] (+)= sa[r]·sb[j]·(Σ a·b − zc[j]), the rescaling done in the
+// kernel's registers. It reports false, doing nothing, without the
+// AVX-VNNI kernel: the caller then goes through microKernel8.
+func microKernel8Deq(kq int, ap []uint8, lda int, bp []int8, c []float32, ldc int, sb, zc, sa []float32, accumulate bool) bool {
+	if !vnni || kq == 0 {
+		return false
+	}
+	_ = ap[(mr8-1)*lda+kq*4-1]
+	_ = bp[kq*nr8*4-1]
+	_ = c[(mr8-1)*ldc+nr8-1]
+	_ = sb[nr8-1]
+	_ = zc[nr8-1]
+	_ = sa[mr8-1]
+	acc := 0
+	if accumulate {
+		acc = 1
+	}
+	microKernelVNNIDeq(kq, &ap[0], lda, &bp[0], &c[0], ldc, &sb[0], &zc[0], &sa[0], acc)
+	return true
+}

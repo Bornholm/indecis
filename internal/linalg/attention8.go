@@ -35,8 +35,7 @@ type AttnBuffers struct {
 	s       []float32 // scores of a block of queries
 	pa      []uint8   // quantized P of a block of queries
 	sp      []float32 // scale of each row of P (1/sum of its quantized weights)
-	ints    []int32
-	off     []int // offset of each depth in a packed panel
+	off     []int     // offset of each depth in a packed panel
 	vinv    []float32
 }
 
@@ -153,22 +152,20 @@ func Attend8(o, q, k, v []float32, n, D, window int, scale float32, b *AttnBuffe
 		}
 		W := c1 - c0
 		s := b.s[:attnRows*W]
-		// Scores: S = Q·(K − k̄)ᵀ, a panel of rows at a time, rescaled
-		// row by row in one call.
-		acc := grow(b.ints, mr8*max(W, Dp))
-		b.ints = acc
+		// Scores: S = Q·(K − k̄)ᵀ. The padding rows of the last panel
+		// are zero (quantizeA), their scores too.
 		for r0 := i0; r0 < i1; r0 += mr8 {
 			ap := b.qa[r0*lda : (r0+mr8)*lda]
 			for p := c0 / nr8; p < c1/nr8; p++ {
-				microKernel8(kq, ap, lda, b.kp[p*kq*nr8*4:(p+1)*kq*nr8*4], &tile)
-				jc := p*nr8 - c0
-				for r := 0; r < mr8; r++ {
-					copy(acc[r*W+jc:r*W+jc+nr8], tile[r*nr8:(r+1)*nr8])
+				bp := b.kp[p*kq*nr8*4 : (p+1)*kq*nr8*4]
+				out := s[(r0-i0)*W+p*nr8-c0:]
+				if microKernel8Deq(kq, ap, lda, bp, out, W, b.ks[p*nr8:], b.kzc[p*nr8:], b.sq[r0:], false) {
+					continue
 				}
-			}
-			for r := 0; r < min(mr8, i1-r0); r++ {
-				i := r0 + r
-				Dequantize(s[(i-i0)*W:(i-i0+1)*W], acc[r*W:(r+1)*W], b.ks[c0:c1], b.kzc[c0:c1], b.sq[i], false)
+				microKernel8(kq, ap, lda, bp, &tile)
+				for r := 0; r < mr8; r++ {
+					Dequantize(out[r*W:r*W+nr8], tile[r*nr8:(r+1)*nr8], b.ks[p*nr8:(p+1)*nr8], b.kzc[p*nr8:(p+1)*nr8], b.sq[r0+r], false)
+				}
 			}
 		}
 		// Softmax on the keys of each row, then P quantized to uint8.
@@ -196,16 +193,19 @@ func Attend8(o, q, k, v []float32, n, D, window int, scale float32, b *AttnBuffe
 		// O = P·V, normalized by the sum of each row.
 		for r0 := i0; r0 < i1; r0 += mr8 {
 			ap := pa[(r0-i0)*W : (r0-i0+mr8)*W]
+			rows := min(mr8, i1-r0)
 			for p := 0; p < dPanels; p++ {
 				bp := b.vp[p*kqn*nr8*4+(c0/4)*nr8*4 : p*kqn*nr8*4+(c1/4)*nr8*4]
-				microKernel8(W/4, ap, W, bp, &tile)
-				for r := 0; r < mr8; r++ {
-					copy(acc[r*Dp+p*nr8:r*Dp+(p+1)*nr8], tile[r*nr8:(r+1)*nr8])
+				cols := min(nr8, D-p*nr8)
+				if rows == mr8 && cols == nr8 &&
+					microKernel8Deq(W/4, ap, W, bp, o[r0*D+p*nr8:], D, b.vs[p*nr8:], b.zeros, b.sp[r0-i0:], false) {
+					continue
 				}
-			}
-			for r := 0; r < min(mr8, i1-r0); r++ {
-				i := r0 + r
-				Dequantize(o[i*D:(i+1)*D], acc[r*Dp:r*Dp+D], b.vs[:D], b.zeros[:D], b.sp[i-i0], false)
+				microKernel8(W/4, ap, W, bp, &tile)
+				for r := 0; r < rows; r++ {
+					i := r0 + r
+					Dequantize(o[i*D+p*nr8:i*D+p*nr8+cols], tile[r*nr8:r*nr8+cols], b.vs[p*nr8:p*nr8+cols], b.zeros[:cols], b.sp[i-i0], false)
+				}
 			}
 		}
 	}

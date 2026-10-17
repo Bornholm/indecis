@@ -90,8 +90,10 @@ func QuantizeRowU8(dst []uint8, x []float32, inv float32) int32 {
 	return sum
 }
 
-// Dequantize writes, for a row of C, dst[j] (+)= sa*sb[j]*(acc[j] -
-// zc[j]), where zc = 128*Sum qb of a column (see MatMul8).
+// Dequantize writes, for a row of C, dst[j] (+)= (acc[j] - zc[j])*sb[j]*sa,
+// where zc = 128*Sum qb of a column (see MatMul8). The operations are
+// those of the int8 kernel's own rescaling (microKernel8Deq), in the same
+// order: a row gets the same values in a whole tile or on an edge.
 //
 //go:noinline
 func Dequantize(dst []float32, acc []int32, sb, zc []float32, sa float32, accumulate bool) {
@@ -107,7 +109,7 @@ func Dequantize(dst []float32, acc []int32, sb, zc []float32, sa float32, accumu
 		v.Store(dst[j:])
 	}
 	for ; j < len(dst); j++ {
-		v := sa * sb[j] * (float32(acc[j]) - zc[j])
+		v := (float32(acc[j]) - zc[j]) * sb[j] * sa
 		if accumulate {
 			dst[j] += v
 		} else {

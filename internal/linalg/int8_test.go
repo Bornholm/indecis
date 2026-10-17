@@ -142,3 +142,30 @@ func TestMatMul8Outliers(t *testing.T) {
 		}
 	}
 }
+
+// A row of C does not depend on the rows computed with it: in a whole
+// tile (rescaled by the kernel) or on an edge (Dequantize), its values
+// are the same, bit for bit. Batched requests rely on it.
+func TestMatMul8RowsIndependent(t *testing.T) {
+	r := rand.New(rand.NewSource(3))
+	const m, k, n = 13, 70, 40
+	a, w := make([]float32, m*k), make([]float32, k*n)
+	for i := range a {
+		a[i] = float32(r.NormFloat64())
+	}
+	for i := range w {
+		w[i] = float32(r.NormFloat64())
+	}
+	b := PackB8(w, k, n, false)
+	all := make([]float32, m*n)
+	MatMul8N(all, a, b, m, false, 1)
+	one := make([]float32, n)
+	for i := 0; i < m; i++ {
+		MatMul8N(one, a[i*k:(i+1)*k], b, 1, false, 1)
+		for j, v := range one {
+			if v != all[i*n+j] {
+				t.Fatalf("row %d, column %d: %v alone, %v among %d rows", i, j, v, all[i*n+j], m)
+			}
+		}
+	}
+}
