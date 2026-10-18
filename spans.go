@@ -523,7 +523,9 @@ func (m *Model) spanWindows(data []encoded) []encoded {
 // spanLossGrad adds to dHidden the gradient of the tagging loss of the
 // Spans heads, each averaged over the tagged tokens of the batch, and
 // returns the loss. hidden is [B·T, H], the batch padded to T tokens.
-func (m *Model) spanLossGrad(batch []*encoded, hidden, dHidden []float32, T int, dropout float64, rng interface{ Float64() float64 }) float64 {
+// With a teacher (tc not nil), the loss of each token mixes the label and
+// the teacher's tags (see TrainOptions.Teacher).
+func (m *Model) spanLossGrad(batch []*encoded, hidden, dHidden []float32, T int, dropout float64, rng interface{ Float64() float64 }, tc *teaching) float64 {
 	H := m.enc.Cfg.Hidden
 	var loss float64
 	keep := float32(1 / (1 - dropout))
@@ -564,11 +566,30 @@ func (m *Model) spanLossGrad(batch []*encoded, hidden, dHidden []float32, T int,
 				}
 				z := h.logits(x)
 				p := softmax(z)
-				loss -= math.Log(max(p[tag], 1e-300)) * scale
-				dz := p
-				dz[tag]--
+				dz := make([]float64, len(z))
+				hard := 1.0
+				if tc != nil {
+					hard = 1 - tc.alpha
+					// T²·KL(teacher_T ‖ model_T), of gradient
+					// T·(model_T − teacher_T) on the logits.
+					r := tc.offs[bi] + t
+					zt := tc.teacher.heads[qi].logits(tc.states[r*H : (r+1)*H])
+					Tm := tc.temp
+					ps, pt := softmaxT(z, Tm), softmaxT(zt, Tm)
+					for k := range dz {
+						if pt[k] > 0 {
+							loss += tc.alpha * Tm * Tm * pt[k] * (math.Log(pt[k]) - math.Log(max(ps[k], 1e-300))) * scale
+						}
+						dz[k] = tc.alpha * Tm * (ps[k] - pt[k]) * scale
+					}
+				}
+				loss -= hard * math.Log(max(p[tag], 1e-300)) * scale
 				for k := range dz {
-					dz[k] *= scale
+					y := 0.0
+					if k == int(tag) {
+						y = 1
+					}
+					dz[k] += hard * (p[k] - y) * scale
 				}
 				clear(dx)
 				h.backward(x, dz, dx)
