@@ -82,6 +82,37 @@ func TestAttend8(t *testing.T) {
 	}
 }
 
+// Ranges of queries computed apart, into a wider output, give exactly the
+// whole attention.
+func TestAttn8Ranges(t *testing.T) {
+	r := rand.New(rand.NewPCG(3, 4))
+	n, D, ldo := 259, 64, 64*3
+	q, k, v := make([]float32, n*D), make([]float32, n*D), make([]float32, n*D)
+	for i := range q {
+		q[i], k[i], v[i] = float32(r.NormFloat64()), float32(r.NormFloat64()), float32(r.NormFloat64())
+	}
+	for _, window := range []int{-1, 64} {
+		var b AttnBuffers
+		want := make([]float32, n*D)
+		Attend8(want, q, k, v, n, D, window, 0.125, &b)
+		var a Attn8
+		a.Prepare(q, k, v, n, D, 0.125)
+		o := make([]float32, n*ldo)
+		for i0 := 0; i0 < n; i0 += AttnBlock {
+			var sc AttnScratch
+			i1 := min(n, i0+AttnBlock)
+			a.Attend(o[i0*ldo+D:], ldo, i0, i1, window, &sc)
+		}
+		for i := 0; i < n; i++ {
+			for d := 0; d < D; d++ {
+				if o[i*ldo+D+d] != want[i*D+d] {
+					t.Fatalf("window=%d: o[%d][%d] = %v, want %v", window, i, d, o[i*ldo+D+d], want[i*D+d])
+				}
+			}
+		}
+	}
+}
+
 func BenchmarkAttend8(b *testing.B) {
 	n, D := benchN(), 64
 	r := rand.New(rand.NewPCG(1, 2))

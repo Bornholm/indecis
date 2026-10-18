@@ -18,25 +18,41 @@ package linalg
 // the keys a block sees are scored at once, so the running max and sum
 // of attendBlocks are not needed. Memory stays linear in the length.
 
-// attnRows is the number of queries scored at a time: a multiple of mr8.
-const attnRows = 8 * mr8
+// AttnBlock is the number of queries scored at a time: a multiple of
+// mr8. Attn8.Attend takes ranges of queries that start on a multiple of
+// it.
+const AttnBlock = 8 * mr8
+
+// Attn8 holds the operands of an attention, quantized and packed once by
+// Prepare: the ranges of queries can then be computed separately, by
+// several workers (Attend).
+type Attn8 struct {
+	n, D, kq, lda int
+	nPad, dPanels int
+	qa            []uint8   // quantized Q, rows of lda bytes
+	sq            []float32 // scale of each row of Q (times the score scale)
+	kp            []int8    // packed centered K: panels of 16 keys, depth D
+	ks, kzc       []float32 // scale and 128·sum of each key
+	vp            []int8    // packed V: panels of 16 dimensions, depth the keys
+	vs            []float32 // scale of each dimension of V
+	zeros         []float32
+	mean          []float32
+	kc            []float32 // a centered key
+	off           []int     // offset of each depth in a packed panel
+	vinv          []float32
+}
+
+// AttnScratch holds the buffers of Attn8.Attend, one per worker.
+type AttnScratch struct {
+	s  []float32 // scores of a block of queries
+	pa []uint8   // quantized P of a block of queries
+	sp []float32 // scale of each row of P (1/sum of its quantized weights)
+}
 
 // AttnBuffers holds the buffers of Attend8, reused from call to call.
 type AttnBuffers struct {
-	qa      []uint8   // quantized Q, rows of lda bytes
-	sq      []float32 // scale of each row of Q (times the score scale)
-	kp      []int8    // packed centered K: panels of 16 keys, depth D
-	ks, kzc []float32 // scale and 128·sum of each key
-	vp      []int8    // packed V: panels of 16 dimensions, depth the keys
-	vs      []float32 // scale of each dimension of V
-	zeros   []float32
-	mean    []float32
-	kc      []float32 // a centered key
-	s       []float32 // scores of a block of queries
-	pa      []uint8   // quantized P of a block of queries
-	sp      []float32 // scale of each row of P (1/sum of its quantized weights)
-	off     []int     // offset of each depth in a packed panel
-	vinv    []float32
+	Attn8
+	AttnScratch
 }
 
 func grow[T any](b []T, n int) []T {
@@ -50,6 +66,14 @@ func grow[T any](b []T, n int) []T {
 // with scores scaled by scale. window < 0: global attention; otherwise
 // |i − j| ≤ window. q, k and v are not modified.
 func Attend8(o, q, k, v []float32, n, D, window int, scale float32, b *AttnBuffers) {
+	b.Prepare(q, k, v, n, D, scale)
+	b.Attend(o, D, 0, n, window, &b.AttnScratch)
+}
+
+// Prepare quantizes and packs q, k and v (n×D each), with scores scaled
+// by scale. q, k and v are not modified nor kept.
+func (b *Attn8) Prepare(q, k, v []float32, n, D int, scale float32) {
+	b.n, b.D = n, D
 	if n == 0 {
 		return
 	}
@@ -59,6 +83,7 @@ func Attend8(o, q, k, v []float32, n, D, window int, scale float32, b *AttnBuffe
 	keyPanels := (n + nr8 - 1) / nr8
 	nPad := keyPanels * nr8 // keys, padded to whole panels
 	kqn := nPad / 4         // depth of P·V in quadruplets
+	b.kq, b.lda, b.nPad = kq, lda, nPad
 
 	// Q, quantized per row; the score scale goes into the row scales.
 	b.qa = grow(b.qa, rowsPad*lda)
@@ -138,12 +163,25 @@ func Attend8(o, q, k, v []float32, n, D, window int, scale float32, b *AttnBuffe
 	b.zeros = grow(b.zeros, Dp)
 	clear(b.zeros)
 
-	b.s = grow(b.s, attnRows*nPad)
-	b.pa = grow(b.pa, attnRows*nPad)
-	b.sp = grow(b.sp, attnRows)
+	b.dPanels = dPanels
+}
+
+// Attend writes into o the attention of the queries [i0, i1), row i at
+// o[(i−i0)·ldo:], D values. i0 is a multiple of AttnBlock. window < 0:
+// global attention; otherwise |i − j| ≤ window.
+func (b *Attn8) Attend(o []float32, ldo, i0, i1, window int, sc *AttnScratch) {
+	n, D, kq, lda, nPad, dPanels := b.n, b.D, b.kq, b.lda, b.nPad, b.dPanels
+	kqn := nPad / 4
+	if i0 >= i1 {
+		return
+	}
+	sc.s = grow(sc.s, AttnBlock*nPad)
+	sc.pa = grow(sc.pa, AttnBlock*nPad)
+	sc.sp = grow(sc.sp, AttnBlock)
+	base := i0
 	var tile [mr8 * nr8]int32
-	for i0 := 0; i0 < n; i0 += attnRows {
-		i1 := min(n, i0+attnRows)
+	for end := i1; i0 < end; i0 += AttnBlock {
+		i1 := min(end, i0+AttnBlock)
 		// Keys the block sees, in whole panels: [c0, c1).
 		c0, c1 := 0, nPad
 		if window >= 0 {
@@ -151,7 +189,7 @@ func Attend8(o, q, k, v []float32, n, D, window int, scale float32, b *AttnBuffe
 			c1 = min(nPad, (i1-1+window+1+nr8-1)/nr8*nr8)
 		}
 		W := c1 - c0
-		s := b.s[:attnRows*W]
+		s := sc.s[:AttnBlock*W]
 		// Scores: S = Q·(K − k̄)ᵀ. The padding rows of the last panel
 		// are zero (quantizeA), their scores too.
 		for r0 := i0; r0 < i1; r0 += mr8 {
@@ -169,8 +207,8 @@ func Attend8(o, q, k, v []float32, n, D, window int, scale float32, b *AttnBuffe
 			}
 		}
 		// Softmax on the keys of each row, then P quantized to uint8.
-		pa := b.pa[:attnRows*W]
-		for r := 0; r < attnRows; r++ {
+		pa := sc.pa[:AttnBlock*W]
+		for r := 0; r < AttnBlock; r++ {
 			i := i0 + r
 			prow := pa[r*W : (r+1)*W]
 			if i >= i1 {
@@ -187,7 +225,7 @@ func Attend8(o, q, k, v []float32, n, D, window int, scale float32, b *AttnBuffe
 			clear(prow[:cs])
 			// Normalized by the sum of the quantized weights, those rounded
 			// to zero left out: the weights used sum to exactly one.
-			b.sp[r] = 1 / float32(QuantizeRowU8(prow[cs:ce], valid, 255))
+			sc.sp[r] = 1 / float32(QuantizeRowU8(prow[cs:ce], valid, 255))
 			clear(prow[ce:])
 		}
 		// O = P·V, normalized by the sum of each row.
@@ -198,13 +236,13 @@ func Attend8(o, q, k, v []float32, n, D, window int, scale float32, b *AttnBuffe
 				bp := b.vp[p*kqn*nr8*4+(c0/4)*nr8*4 : p*kqn*nr8*4+(c1/4)*nr8*4]
 				cols := min(nr8, D-p*nr8)
 				if rows == mr8 && cols == nr8 &&
-					microKernel8Deq(W/4, ap, W, bp, o[r0*D+p*nr8:], D, b.vs[p*nr8:], b.zeros, b.sp[r0-i0:], false) {
+					microKernel8Deq(W/4, ap, W, bp, o[(r0-base)*ldo+p*nr8:], ldo, b.vs[p*nr8:], b.zeros, sc.sp[r0-i0:], false) {
 					continue
 				}
 				microKernel8(W/4, ap, W, bp, &tile)
 				for r := 0; r < rows; r++ {
 					i := r0 + r
-					Dequantize(o[i*D+p*nr8:i*D+p*nr8+cols], tile[r*nr8:r*nr8+cols], b.vs[p*nr8:p*nr8+cols], b.zeros[:cols], b.sp[i-i0], false)
+					Dequantize(o[(i-base)*ldo+p*nr8:(i-base)*ldo+p*nr8+cols], tile[r*nr8:r*nr8+cols], b.vs[p*nr8:p*nr8+cols], b.zeros[:cols], sc.sp[i-i0], false)
 				}
 			}
 		}
