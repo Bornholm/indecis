@@ -394,6 +394,9 @@ func (m *Model) run(seqs [][]int32, done func(xn []float32, offs []int)) error {
 				for r := 0; r < rows; r++ {
 					linalg.GeluMul(g[r*I:(r+1)*I], z[r*2*I:r*2*I+I], z[r*2*I+I:(r+1)*2*I])
 				}
+				if st := m.stats; st != nil {
+					st.add(l, g, rows, I)
+				}
 				p.oMLP.mul(x[r0*H:(r0+rows)*H], g, rows, true, 1) // x += MLP
 			}
 		})
