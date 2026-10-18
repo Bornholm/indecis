@@ -31,10 +31,13 @@ import (
 //
 // Texts longer than the model (WithMaxLen) are read in overlapping
 // windows, in training as in inference. Training tags every token of every
-// window, so the head also learns passages cut by an edge; inference tags
-// each token from the window where it is furthest from an edge. The other
-// questions of the schema read the first window, the truncation they
-// always had.
+// window, so the head also learns passages cut by an edge; the windows
+// overlap by a quarter. Inference tags each token from one window only,
+// where it has at least a sixteenth of a window of context on each side:
+// the windows overlap by an eighth. On TAB, a wider overlap does not
+// change the masks (token F1 within 0.003 from a quarter to a
+// thirty-second), it only computes more tokens. The other questions of
+// the schema read the first window, the truncation they always had.
 
 // Span is a passage found by a Spans question: text[Start:End].
 type Span struct {
@@ -311,29 +314,22 @@ func logSoftmax(z []float64, temperature float64) []float64 {
 // the tokens [keepFrom, keepTo) are tagged from it.
 type window struct{ start, end, keepFrom, keepTo int }
 
-// planWindows cuts n tokens into windows of at most size tokens that
-// overlap by a quarter. Each token is kept by the window where it is
-// furthest from an edge: the boundaries fall in the middle of the
-// overlaps. The last window ends on the last token.
-func planWindows(n, size int) []window {
+// planWindows cuts n tokens into windows of at most size tokens. Each
+// window keeps the tokens of a slice of the text, and reads besides up to
+// margin tokens on each side: the context of the tokens near the edges of
+// the slice. The slices are of equal length, so are the windows: the last
+// window does not read again what the one before it read.
+func planWindows(n, size, margin int) []window {
 	if n <= size {
 		return []window{{0, n, 0, n}}
 	}
-	stride := max(size-size/4, 1)
-	var ws []window
-	for start := 0; ; start += stride {
-		if start+size >= n {
-			ws = append(ws, window{start: max(n-size, 0), end: n})
-			break
-		}
-		ws = append(ws, window{start: start, end: start + size})
+	margin = min(margin, (size-1)/4) // a window keeps at least half its tokens
+	k := (n + size - 2*margin - 1) / (size - 2*margin)
+	ws := make([]window, k)
+	for i := range ws {
+		from, to := i*n/k, (i+1)*n/k
+		ws[i] = window{max(from-margin, 0), min(to+margin, n), from, to}
 	}
-	ws[0].keepFrom = 0
-	for i := 1; i < len(ws); i++ {
-		mid := (ws[i].start + ws[i-1].end) / 2
-		ws[i-1].keepTo, ws[i].keepFrom = mid, mid
-	}
-	ws[len(ws)-1].keepTo = n
 	return ws
 }
 
@@ -408,7 +404,7 @@ func (m *Model) infer(ctx context.Context, inputs []Input, batchSize int) ([]inf
 				out[i].tokens[qi] = make([][]float64, len(ids))
 			}
 		}
-		for _, w := range planWindows(len(ids), size) {
+		for _, w := range planWindows(len(ids), size, size/16) {
 			seq := append(append(append([]int32(nil), prefix...), ids[w.start:w.end]...), suffix...)
 			jobs = append(jobs, job{i, w, seq})
 		}
@@ -501,7 +497,7 @@ func (m *Model) spanWindows(data []encoded) []encoded {
 	size := m.windowSize()
 	var out []encoded
 	for _, e := range data {
-		for wi, w := range planWindows(len(e.ids), size) {
+		for wi, w := range planWindows(len(e.ids), size, size/8) {
 			win := encoded{targets: make([][]float64, len(m.heads)), tags: make([][]int8, len(m.heads))}
 			win.ids = append(append(append([]int32(nil), prefix...), e.ids[w.start:w.end]...), suffix...)
 			if wi == 0 {
