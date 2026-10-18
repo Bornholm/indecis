@@ -105,6 +105,7 @@ type Model struct {
 	compact bool         // see SetCompact
 	source  WeightSource // see SetCompact
 	int8    bool         // see SetInt8
+	stats   *mlpStats    // see MLPActivity
 }
 
 // Load reads config.json and model.safetensors from dir.

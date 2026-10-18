@@ -19,24 +19,34 @@ import (
 // and a kept token is at least an eighth of a window from an inner edge.
 func TestPlanWindows(t *testing.T) {
 	for _, size := range []int{1, 2, 3, 7, 16, 254} {
-		for n := 0; n < 4*size+5; n++ {
-			ws := planWindows(n, size)
-			next := 0
-			for i, w := range ws {
-				if w.end-w.start > size || w.start < 0 || w.end > n {
-					t.Fatalf("n=%d size=%d: window %d = %+v", n, size, i, w)
+		for _, margin := range []int{0, size / 16, size / 8, size} {
+			for n := 0; n < 4*size+5; n++ {
+				ws := planWindows(n, size, margin)
+				next := 0
+				for i, w := range ws {
+					if w.end-w.start > size || w.start < 0 || w.end > n {
+						t.Fatalf("n=%d size=%d margin=%d: window %d = %+v", n, size, margin, i, w)
+					}
+					if w.keepFrom != next || w.keepFrom < w.start || w.keepTo > w.end || w.keepTo <= w.keepFrom && n > 0 {
+						t.Fatalf("n=%d size=%d margin=%d: window %d = %+v, expected to keep from %d", n, size, margin, i, w, next)
+					}
+					m := min(margin, (size-1)/4)
+					if i > 0 && w.keepFrom-w.start < m || i < len(ws)-1 && w.end-w.keepTo < m {
+						t.Fatalf("n=%d size=%d margin=%d: window %d = %+v keeps tokens near an edge", n, size, margin, i, w)
+					}
+					next = w.keepTo
 				}
-				if w.keepFrom != next || w.keepFrom < w.start || w.keepTo > w.end || w.keepTo < w.keepFrom {
-					t.Fatalf("n=%d size=%d: window %d = %+v, expected to keep from %d", n, size, i, w, next)
+				if next != n {
+					t.Fatalf("n=%d size=%d margin=%d: kept up to %d", n, size, margin, next)
 				}
-				margin := size / 8
-				if i > 0 && w.keepFrom-w.start < margin || i < len(ws)-1 && w.end-w.keepTo < margin {
-					t.Fatalf("n=%d size=%d: window %d = %+v keeps tokens near an edge", n, size, i, w)
+				// Windows of equal length: as few tokens read as the margins allow.
+				if n > size {
+					for _, w := range ws[1:] {
+						if d := (w.end - w.start) - (ws[0].end - ws[0].start); d > margin+1 || d < -margin-1 {
+							t.Fatalf("n=%d size=%d margin=%d: windows %+v of unequal lengths", n, size, margin, ws)
+						}
+					}
 				}
-				next = w.keepTo
-			}
-			if next != n {
-				t.Fatalf("n=%d size=%d: kept up to %d", n, size, next)
 			}
 		}
 	}

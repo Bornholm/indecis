@@ -63,4 +63,72 @@ store:''')
 for r in range(12):
     out.append("\tVMOVDQU Y%d, %s(DX)" % (r, str(32 * r) if r else ""))
 out.append("\tVZEROUPPER\n\tRET")
+
+# The same product, its tile rescaled and stored as float32 in C (see
+# MatMul8): c[r][j] (+)= sa[r]·sb[j]·(acc - zc[j]), for a whole 6x16 tile.
+out.append('''
+// func microKernelVNNIDeq(kq int, ap *uint8, lda int, bp *int8, c *float32, ldc int, sb, zc, sa *float32, accumulate int)
+//
+// microKernelVNNI, its tile then converted in registers: rows of C ldc
+// floats apart, sb and zc 16 columns, sa 6 rows; with accumulate != 0, C
+// is added to.
+TEXT ·microKernelVNNIDeq(SB), NOSPLIT, $0-80
+	MOVQ kq+0(FP), CX
+	MOVQ ap+8(FP), SI
+	MOVQ lda+16(FP), R8
+	MOVQ bp+24(FP), DI
+	MOVQ c+32(FP), DX
+	MOVQ ldc+40(FP), R10
+	SHLQ $2, R10
+	MOVQ sb+48(FP), R11
+	MOVQ zc+56(FP), R12
+	MOVQ sa+64(FP), BX
+	MOVQ accumulate+72(FP), AX
+	LEAQ (SI)(R8*2), R9
+	ADDQ R8, R9
+''')
+for r in range(12):
+    out.append("\tVPXOR Y%d, Y%d, Y%d" % (r, r, r))
+out.append('''
+	TESTQ CX, CX
+	JEQ   deq
+
+loopd:
+	VMOVDQU (DI), Y12
+	VMOVDQU 32(DI), Y13''')
+for r in range(6):
+    reg = 14 + (r % 2)
+    out.append("\tVPBROADCASTD %s, Y%d" % (addr[r], reg))
+    out.append(vpdpbusd(2 * r, reg, 12))
+    out.append(vpdpbusd(2 * r + 1, reg, 13))
+out.append('''	ADDQ $4, SI
+	ADDQ $4, R9
+	ADDQ $64, DI
+	DECQ CX
+	JNZ  loopd
+
+deq:
+	VMOVUPS (R11), Y12
+	VMOVUPS 32(R11), Y13''')
+for r in range(12):
+    out.append("\tVCVTDQ2PS Y%d, Y%d" % (r, r))
+    out.append("\tVSUBPS %s(R12), Y%d, Y%d" % ("32" if r % 2 else "", r, r))
+    out.append("\tVMULPS Y%d, Y%d, Y%d" % (12 + r % 2, r, r))
+for r in range(6):
+    out.append("\tVBROADCASTSS %s(BX), Y14" % (str(4 * r) if r else ""))
+    out.append("\tVMULPS Y14, Y%d, Y%d" % (2 * r, 2 * r))
+    out.append("\tVMULPS Y14, Y%d, Y%d" % (2 * r + 1, 2 * r + 1))
+out.append("\tTESTQ AX, AX\n\tJEQ   put")
+for r in range(6):
+    out.append("\tVADDPS (DX), Y%d, Y%d" % (2 * r, 2 * r))
+    out.append("\tVADDPS 32(DX), Y%d, Y%d" % (2 * r + 1, 2 * r + 1))
+    out.append("\tVMOVUPS Y%d, (DX)" % (2 * r))
+    out.append("\tVMOVUPS Y%d, 32(DX)" % (2 * r + 1))
+    out.append("\tADDQ R10, DX")
+out.append("\tVZEROUPPER\n\tRET\n\nput:")
+for r in range(6):
+    out.append("\tVMOVUPS Y%d, (DX)" % (2 * r))
+    out.append("\tVMOVUPS Y%d, 32(DX)" % (2 * r + 1))
+    out.append("\tADDQ R10, DX")
+out.append("\tVZEROUPPER\n\tRET")
 print("\n".join(out))

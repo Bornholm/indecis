@@ -113,7 +113,8 @@ func (m *Model) SetCompact(source WeightSource) {
 
 // SetInt8 makes the layers compute their products in int8 (per-channel
 // weights, per-token activations). Without a hardware kernel
-// (linalg.Int8Fast), this is exact but slow.
+// (linalg.Int8Fast), this is exact but slow. With it, the attention runs
+// in int8 too (linalg.Attend8).
 func (m *Model) SetInt8(on bool) {
 	m.packMu.Lock()
 	defer m.packMu.Unlock()
@@ -219,8 +220,16 @@ func (m *Model) packs() []packedLayer {
 // workspace groups the buffers of an inference pass, reused across
 // requests.
 type workspace struct {
-	x, xn, qkv, ctx, z, g []float32
+	x, xn, qkv, ctx []float32
+	pos             []int32        // position of each row in its sequence
+	attn            []linalg.Attn8 // one per (sequence, head), see attention8
 }
+
+// mlpBuffers holds the MLP buffers of the workers (see run).
+var mlpBuffers = sync.Pool{New: func() any { return new([]float32) }}
+
+// attnScratches holds the buffers of the workers of attention8.
+var attnScratches = sync.Pool{New: func() any { return new(linalg.AttnScratch) }}
 
 var workspaces sync.Pool
 
@@ -317,10 +326,15 @@ func (m *Model) run(seqs [][]int32, done func(xn []float32, offs []int)) error {
 	ws.xn = grow(ws.xn, N*H)
 	ws.qkv = grow(ws.qkv, N*3*H)
 	ws.ctx = grow(ws.ctx, N*H)
-	chunk := min(N, mlpChunk)
-	ws.z = grow(ws.z, chunk*2*I)
-	ws.g = grow(ws.g, chunk*I)
 	x, xn := ws.x, ws.xn
+	ws.pos = grow(ws.pos, N)
+	T := 0
+	for i := range seqs {
+		T = max(T, offs[i+1]-offs[i])
+		for t := offs[i]; t < offs[i+1]; t++ {
+			ws.pos[t] = int32(t - offs[i])
+		}
+	}
 
 	r := 0
 	for _, sq := range seqs {
@@ -331,36 +345,73 @@ func (m *Model) run(seqs [][]int32, done func(xn []float32, offs []int)) error {
 	}
 	layerNormInfer(x, xn, m.EmbNorm.W, N, H, cfg.NormEps, w)
 
+	nh, D := cfg.Heads, cfg.HeadDim()
+	half := D / 2
 	for l, L := range m.Layers {
 		p := packs[l]
-		attnIn := x
-		if L.AttnNorm != nil {
-			layerNormInfer(xn, x, L.AttnNorm.W, N, H, cfg.NormEps, w)
-			attnIn = xn
-		}
-		p.qkv.mul(ws.qkv, attnIn, N, false, w)
-		m.attentionInfer(l, offs, ws.qkv, ws.ctx, w)
-		p.o.mul(x, ws.ctx, N, true, w) // x += attention
-
-		layerNormInfer(xn, x, L.MLPNorm.W, N, H, cfg.NormEps, w)
-		// The MLP works in row chunks: its buffers (2·I + I values per row,
-		// more than everything else) do not depend on the text length.
-		for r0 := 0; r0 < N; r0 += chunk {
-			rows := min(chunk, N-r0)
-			p.i.mul(ws.z, xn[r0*H:(r0+rows)*H], rows, false, w)
-			gluInfer(ws.g, ws.z, rows, I, w)
-			p.oMLP.mul(x[r0*H:(r0+rows)*H], ws.g, rows, true, w) // x += MLP
-		}
+		rope := m.ropeFor(m.theta(l), T)
+		// Outside the attention, rows are independent: each worker takes
+		// slices of rows through the norm and the QKV projection, then
+		// through the output projection and the MLP, its products on one
+		// core. A layer waits three times for all workers, not at every
+		// product: on a hybrid processor, each wait is for the slowest
+		// core.
+		linalg.ParallelN(w, N, rowSlice, func(lo, hi int) {
+			in := x[lo*H : hi*H]
+			if L.AttnNorm != nil {
+				for r := lo; r < hi; r++ {
+					linalg.LayerNormRow(xn[r*H:(r+1)*H], x[r*H:(r+1)*H], L.AttnNorm.W, cfg.NormEps)
+				}
+				in = xn[lo*H : hi*H]
+			}
+			p.qkv.mul(ws.qkv[lo*3*H:hi*3*H], in, hi-lo, false, 1)
+			// RoPE on the queries and keys of every head, in place.
+			for r := lo; r < hi; r++ {
+				t := int(ws.pos[r])
+				cos, sin := rope.cos[t*half:(t+1)*half], rope.sin[t*half:(t+1)*half]
+				row := ws.qkv[r*3*H : r*3*H+2*H]
+				for h := 0; h < 2*nh; h++ {
+					linalg.Rope(row[h*D:(h+1)*D], cos, sin)
+				}
+			}
+		})
+		m.attentionInfer(l, offs, ws, w)
+		linalg.ParallelN(w, N, rowSlice, func(lo, hi int) {
+			p.o.mul(x[lo*H:hi*H], ws.ctx[lo*H:hi*H], hi-lo, true, 1) // x += attention
+			for r := lo; r < hi; r++ {
+				linalg.LayerNormRow(xn[r*H:(r+1)*H], x[r*H:(r+1)*H], L.MLPNorm.W, cfg.NormEps)
+			}
+			// The MLP works in chunks of rows: its buffers (2·I + I values
+			// per row, more than everything else) do not depend on the
+			// text length.
+			buf := mlpBuffers.Get().(*[]float32)
+			defer mlpBuffers.Put(buf)
+			*buf = grow(*buf, mlpChunk*3*I)
+			z, g := (*buf)[:mlpChunk*2*I], (*buf)[mlpChunk*2*I:]
+			for r0 := lo; r0 < hi; r0 += mlpChunk {
+				rows := min(mlpChunk, hi-r0)
+				p.i.mul(z, xn[r0*H:(r0+rows)*H], rows, false, 1)
+				for r := 0; r < rows; r++ {
+					linalg.GeluMul(g[r*I:(r+1)*I], z[r*2*I:r*2*I+I], z[r*2*I+I:(r+1)*2*I])
+				}
+				if st := m.stats; st != nil {
+					st.add(l, g, rows, I)
+				}
+				p.oMLP.mul(x[r0*H:(r0+rows)*H], g, rows, true, 1) // x += MLP
+			}
+		})
 	}
 	layerNormInfer(xn, x, m.FinalNorm.W, N, H, cfg.NormEps, w)
 	done(xn, offs)
 	return nil
 }
 
-// attentionInfer is attentionForward without keeping anything: q, k, v of
-// each (sequence, head) live in the task's buffers, and attention is
-// computed block by block (attendBlocks), in linear memory.
-func (m *Model) attentionInfer(l int, offs []int, qkv, ctx []float32, workers int) {
+// attentionInfer is attentionForward without keeping anything, on the
+// rows of ws.qkv, RoPE already applied (see run): q, k, v of each
+// (sequence, head) live in the task's buffers, and attention is computed
+// block by block (attendBlocks), in linear memory. In int8, see
+// attention8.
+func (m *Model) attentionInfer(l int, offs []int, ws *workspace, workers int) {
 	cfg := m.Cfg
 	H, nh, D := cfg.Hidden, cfg.Heads, cfg.HeadDim()
 	B := len(offs) - 1
@@ -368,12 +419,14 @@ func (m *Model) attentionInfer(l int, offs []int, qkv, ctx []float32, workers in
 	for i := 0; i < B; i++ {
 		T = max(T, offs[i+1]-offs[i])
 	}
-	half := D / 2
-	rope := m.ropeFor(m.theta(l), T)
 	scale := float32(1 / math.Sqrt(float64(D)))
 	window := -1
 	if !cfg.IsGlobal(l) {
 		window = cfg.Window()
+	}
+	if m.int8 && linalg.Int8Fast() {
+		m.attention8(offs, ws, window, scale, workers)
+		return
 	}
 	linalg.ParallelN(workers, B*nh, 1, func(lo, hi int) {
 		buf := make([]float32, 4*T*D)
@@ -386,20 +439,57 @@ func (m *Model) attentionInfer(l int, offs []int, qkv, ctx []float32, workers in
 				continue
 			}
 			for t := 0; t < n; t++ {
-				row := qkv[(off+t)*3*H:]
-				cos := rope.cos[t*half : (t+1)*half]
-				sin := rope.sin[t*half : (t+1)*half]
-				qt, kt := q[t*D:(t+1)*D], k[t*D:(t+1)*D]
-				copy(qt, row[h*D:(h+1)*D])
-				copy(kt, row[H+h*D:H+(h+1)*D])
+				row := ws.qkv[(off+t)*3*H:]
+				copy(q[t*D:(t+1)*D], row[h*D:(h+1)*D])
+				copy(k[t*D:(t+1)*D], row[H+h*D:H+(h+1)*D])
 				copy(v[t*D:(t+1)*D], row[2*H+h*D:2*H+(h+1)*D])
-				applyRope(qt, cos, sin)
-				applyRope(kt, cos, sin)
 			}
 			attendBlocks(o, q, k, v, n, D, window, scale, blk)
 			for t := 0; t < n; t++ {
-				copy(ctx[(off+t)*H+h*D:(off+t)*H+(h+1)*D], o[t*D:(t+1)*D])
+				copy(ws.ctx[(off+t)*H+h*D:(off+t)*H+(h+1)*D], o[t*D:(t+1)*D])
 			}
+		}
+	})
+}
+
+// attention8 computes the attention in int8 (linalg.Attn8), in two
+// passes: each (sequence, head) is quantized and packed, straight from
+// the rows of ws.qkv, then the blocks of queries are scored. Spread over
+// blocks rather than (sequence, head), the work divides finely even for
+// one sequence and a few heads: on a hybrid processor, no slow core is
+// left with a whole head while the others wait.
+func (m *Model) attention8(offs []int, ws *workspace, window int, scale float32, workers int) {
+	H, nh, D := m.Cfg.Hidden, m.Cfg.Heads, m.Cfg.HeadDim()
+	B := len(offs) - 1
+	if cap(ws.attn) < B*nh {
+		ws.attn = make([]linalg.Attn8, B*nh)
+	}
+	prep := ws.attn[:B*nh]
+	linalg.ParallelN(workers, B*nh, 1, func(lo, hi int) {
+		for task := lo; task < hi; task++ {
+			bi, h := task/nh, task%nh
+			off, n := offs[bi], offs[bi+1]-offs[bi]
+			rows := ws.qkv[off*3*H:]
+			prep[task].Prepare(rows[h*D:], rows[H+h*D:], rows[2*H+h*D:], 3*H, n, D, scale)
+		}
+	})
+	// The blocks of queries: (sequence, head, first query).
+	type block struct{ task, i0 int }
+	var blocks []block
+	for bi := 0; bi < B; bi++ {
+		for h := 0; h < nh; h++ {
+			for i0 := 0; i0 < offs[bi+1]-offs[bi]; i0 += linalg.AttnBlock {
+				blocks = append(blocks, block{bi*nh + h, i0})
+			}
+		}
+	}
+	linalg.ParallelN(workers, len(blocks), 1, func(lo, hi int) {
+		sc := attnScratches.Get().(*linalg.AttnScratch)
+		defer attnScratches.Put(sc)
+		for _, b := range blocks[lo:hi] {
+			bi, h := b.task/nh, b.task%nh
+			off, n := offs[bi], offs[bi+1]-offs[bi]
+			prep[b.task].Attend(ws.ctx[(off+b.i0)*H+h*D:], H, b.i0, min(n, b.i0+linalg.AttnBlock), window, sc)
 		}
 	})
 }
@@ -409,15 +499,6 @@ func layerNormInfer(out, x, gamma []float32, n, h int, eps float64, workers int)
 	linalg.ParallelN(workers, n, rowGrain, func(lo, hi int) {
 		for r := lo; r < hi; r++ {
 			linalg.LayerNormRow(out[r*h:(r+1)*h], x[r*h:(r+1)*h], gamma, eps)
-		}
-	})
-}
-
-// gluInfer is gluForward with GELU in float32.
-func gluInfer(g, z []float32, n, inter int, workers int) {
-	linalg.ParallelN(workers, n, rowGrain, func(lo, hi int) {
-		for r := lo; r < hi; r++ {
-			linalg.GeluMul(g[r*inter:(r+1)*inter], z[r*2*inter:r*2*inter+inter], z[r*2*inter+inter:(r+1)*2*inter])
 		}
 	})
 }
@@ -433,15 +514,23 @@ const (
 	qBlock = 64
 	kBlock = 128
 
-	// mlpChunk is the number of rows the MLP processes at a time.
-	mlpChunk = 256
+	// mlpChunk is the number of rows the MLP processes at a time, on one
+	// core.
+	mlpChunk = 64
+
+	// rowSlice is the smallest slice of rows a worker takes outside the
+	// attention.
+	rowSlice = 24
 
 	// parallelRows is the number of positions (across all sequences in
 	// the batch) above which Encode spreads its computation over multiple
 	// cores. Below it, launching goroutines costs more than the
 	// computation, and a hybrid processor sends them to its slow cores: a
-	// sentence computes twice as fast on a single core.
-	parallelRows = 1024
+	// sentence of 32 tokens computes twice as fast on a single core. Above
+	// it, the slices of rows (rowSlice) divide the work well: on a Core
+	// Ultra 7 265U, all cores compute 128 positions twice as fast as one,
+	// 512 three times as fast.
+	parallelRows = 96
 )
 
 type blockBuffers struct {

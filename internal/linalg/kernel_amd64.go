@@ -108,3 +108,71 @@ func microKernel8(kq int, ap []uint8, lda int, bp []int8, tile *[mr8 * nr8]int32
 	}
 	microKernel8Go(kq, ap, lda, bp, tile)
 }
+
+//go:noescape
+func microKernelVNNIDeq(kq int, ap *uint8, lda int, bp *int8, c *float32, ldc int, sb, zc, sa *float32, accumulate int)
+
+// microKernel8Deq computes a whole 6×16 tile of C, rows ldc apart:
+// c[r][j] (+)= sa[r]·sb[j]·(Σ a·b − zc[j]), the rescaling done in the
+// kernel's registers. It reports false, doing nothing, without the
+// AVX-VNNI kernel: the caller then goes through microKernel8.
+func microKernel8Deq(kq int, ap []uint8, lda int, bp []int8, c []float32, ldc int, sb, zc, sa []float32, accumulate bool) bool {
+	if !vnni || kq == 0 {
+		return false
+	}
+	_ = ap[(mr8-1)*lda+kq*4-1]
+	_ = bp[kq*nr8*4-1]
+	_ = c[(mr8-1)*ldc+nr8-1]
+	_ = sb[nr8-1]
+	_ = zc[nr8-1]
+	_ = sa[mr8-1]
+	acc := 0
+	if accumulate {
+		acc = 1
+	}
+	microKernelVNNIDeq(kq, &ap[0], lda, &bp[0], &c[0], ldc, &sb[0], &zc[0], &sa[0], acc)
+	return true
+}
+
+//go:noescape
+func quantRowAVX2(dst *int8, x, mean *float32, n int, flip int) (scale float32, sum int32)
+
+//go:noescape
+func quantColsAVX2(dst *int8, x, inv *float32, n int)
+
+//go:noescape
+func interleave4AVX2(dst, src *int8, n, stride int)
+
+// quantFast reports whether the AVX2 quantization of the attention
+// operands applies to heads of D values.
+func quantFast(D int) bool { return avx2 && D%32 == 0 }
+
+// quantRow quantizes c = x − mean to int8, scale = max|c|/127 (see
+// quantRowAVX2); flip gives uint8 with the 128 offset. len(x) = D,
+// quantFast(D).
+func quantRow(dst []int8, x, mean []float32, flip bool) (float32, int32) {
+	n := len(x)
+	_ = dst[n-1]
+	_ = mean[n-1]
+	f := 0
+	if flip {
+		f = 1
+	}
+	return quantRowAVX2(&dst[0], &x[0], &mean[0], n, f)
+}
+
+// quantCols writes dst[i] = round(x[i]·inv[i]), quantFast(len(x)).
+func quantCols(dst []int8, x, inv []float32) {
+	n := len(x)
+	_ = dst[n-1]
+	_ = inv[n-1]
+	quantColsAVX2(&dst[0], &x[0], &inv[0], n)
+}
+
+// interleave4 writes the 4 rows of n bytes of src column by column, 16
+// columns at dst[c·stride:] for each chunk c.
+func interleave4(dst, src []int8, n, stride int) {
+	_ = src[4*n-1]
+	_ = dst[(n/16-1)*stride+63]
+	interleave4AVX2(&dst[0], &src[0], n, stride)
+}

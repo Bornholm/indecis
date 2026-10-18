@@ -37,6 +37,19 @@ type TrainOptions struct {
 	Symmetric bool
 	// Progress, if provided, is called after each step.
 	Progress func(Progress)
+
+	// Teacher, if set, is distilled into the model (see PruneMLP): the
+	// loss of each Spans question mixes the labels, weight 1 − Distill,
+	// and the teacher's tags, weight Distill, both distributions softened
+	// by DistillTemp (Hinton et al. 2015: the soft term is multiplied by
+	// T² so that its gradients keep their scale). DistillHidden weighs
+	// the mean squared distance between the final states of the two
+	// encoders. The teacher must have the model's questions, tokenizer
+	// and width; it runs in inference, int8 if it was loaded so.
+	Teacher       *Model
+	Distill       float64
+	DistillTemp   float64
+	DistillHidden float64
 }
 
 // DefaultTrainOptions are starting settings for a small encoder.
@@ -121,6 +134,11 @@ func (m *Model) Fit(ctx context.Context, examples []dataset.Example, opts TrainO
 	if opts.BatchSize <= 0 || opts.Epochs <= 0 {
 		return fmt.Errorf("indecis: BatchSize and Epochs must be positive")
 	}
+	if opts.Teacher != nil {
+		if err := m.checkTeacher(opts.Teacher); err != nil {
+			return err
+		}
+	}
 	data, err := m.encode(examples)
 	if err != nil {
 		return err
@@ -175,7 +193,10 @@ func (m *Model) Fit(ctx context.Context, examples []dataset.Example, opts TrainO
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			loss, n := m.trainStep(batch, grads, opts.Dropout, rng)
+			loss, n, err := m.trainStep(batch, grads, opts, rng)
+			if err != nil {
+				return err
+			}
 			tokens += n
 			all := append(append([]optim.Dense(nil), encDense...), headDense...)
 			if opts.ClipNorm > 0 {
@@ -224,13 +245,18 @@ func batches(data []encoded, size int, rng *rand.Rand) [][]*encoded {
 // trainStep computes the loss of a batch and accumulates all the
 // gradients. Each question's loss is averaged over the examples that
 // label it, then the questions are summed.
-func (m *Model) trainStep(batch []*encoded, grads *modernbert.Grads, dropout float64, rng *rand.Rand) (float64, int) {
+func (m *Model) trainStep(batch []*encoded, grads *modernbert.Grads, opts TrainOptions, rng *rand.Rand) (float64, int, error) {
 	H := m.enc.Cfg.Hidden
+	dropout := opts.Dropout
 	seqs := make([][]int32, len(batch))
 	tokens := 0
 	for i, e := range batch {
 		seqs[i] = e.ids
 		tokens += len(e.ids)
+	}
+	tc, err := teach(opts, seqs)
+	if err != nil {
+		return 0, 0, err
 	}
 	b := modernbert.NewBatch(seqs, m.enc.Cfg.PadID)
 	s, err := m.enc.Forward(b)
@@ -286,10 +312,13 @@ func (m *Model) trainStep(batch []*encoded, grads *modernbert.Grads, dropout flo
 	}
 	dHidden := modernbert.MeanPoolBackward(dx, b, H)
 	if m.hasSpans() {
-		loss += m.spanLossGrad(batch, s.Hidden, dHidden, b.T, dropout, rng)
+		loss += m.spanLossGrad(batch, s.Hidden, dHidden, b.T, dropout, rng, tc)
+	}
+	if tc != nil {
+		loss += m.hiddenLossGrad(batch, s.Hidden, dHidden, b.T, tc, opts.DistillHidden)
 	}
 	m.enc.Backward(s, dHidden, grads)
-	return loss, tokens
+	return loss, tokens, nil
 }
 
 func (m *Model) recordPriors(data []encoded) {

@@ -179,11 +179,11 @@ func softmaxRows(s []float32, n, m int) {
 	}
 }
 
-func grow(s []float32, n int) []float32 {
+func grow[T any](s []T, n int) []T {
 	if cap(s) >= n {
 		return s[:n]
 	}
-	return make([]float32, n)
+	return make([]T, n)
 }
 
 func sqrt(x float64) float64 { return math.Sqrt(x) }

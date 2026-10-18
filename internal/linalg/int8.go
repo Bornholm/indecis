@@ -105,28 +105,27 @@ func MatMul8N(c, a []float32, b *PackedB8, m int, accumulate bool, limit int) {
 
 	colPanels := (n + nr8 - 1) / nr8
 	// Each worker handles a slice of column panels [lo, hi) for all row
-	// panels: the tiles of a row panel accumulate into acc, then each row
-	// is rescaled in one go (one vector call per row, not per tile).
+	// panels. A whole tile is rescaled and stored by the kernel itself;
+	// the tiles on the edges of C go through Dequantize.
 	work := func(lo, hi int) {
 		var tile [mr8 * nr8]int32
-		j0, j1 := lo*nr8, min(n, hi*nr8)
-		width := j1 - j0
-		acc := getInts(mr8 * width)
-		defer putInts(acc)
 		for pi := 0; pi < rowPanels; pi++ {
 			ap := apack[pi*mr8*lda : (pi+1)*mr8*lda]
+			i0 := pi * mr8
+			rows := min(mr8, m-i0)
 			for pj := lo; pj < hi; pj++ {
-				microKernel8(kq, ap, lda, b.data[pj*kq*nr8*4:(pj+1)*kq*nr8*4], &tile)
-				c0 := pj*nr8 - j0
-				cols := min(nr8, n-pj*nr8)
-				for r := 0; r < mr8; r++ {
-					copy(acc[r*width+c0:r*width+c0+cols], tile[r*nr8:r*nr8+cols])
+				j0 := pj * nr8
+				cols := min(nr8, n-j0)
+				bp := b.data[pj*kq*nr8*4 : (pj+1)*kq*nr8*4]
+				if rows == mr8 && cols == nr8 &&
+					microKernel8Deq(kq, ap, lda, bp, c[i0*n+j0:], n, b.scale[j0:], b.zc[j0:], sa[i0:], accumulate) {
+					continue
 				}
-			}
-			rows := min(mr8, m-pi*mr8)
-			for r := 0; r < rows; r++ {
-				i := pi*mr8 + r
-				Dequantize(c[i*n+j0:i*n+j1], acc[r*width:(r+1)*width], b.scale[j0:j1], b.zc[j0:j1], sa[i], accumulate)
+				microKernel8(kq, ap, lda, bp, &tile)
+				for r := 0; r < rows; r++ {
+					i := i0 + r
+					Dequantize(c[i*n+j0:i*n+j0+cols], tile[r*nr8:r*nr8+cols], b.scale[j0:j0+cols], b.zc[j0:j0+cols], sa[i], accumulate)
+				}
 			}
 		}
 	}

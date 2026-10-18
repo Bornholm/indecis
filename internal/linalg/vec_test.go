@@ -50,6 +50,37 @@ func TestVectorOps(t *testing.T) {
 			}
 		}
 
+		d := make([]float32, n)
+		SubTo(d, x, b)
+		mx := append([]float32(nil), b...)
+		MaxAbsTo(mx, x)
+		inv2 := make([]float32, n)
+		for i := range inv2 {
+			inv2[i] = 127 / want * float32(0.5+r.Float64()/2)
+		}
+		qc := make([]uint8, n)
+		QuantizeCols(qc, x, inv2)
+		for i := range d {
+			if d[i] != x[i]-b[i] || mx[i] != max(b[i], float32(math.Abs(float64(x[i])))) {
+				t.Fatalf("n=%d SubTo/MaxAbsTo[%d] %v %v", n, i, d[i], mx[i])
+			}
+			if w := uint8(int32(math.RoundToEven(float64(x[i]*inv2[i]))) + 128); qc[i] != w {
+				t.Fatalf("n=%d QuantizeCols[%d] %d, want %d", n, i, qc[i], w)
+			}
+		}
+		if n%2 == 0 {
+			half := n / 2
+			rot := append([]float32(nil), x...)
+			Rope(rot, b[:half], b[half:])
+			for i := 0; i < half; i++ {
+				w1 := x[i]*b[i] - x[i+half]*b[half+i]
+				w2 := x[i+half]*b[i] + x[i]*b[half+i]
+				if rot[i] != w1 || rot[i+half] != w2 {
+					t.Fatalf("n=%d Rope[%d] %v %v, want %v %v", n, i, rot[i], rot[i+half], w1, w2)
+				}
+			}
+		}
+
 		s := append([]float32(nil), x...)
 		AddTo(s, b)
 		for i := range s {

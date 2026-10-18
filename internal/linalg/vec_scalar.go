@@ -20,9 +20,19 @@ func QuantizeRow(dst []uint8, x []float32, inv float32) {
 	}
 }
 
+func QuantizeRowU8(dst []uint8, x []float32, inv float32) int32 {
+	var sum int32
+	for i, v := range x {
+		q := int32(roundHalfEven(v * inv))
+		dst[i] = uint8(q)
+		sum += q
+	}
+	return sum
+}
+
 func Dequantize(dst []float32, acc []int32, sb, zc []float32, sa float32, accumulate bool) {
 	for j := range dst {
-		v := sa * sb[j] * (float32(acc[j]) - zc[j])
+		v := (float32(acc[j]) - zc[j]) * sb[j] * sa
 		if accumulate {
 			dst[j] += v
 		} else {
@@ -87,5 +97,32 @@ func GeluTanh(o, a []float32) {
 func AddTo(o, b []float32) {
 	for i := range o {
 		o[i] += b[i]
+	}
+}
+
+func SubTo(o, x, y []float32) {
+	for i := range o {
+		o[i] = x[i] - y[i]
+	}
+}
+
+func MaxAbsTo(o, x []float32) {
+	for i := range o {
+		o[i] = max(o[i], abs32(x[i]))
+	}
+}
+
+func QuantizeCols(dst []uint8, x, inv []float32) {
+	for i, v := range x {
+		dst[i] = uint8(int32(roundHalfEven(v*inv[i])) + 128)
+	}
+}
+
+func Rope(x, cos, sin []float32) {
+	half := len(cos)
+	for i := 0; i < half; i++ {
+		a, b := x[i], x[i+half]
+		x[i] = a*cos[i] - b*sin[i]
+		x[i+half] = b*cos[i] + a*sin[i]
 	}
 }

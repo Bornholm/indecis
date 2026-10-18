@@ -282,6 +282,21 @@ func (m *Model) Temperatures() map[string]float64 {
 	return out
 }
 
+// SetTemperatures replaces the temperatures of the named questions. A
+// model distilled from another (see TrainOptions.Teacher) can take its
+// teacher's: its logits learned the teacher's scale, so a decoding bias
+// keeps the effect it has on the teacher.
+func (m *Model) SetTemperatures(temps map[string]float64) error {
+	for name, t := range temps {
+		qi := m.schema.Index(name)
+		if qi < 0 || t <= 0 {
+			return fmt.Errorf("indecis: temperature %v for question %q", t, name)
+		}
+		m.temps[qi] = t
+	}
+	return nil
+}
+
 // Decide answers all the questions for each text, without context.
 func (m *Model) Decide(ctx context.Context, texts ...string) ([]Decision, error) {
 	return m.DecideInputs(ctx, textsToInputs(texts)...)

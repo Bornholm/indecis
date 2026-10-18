@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"os"
+	"strconv"
 	"testing"
 )
 
@@ -276,4 +278,24 @@ func TestEncodeLongMatchesForward(t *testing.T) {
 			t.Errorf("%d tokens: |Δ|max = %g", len(seqs[i]), d)
 		}
 	}
+}
+
+func BenchmarkAttendBlocks(b *testing.B) {
+	n, D := benchN(), 64
+	q, k, v := make([]float32, n*D), make([]float32, n*D), make([]float32, n*D)
+	for i := range q {
+		q[i], k[i], v[i] = float32(i%7)/7, float32(i%5)/5, float32(i%3)/3
+	}
+	o := make([]float32, n*D)
+	blk := newBlockBuffers()
+	for b.Loop() {
+		attendBlocks(o, q, k, v, n, D, -1, 1, blk)
+	}
+}
+
+func benchN() int {
+	if n, err := strconv.Atoi(os.Getenv("ATTN_N")); err == nil {
+		return n
+	}
+	return 258
 }
