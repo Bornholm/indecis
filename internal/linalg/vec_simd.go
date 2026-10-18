@@ -347,3 +347,79 @@ func MaxOf(x []float32) float32 {
 	}
 	return m
 }
+
+// SubTo writes o[i] = x[i] - y[i].
+//
+//go:noinline
+func SubTo(o, x, y []float32) {
+	var zero simd.Float32s
+	V := zero.Len()
+	i := 0
+	for ; i+V <= len(o); i += V {
+		simd.LoadFloat32s(x[i:]).Sub(simd.LoadFloat32s(y[i:])).Store(o[i:])
+	}
+	for ; i < len(o); i++ {
+		o[i] = x[i] - y[i]
+	}
+}
+
+// MaxAbsTo writes o[i] = max(o[i], |x[i]|).
+//
+//go:noinline
+func MaxAbsTo(o, x []float32) {
+	var zero simd.Float32s
+	V := zero.Len()
+	i := 0
+	for ; i+V <= len(o); i += V {
+		simd.LoadFloat32s(o[i:]).Max(simd.LoadFloat32s(x[i:]).Abs()).Store(o[i:])
+	}
+	for ; i < len(o); i++ {
+		o[i] = max(o[i], abs32(x[i]))
+	}
+}
+
+// QuantizeCols writes dst[i] = round(x[i]*inv[i]) + 128 (|x[i]*inv[i]| <=
+// 127): QuantizeRow with a scale per value.
+//
+//go:noinline
+func QuantizeCols(dst []uint8, x, inv []float32) {
+	magic := simd.BroadcastFloat32s(12582912) // 1.5*2^23: round to even
+	off := simd.BroadcastInt32s(128)
+	V := magic.Len()
+	var tmp [16]int32
+	i := 0
+	for ; i+V <= len(x); i += V {
+		q := simd.LoadFloat32s(x[i:]).Mul(simd.LoadFloat32s(inv[i:])).Add(magic).Sub(magic).ConvertToInt32().Add(off)
+		q.Store(tmp[:])
+		d := dst[i : i+V]
+		for j := range d {
+			d[j] = uint8(tmp[j])
+		}
+	}
+	for ; i < len(x); i++ {
+		dst[i] = uint8(int32(roundHalfEven(x[i]*inv[i])) + 128)
+	}
+}
+
+// Rope rotates x (a head, 2·len(cos) values) in place, rotate_half style:
+// x' = x·cos + [-x₂, x₁]·sin.
+//
+//go:noinline
+func Rope(x, cos, sin []float32) {
+	half := len(cos)
+	x1, x2 := x[:half], x[half:2*half]
+	var zero simd.Float32s
+	V := zero.Len()
+	i := 0
+	for ; i+V <= half; i += V {
+		a, b := simd.LoadFloat32s(x1[i:]), simd.LoadFloat32s(x2[i:])
+		c, s := simd.LoadFloat32s(cos[i:]), simd.LoadFloat32s(sin[i:])
+		a.Mul(c).Sub(b.Mul(s)).Store(x1[i:])
+		b.Mul(c).Add(a.Mul(s)).Store(x2[i:])
+	}
+	for ; i < half; i++ {
+		a, b := x1[i], x2[i]
+		x1[i] = a*cos[i] - b*sin[i]
+		x2[i] = b*cos[i] + a*sin[i]
+	}
+}

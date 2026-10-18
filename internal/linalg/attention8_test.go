@@ -96,7 +96,7 @@ func TestAttn8Ranges(t *testing.T) {
 		want := make([]float32, n*D)
 		Attend8(want, q, k, v, n, D, window, 0.125, &b)
 		var a Attn8
-		a.Prepare(q, k, v, n, D, 0.125)
+		a.Prepare(q, k, v, D, n, D, 0.125)
 		o := make([]float32, n*ldo)
 		for i0 := 0; i0 < n; i0 += AttnBlock {
 			var sc AttnScratch

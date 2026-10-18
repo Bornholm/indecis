@@ -1,5 +1,7 @@
 package linalg
 
+import "unsafe"
+
 // Attention in int8, for inference: both products of the attention, Q·Kᵀ
 // and P·V, run on the int8 micro-kernel of MatMul8.
 //
@@ -38,7 +40,7 @@ type Attn8 struct {
 	zeros         []float32
 	mean          []float32
 	kc            []float32 // a centered key
-	off           []int     // offset of each depth in a packed panel
+	kb            []uint8   // a quantized key, or four quantized values
 	vinv          []float32
 }
 
@@ -66,13 +68,14 @@ func grow[T any](b []T, n int) []T {
 // with scores scaled by scale. window < 0: global attention; otherwise
 // |i − j| ≤ window. q, k and v are not modified.
 func Attend8(o, q, k, v []float32, n, D, window int, scale float32, b *AttnBuffers) {
-	b.Prepare(q, k, v, n, D, scale)
+	b.Prepare(q, k, v, D, n, D, scale)
 	b.Attend(o, D, 0, n, window, &b.AttnScratch)
 }
 
-// Prepare quantizes and packs q, k and v (n×D each), with scores scaled
-// by scale. q, k and v are not modified nor kept.
-func (b *Attn8) Prepare(q, k, v []float32, n, D int, scale float32) {
+// Prepare quantizes and packs q, k and v, n rows of D values each, row j
+// at [j·ld:], with scores scaled by scale. q, k and v are not modified
+// nor kept.
+func (b *Attn8) Prepare(q, k, v []float32, ld, n, D int, scale float32) {
 	b.n, b.D = n, D
 	if n == 0 {
 		return
@@ -83,21 +86,45 @@ func (b *Attn8) Prepare(q, k, v []float32, n, D int, scale float32) {
 	keyPanels := (n + nr8 - 1) / nr8
 	nPad := keyPanels * nr8 // keys, padded to whole panels
 	kqn := nPad / 4         // depth of P·V in quadruplets
-	b.kq, b.lda, b.nPad = kq, lda, nPad
+	dPanels := (D + nr8 - 1) / nr8
+	Dp := dPanels * nr8
+	b.kq, b.lda, b.nPad, b.dPanels = kq, lda, nPad, dPanels
+	b.zeros = grow(b.zeros, Dp)
+	clear(b.zeros)
+	if quantFast(D) {
+		b.prepareAVX2(q, k, v, ld, n, D, scale)
+		return
+	}
 
 	// Q, quantized per row; the score scale goes into the row scales.
 	b.qa = grow(b.qa, rowsPad*lda)
 	b.sq = grow(b.sq, rowsPad)
-	quantizeA(b.qa, b.sq, q, n, D, lda)
-	for i := range b.sq {
-		b.sq[i] *= scale
+	for i := 0; i < rowsPad; i++ {
+		row := b.qa[i*lda : (i+1)*lda]
+		b.sq[i] = 0
+		if i >= n {
+			fill128(row)
+			continue
+		}
+		x := q[i*ld : i*ld+D]
+		mx := AbsMax(x)
+		if mx == 0 {
+			fill128(row)
+			continue
+		}
+		sc := mx / 127
+		b.sq[i] = sc * scale
+		QuantizeRow(row[:D], x, 1/sc)
+		fill128(row[D:])
 	}
 
-	// K, centered then quantized per key.
+	// K, centered then quantized per key. A key quantized with the 128
+	// offset becomes int8 by flipping the top bit of each byte; its
+	// quadruplets of depths go to the panel as 4-byte words.
 	b.mean = grow(b.mean, D)
 	clear(b.mean)
 	for j := 0; j < n; j++ {
-		AddTo(b.mean, k[j*D:(j+1)*D])
+		AddTo(b.mean, k[j*ld:j*ld+D])
 	}
 	Scale(b.mean, 1/float32(n))
 	b.kp = grow(b.kp, keyPanels*kq*nr8*4)
@@ -107,43 +134,40 @@ func (b *Attn8) Prepare(q, k, v []float32, n, D int, scale float32) {
 	clear(b.ks)
 	clear(b.kzc)
 	b.kc = grow(b.kc, D)
-	b.off = grow(b.off, max(D, nr8))
-	for d := 0; d < D; d++ {
-		b.off[d] = (d/4)*nr8*4 + d%4
-	}
+	b.kb = grow(b.kb, 4*lda)
 	for j := 0; j < n; j++ {
 		kc := b.kc
-		for d, x := range k[j*D : (j+1)*D] {
-			kc[d] = x - b.mean[d]
-		}
+		SubTo(kc, k[j*ld:j*ld+D], b.mean)
 		mx := AbsMax(kc)
 		if mx == 0 {
 			continue
 		}
-		s := mx / 127
-		inv := 1 / s
-		b.ks[j] = s
+		sc := mx / 127
+		b.ks[j] = sc
+		kb := b.kb[:lda]
+		QuantizeRow(kb[:D], kc, 1/sc)
+		fill128(kb[D:])
 		dst := b.kp[(j/nr8)*kq*nr8*4+(j%nr8)*4:]
 		var sum int32
-		for d, x := range kc {
-			qv := int8(roundHalfEven(x * inv))
-			dst[b.off[d]] = qv
-			sum += int32(qv)
+		for d4 := 0; d4 < kq; d4++ {
+			w := dst[d4*nr8*4 : d4*nr8*4+4]
+			for t, u := range kb[d4*4 : d4*4+4] {
+				w[t] = int8(u ^ 0x80)
+				sum += int32(u)
+			}
 		}
-		b.kzc[j] = 128 * float32(sum)
+		b.kzc[j] = 128 * float32(sum-128*int32(lda))
 	}
 
-	// V, quantized per dimension, its depth (the keys) padded with zeros.
-	dPanels := (D + nr8 - 1) / nr8
-	Dp := dPanels * nr8
+	// V, quantized per dimension, its depth (the keys) padded with zeros:
+	// four keys at a time, whose values of a dimension are a 4-byte word
+	// of the panel.
 	b.vp = grow(b.vp, dPanels*kqn*nr8*4)
 	clear(b.vp)
 	b.vs = grow(b.vs, Dp)
 	clear(b.vs)
 	for j := 0; j < n; j++ {
-		for d, x := range v[j*D : (j+1)*D] {
-			b.vs[d] = max(b.vs[d], abs32(x))
-		}
+		MaxAbsTo(b.vs[:D], v[j*ld:j*ld+D])
 	}
 	b.vinv = grow(b.vinv, D)
 	for d := 0; d < D; d++ {
@@ -152,18 +176,120 @@ func (b *Attn8) Prepare(q, k, v []float32, n, D int, scale float32) {
 			b.vs[d] /= 127
 			b.vinv[d] = 1 / b.vs[d]
 		}
-		b.off[d] = (d/nr8)*kqn*nr8*4 + (d%nr8)*4
 	}
-	for j := 0; j < n; j++ {
-		dst := b.vp[(j/4)*nr8*4+j%4:]
-		for d, x := range v[j*D : (j+1)*D] {
-			dst[b.off[d]] = int8(roundHalfEven(x * b.vinv[d]))
+	vb := b.kb[:4*D]
+	for j0 := 0; j0 < n; j0 += 4 {
+		for t := 0; t < 4; t++ {
+			if j0+t < n {
+				QuantizeCols(vb[t*D:(t+1)*D], v[(j0+t)*ld:(j0+t)*ld+D], b.vinv)
+			} else {
+				fill128(vb[t*D : (t+1)*D])
+			}
+		}
+		base := b.vp[(j0/4)*nr8*4:]
+		for d := 0; d < D; d++ {
+			w := base[(d/nr8)*kqn*nr8*4+(d%nr8)*4:]
+			w = w[:4]
+			w[0] = int8(vb[d] ^ 0x80)
+			w[1] = int8(vb[D+d] ^ 0x80)
+			w[2] = int8(vb[2*D+d] ^ 0x80)
+			w[3] = int8(vb[3*D+d] ^ 0x80)
 		}
 	}
-	b.zeros = grow(b.zeros, Dp)
-	clear(b.zeros)
+}
 
-	b.dPanels = dPanels
+// prepareAVX2 is Prepare with the AVX2 quantization (quantFast(D), so
+// lda = D): one call per row centers, scales, rounds and narrows it.
+func (b *Attn8) prepareAVX2(q, k, v []float32, ld, n, D int, scale float32) {
+	kq, nPad, dPanels := b.kq, b.nPad, b.dPanels
+	rowsPad := (n + mr8 - 1) / mr8 * mr8
+	kqn := nPad / 4
+
+	b.qa = grow(b.qa, rowsPad*D)
+	b.sq = grow(b.sq, rowsPad)
+	qa := asInt8(b.qa)
+	for i := 0; i < rowsPad; i++ {
+		b.sq[i] = 0
+		if i < n {
+			if s, _ := quantRow(qa[i*D:(i+1)*D], q[i*ld:i*ld+D], b.zeros, true); s != 0 {
+				b.sq[i] = s * scale
+				continue
+			}
+		}
+		fill128(b.qa[i*D : (i+1)*D])
+	}
+
+	// K, centered, its quadruplets of depths copied as words into the
+	// panels of 16 keys.
+	b.mean = grow(b.mean, D)
+	clear(b.mean)
+	for j := 0; j < n; j++ {
+		AddTo(b.mean, k[j*ld:j*ld+D])
+	}
+	Scale(b.mean, 1/float32(n))
+	b.kp = grow(b.kp, nPad/nr8*kq*nr8*4)
+	clear(b.kp)
+	b.ks = grow(b.ks, nPad)
+	b.kzc = grow(b.kzc, nPad)
+	clear(b.ks)
+	clear(b.kzc)
+	b.kb = grow(b.kb, 4*D)
+	kb := asInt8(b.kb)
+	kw := asUint32(b.kb[:D])
+	pw := asUint32(asUint8(b.kp))
+	for j := 0; j < n; j++ {
+		s, sum := quantRow(kb[:D], k[j*ld:j*ld+D], b.mean, false)
+		if s == 0 {
+			continue
+		}
+		b.ks[j] = s
+		b.kzc[j] = 128 * float32(sum)
+		dst := pw[(j/nr8)*kq*nr8+j%nr8:]
+		for d4, w := range kw {
+			dst[d4*nr8] = w
+		}
+	}
+
+	// V, quantized per dimension four keys at a time, interleaved into
+	// the panels.
+	b.vp = grow(b.vp, dPanels*kqn*nr8*4)
+	clear(b.vp)
+	b.vs = grow(b.vs, dPanels*nr8)
+	clear(b.vs)
+	for j := 0; j < n; j++ {
+		MaxAbsTo(b.vs[:D], v[j*ld:j*ld+D])
+	}
+	b.vinv = grow(b.vinv, D)
+	for d := 0; d < D; d++ {
+		b.vinv[d] = 0
+		if b.vs[d] > 0 {
+			b.vs[d] /= 127
+			b.vinv[d] = 1 / b.vs[d]
+		}
+	}
+	for j0 := 0; j0 < n; j0 += 4 {
+		for t := 0; t < 4; t++ {
+			if j0+t < n {
+				quantCols(kb[t*D:(t+1)*D], v[(j0+t)*ld:(j0+t)*ld+D], b.vinv)
+			} else {
+				clear(kb[t*D : (t+1)*D])
+			}
+		}
+		interleave4(b.vp[(j0/4)*nr8*4:], kb, D, kqn*nr8*4)
+	}
+}
+
+func asInt8(b []uint8) []int8 {
+	return unsafe.Slice((*int8)(unsafe.Pointer(unsafe.SliceData(b))), len(b))
+}
+
+func asUint8(b []int8) []uint8 {
+	return unsafe.Slice((*uint8)(unsafe.Pointer(unsafe.SliceData(b))), len(b))
+}
+
+// asUint32 views b (a multiple of 4 bytes) as words.
+func asUint32(b []uint8) []uint32 {
+	return unsafe.Slice((*uint32)(unsafe.Pointer(unsafe.SliceData(b))), len(b)/4)
 }
 
 // Attend writes into o the attention of the queries [i0, i1), row i at

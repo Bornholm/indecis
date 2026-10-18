@@ -221,18 +221,15 @@ func (m *Model) packs() []packedLayer {
 // requests.
 type workspace struct {
 	x, xn, qkv, ctx []float32
+	pos             []int32        // position of each row in its sequence
 	attn            []linalg.Attn8 // one per (sequence, head), see attention8
 }
 
 // mlpBuffers holds the MLP buffers of the workers (see run).
 var mlpBuffers = sync.Pool{New: func() any { return new([]float32) }}
 
-// headBuffers and attnScratches hold the buffers of the workers of
-// attention8.
-var (
-	headBuffers   = sync.Pool{New: func() any { return new([]float32) }}
-	attnScratches = sync.Pool{New: func() any { return new(linalg.AttnScratch) }}
-)
+// attnScratches holds the buffers of the workers of attention8.
+var attnScratches = sync.Pool{New: func() any { return new(linalg.AttnScratch) }}
 
 var workspaces sync.Pool
 
@@ -330,6 +327,14 @@ func (m *Model) run(seqs [][]int32, done func(xn []float32, offs []int)) error {
 	ws.qkv = grow(ws.qkv, N*3*H)
 	ws.ctx = grow(ws.ctx, N*H)
 	x, xn := ws.x, ws.xn
+	ws.pos = grow(ws.pos, N)
+	T := 0
+	for i := range seqs {
+		T = max(T, offs[i+1]-offs[i])
+		for t := offs[i]; t < offs[i+1]; t++ {
+			ws.pos[t] = int32(t - offs[i])
+		}
+	}
 
 	r := 0
 	for _, sq := range seqs {
@@ -340,8 +345,11 @@ func (m *Model) run(seqs [][]int32, done func(xn []float32, offs []int)) error {
 	}
 	layerNormInfer(x, xn, m.EmbNorm.W, N, H, cfg.NormEps, w)
 
+	nh, D := cfg.Heads, cfg.HeadDim()
+	half := D / 2
 	for l, L := range m.Layers {
 		p := packs[l]
+		rope := m.ropeFor(m.theta(l), T)
 		// Outside the attention, rows are independent: each worker takes
 		// slices of rows through the norm and the QKV projection, then
 		// through the output projection and the MLP, its products on one
@@ -357,6 +365,15 @@ func (m *Model) run(seqs [][]int32, done func(xn []float32, offs []int)) error {
 				in = xn[lo*H : hi*H]
 			}
 			p.qkv.mul(ws.qkv[lo*3*H:hi*3*H], in, hi-lo, false, 1)
+			// RoPE on the queries and keys of every head, in place.
+			for r := lo; r < hi; r++ {
+				t := int(ws.pos[r])
+				cos, sin := rope.cos[t*half:(t+1)*half], rope.sin[t*half:(t+1)*half]
+				row := ws.qkv[r*3*H : r*3*H+2*H]
+				for h := 0; h < 2*nh; h++ {
+					linalg.Rope(row[h*D:(h+1)*D], cos, sin)
+				}
+			}
 		})
 		m.attentionInfer(l, offs, ws, w)
 		linalg.ParallelN(w, N, rowSlice, func(lo, hi int) {
@@ -386,9 +403,10 @@ func (m *Model) run(seqs [][]int32, done func(xn []float32, offs []int)) error {
 	return nil
 }
 
-// attentionInfer is attentionForward without keeping anything: q, k, v of
-// each (sequence, head) live in the task's buffers, and attention is
-// computed block by block (attendBlocks), in linear memory. In int8, see
+// attentionInfer is attentionForward without keeping anything, on the
+// rows of ws.qkv, RoPE already applied (see run): q, k, v of each
+// (sequence, head) live in the task's buffers, and attention is computed
+// block by block (attendBlocks), in linear memory. In int8, see
 // attention8.
 func (m *Model) attentionInfer(l int, offs []int, ws *workspace, workers int) {
 	cfg := m.Cfg
@@ -398,14 +416,13 @@ func (m *Model) attentionInfer(l int, offs []int, ws *workspace, workers int) {
 	for i := 0; i < B; i++ {
 		T = max(T, offs[i+1]-offs[i])
 	}
-	rope := m.ropeFor(m.theta(l), T)
 	scale := float32(1 / math.Sqrt(float64(D)))
 	window := -1
 	if !cfg.IsGlobal(l) {
 		window = cfg.Window()
 	}
 	if m.int8 && linalg.Int8Fast() {
-		m.attention8(offs, ws, rope, T, window, scale, workers)
+		m.attention8(offs, ws, window, scale, workers)
 		return
 	}
 	linalg.ParallelN(workers, B*nh, 1, func(lo, hi int) {
@@ -418,7 +435,12 @@ func (m *Model) attentionInfer(l int, offs []int, ws *workspace, workers int) {
 			if n == 0 {
 				continue
 			}
-			m.headInputs(q, k, v, ws.qkv[off*3*H:], n, h, rope)
+			for t := 0; t < n; t++ {
+				row := ws.qkv[(off+t)*3*H:]
+				copy(q[t*D:(t+1)*D], row[h*D:(h+1)*D])
+				copy(k[t*D:(t+1)*D], row[H+h*D:H+(h+1)*D])
+				copy(v[t*D:(t+1)*D], row[2*H+h*D:2*H+(h+1)*D])
+			}
 			attendBlocks(o, q, k, v, n, D, window, scale, blk)
 			for t := 0; t < n; t++ {
 				copy(ws.ctx[(off+t)*H+h*D:(off+t)*H+(h+1)*D], o[t*D:(t+1)*D])
@@ -427,31 +449,13 @@ func (m *Model) attentionInfer(l int, offs []int, ws *workspace, workers int) {
 	})
 }
 
-// headInputs copies into q, k, v the n rows of head h from qkv (rows of
-// 3·H values), RoPE applied to q and k.
-func (m *Model) headInputs(q, k, v, qkv []float32, n, h int, rope *ropeTable) {
-	H, D := m.Cfg.Hidden, m.Cfg.HeadDim()
-	half := D / 2
-	for t := 0; t < n; t++ {
-		row := qkv[t*3*H:]
-		cos := rope.cos[t*half : (t+1)*half]
-		sin := rope.sin[t*half : (t+1)*half]
-		qt, kt := q[t*D:(t+1)*D], k[t*D:(t+1)*D]
-		copy(qt, row[h*D:(h+1)*D])
-		copy(kt, row[H+h*D:H+(h+1)*D])
-		copy(v[t*D:(t+1)*D], row[2*H+h*D:2*H+(h+1)*D])
-		applyRope(qt, cos, sin)
-		applyRope(kt, cos, sin)
-	}
-}
-
 // attention8 computes the attention in int8 (linalg.Attn8), in two
-// passes: each (sequence, head) is quantized and packed, then the blocks
-// of queries are scored. Spread over blocks rather than (sequence, head),
-// the work divides finely even for one sequence and a few heads: on a
-// hybrid processor, no slow core is left with a whole head while the
-// others wait.
-func (m *Model) attention8(offs []int, ws *workspace, rope *ropeTable, T, window int, scale float32, workers int) {
+// passes: each (sequence, head) is quantized and packed, straight from
+// the rows of ws.qkv, then the blocks of queries are scored. Spread over
+// blocks rather than (sequence, head), the work divides finely even for
+// one sequence and a few heads: on a hybrid processor, no slow core is
+// left with a whole head while the others wait.
+func (m *Model) attention8(offs []int, ws *workspace, window int, scale float32, workers int) {
 	H, nh, D := m.Cfg.Hidden, m.Cfg.Heads, m.Cfg.HeadDim()
 	B := len(offs) - 1
 	if cap(ws.attn) < B*nh {
@@ -459,17 +463,11 @@ func (m *Model) attention8(offs []int, ws *workspace, rope *ropeTable, T, window
 	}
 	prep := ws.attn[:B*nh]
 	linalg.ParallelN(workers, B*nh, 1, func(lo, hi int) {
-		buf := headBuffers.Get().(*[]float32)
-		defer headBuffers.Put(buf)
-		*buf = grow(*buf, 3*T*D)
-		q, k, v := (*buf)[:T*D], (*buf)[T*D:2*T*D], (*buf)[2*T*D:]
 		for task := lo; task < hi; task++ {
 			bi, h := task/nh, task%nh
 			off, n := offs[bi], offs[bi+1]-offs[bi]
-			if n > 0 {
-				m.headInputs(q, k, v, ws.qkv[off*3*H:], n, h, rope)
-			}
-			prep[task].Prepare(q, k, v, n, D, scale)
+			rows := ws.qkv[off*3*H:]
+			prep[task].Prepare(rows[h*D:], rows[H+h*D:], rows[2*H+h*D:], 3*H, n, D, scale)
 		}
 	})
 	// The blocks of queries: (sequence, head, first query).

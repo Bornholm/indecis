@@ -25,3 +25,13 @@ func CPU() (avx2FMA, avxVNNI bool) { return false, false }
 func microKernel8Deq(kq int, ap []uint8, lda int, bp []int8, c []float32, ldc int, sb, zc, sa []float32, accumulate bool) bool {
 	return false
 }
+
+func quantFast(D int) bool { return false }
+
+func quantRow(dst []int8, x, mean []float32, flip bool) (float32, int32) {
+	panic("linalg: no AVX2 quantization")
+}
+
+func quantCols(dst []int8, x, inv []float32) { panic("linalg: no AVX2 quantization") }
+
+func interleave4(dst, src []int8, n, stride int) { panic("linalg: no AVX2 quantization") }

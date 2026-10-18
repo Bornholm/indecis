@@ -99,3 +99,30 @@ func AddTo(o, b []float32) {
 		o[i] += b[i]
 	}
 }
+
+func SubTo(o, x, y []float32) {
+	for i := range o {
+		o[i] = x[i] - y[i]
+	}
+}
+
+func MaxAbsTo(o, x []float32) {
+	for i := range o {
+		o[i] = max(o[i], abs32(x[i]))
+	}
+}
+
+func QuantizeCols(dst []uint8, x, inv []float32) {
+	for i, v := range x {
+		dst[i] = uint8(int32(roundHalfEven(v*inv[i])) + 128)
+	}
+}
+
+func Rope(x, cos, sin []float32) {
+	half := len(cos)
+	for i := 0; i < half; i++ {
+		a, b := x[i], x[i+half]
+		x[i] = a*cos[i] - b*sin[i]
+		x[i+half] = b*cos[i] + a*sin[i]
+	}
+}
