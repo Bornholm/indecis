@@ -526,8 +526,11 @@ const (
 	// the batch) above which Encode spreads its computation over multiple
 	// cores. Below it, launching goroutines costs more than the
 	// computation, and a hybrid processor sends them to its slow cores: a
-	// sentence computes twice as fast on a single core.
-	parallelRows = 1024
+	// sentence of 32 tokens computes twice as fast on a single core. Above
+	// it, the slices of rows (rowSlice) divide the work well: on a Core
+	// Ultra 7 265U, all cores compute 128 positions twice as fast as one,
+	// 512 three times as fast.
+	parallelRows = 96
 )
 
 type blockBuffers struct {
