@@ -10,6 +10,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/bornholm/indecis/internal/linalg"
 	"github.com/bornholm/indecis/tokenizer"
 )
 
@@ -427,11 +428,13 @@ func (m *Model) infer(ctx context.Context, inputs []Input, batchSize int) ([]inf
 		if err != nil {
 			return nil, err
 		}
+		// The tokens kept from each window: input, token, row of states.
+		type kept struct{ in, t, row int }
+		var keep []kept
 		row := 0
 		for _, jb := range group {
 			res := &out[jb.in]
 			rows := states[row*H : (row+len(jb.seq))*H]
-			row += len(jb.seq)
 			if jb.w.start == 0 {
 				x := meanRows(rows, len(jb.seq), H)
 				for qi, h := range m.heads {
@@ -441,15 +444,22 @@ func (m *Model) infer(ctx context.Context, inputs []Input, batchSize int) ([]inf
 				}
 			}
 			for t := jb.w.keepFrom; t < jb.w.keepTo; t++ {
-				r := len(prefix) + t - jb.w.start
-				x := rows[r*H : (r+1)*H]
+				keep = append(keep, kept{jb.in, t, row + len(prefix) + t - jb.w.start})
+			}
+			row += len(jb.seq)
+		}
+		// The heads read every token: spread over the workers, they would
+		// otherwise take a third of the time of a long text, on one core.
+		linalg.Parallel(len(keep), 256, func(lo, hi int) {
+			for _, k := range keep[lo:hi] {
+				x := states[k.row*H : (k.row+1)*H]
 				for qi, h := range m.heads {
 					if h.q.Kind == Spans {
-						res.tokens[qi][t] = h.logits(x)
+						out[k.in].tokens[qi][k.t] = h.logits(x)
 					}
 				}
 			}
-		}
+		})
 	}
 	return out, nil
 }
