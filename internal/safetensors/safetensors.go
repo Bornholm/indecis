@@ -13,6 +13,8 @@ import (
 	"math"
 	"os"
 	"sort"
+
+	"github.com/bornholm/indecis/internal/mapfile"
 )
 
 // Tensor is a decoded tensor.
@@ -86,7 +88,7 @@ type File struct {
 
 // Open opens a safetensors file without decoding its tensors.
 func Open(path string) (*File, error) {
-	b, mapped, err := mapFile(path)
+	b, mapped, err := mapfile.Map(path)
 	if err != nil {
 		return nil, err
 	}
