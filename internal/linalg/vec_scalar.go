@@ -42,7 +42,7 @@ func Dequantize(dst []float32, acc []int32, sb, zc []float32, sa float32, accumu
 }
 
 func GeluMul(o, a, b []float32) {
-	for i := range o {
+	for i := geluMulFast(o, a, b); i < len(o); i++ {
 		o[i] = geluScalar(a[i]) * b[i]
 	}
 }

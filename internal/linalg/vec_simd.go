@@ -135,7 +135,7 @@ func GeluMul(o, a, b []float32) {
 	b4, b2 := simd.BroadcastFloat32s(-1.68282697438203e-03), simd.BroadcastFloat32s(-7.37332916720468e-03)
 	b0 := simd.BroadcastFloat32s(-1.42647390514189e-02)
 	V := one.Len()
-	i := 0
+	i := geluMulFast(o, a, b)
 	for ; i+V <= len(o); i += V {
 		x := simd.LoadFloat32s(a[i:])
 		t := x.Mul(rs2).Max(lo).Min(hi)
