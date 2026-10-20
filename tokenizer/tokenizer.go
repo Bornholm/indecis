@@ -69,8 +69,16 @@ type addedToken struct {
 
 const maxCache = 1 << 16
 
-// Load reads a tokenizer.json.
+// Load reads a tokenizer.json, or maps the tokenizer.bin beside it if it
+// was written from this JSON (see WriteBinary).
 func Load(path string) (*Tokenizer, error) {
+	if _, err := os.Stat(BinaryPath(path)); err == nil {
+		sum, err := fileDigest(path)
+		if err != nil {
+			return nil, err
+		}
+		return loadDigest(path, sum)
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -86,21 +94,23 @@ var (
 
 // LoadShared is Load, but two files with the same content give the same
 // Tokenizer: several models derived from the same backbone keep only one
-// in memory (~12 MB each). A Tokenizer is immutable and safe for
-// concurrent access, including its word cache.
+// in memory (~12 MB each, nothing with a tokenizer.bin). A Tokenizer is
+// immutable and safe for concurrent access, including its word cache.
 func LoadShared(path string) (*Tokenizer, error) {
-	f, err := os.Open(path)
+	key, err := fileDigest(path)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
-	h := sha256.New()
-	t, err := read(bufio.NewReaderSize(io.TeeReader(f, h), 1<<16))
+	sharedMu.Lock()
+	prev, ok := shared[key]
+	sharedMu.Unlock()
+	if ok {
+		return prev, nil
+	}
+	t, err := loadDigest(path, key)
 	if err != nil {
 		return nil, err
 	}
-	var key [sha256.Size]byte
-	h.Sum(key[:0])
 	sharedMu.Lock()
 	defer sharedMu.Unlock()
 	if prev, ok := shared[key]; ok {
@@ -108,6 +118,37 @@ func LoadShared(path string) (*Tokenizer, error) {
 	}
 	shared[key] = t
 	return t, nil
+}
+
+// loadDigest maps the tokenizer.bin of the JSON at path if it was written
+// from the content of digest sum, and parses the JSON otherwise.
+func loadDigest(path string, sum [sha256.Size]byte) (*Tokenizer, error) {
+	t, err := loadBinary(BinaryPath(path), sum)
+	if err == nil {
+		return t, nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return read(bufio.NewReaderSize(f, 1<<16))
+}
+
+// fileDigest is the SHA-256 of the file at path.
+func fileDigest(path string) ([sha256.Size]byte, error) {
+	var sum [sha256.Size]byte
+	f, err := os.Open(path)
+	if err != nil {
+		return sum, err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return sum, err
+	}
+	h.Sum(sum[:0])
+	return sum, nil
 }
 
 // Parse reads the content of a tokenizer.json.
