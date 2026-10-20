@@ -109,6 +109,7 @@ func MatMul8N(c, a []float32, b *PackedB8, m int, accumulate bool, limit int) {
 	// the tiles on the edges of C go through Dequantize.
 	work := func(lo, hi int) {
 		var tile [mr8 * nr8]int32
+		var edge [mr8 * nr8]float32
 		for pi := 0; pi < rowPanels; pi++ {
 			ap := apack[pi*mr8*lda : (pi+1)*mr8*lda]
 			i0 := pi * mr8
@@ -119,6 +120,20 @@ func MatMul8N(c, a []float32, b *PackedB8, m int, accumulate bool, limit int) {
 				bp := b.data[pj*kq*nr8*4 : (pj+1)*kq*nr8*4]
 				if rows == mr8 && cols == nr8 &&
 					microKernel8Deq(kq, ap, lda, bp, c[i0*n+j0:], n, b.scale[j0:], b.zc[j0:], sa[i0:], accumulate) {
+					continue
+				}
+				if cols == nr8 && Int8Fast() {
+					// Last rows: the kernel rescales into a full tile,
+					// copied back row by row.
+					if accumulate {
+						for r := 0; r < rows; r++ {
+							copy(edge[r*nr8:(r+1)*nr8], c[(i0+r)*n+j0:])
+						}
+					}
+					microKernel8Deq(kq, ap, lda, bp, edge[:], nr8, b.scale[j0:], b.zc[j0:], sa[i0:], accumulate)
+					for r := 0; r < rows; r++ {
+						copy(c[(i0+r)*n+j0:(i0+r)*n+j0+nr8], edge[r*nr8:(r+1)*nr8])
+					}
 					continue
 				}
 				microKernel8(kq, ap, lda, bp, &tile)
