@@ -150,6 +150,18 @@ func quantizeA(apack []uint8, sa, a []float32, m, k, lda int) {
 			continue
 		}
 		x := a[i*k : (i+1)*k]
+		if quantFast(k) && k <= len(zeroRow) {
+			// One pass for the maximum, one for the rounding, narrowed
+			// 32 values at a time.
+			s, _ := quantRow(asInt8(row[:k]), x, zeroRow[:k], true)
+			if s == 0 {
+				fill128(row)
+				continue
+			}
+			sa[i] = s
+			fill128(row[k:])
+			continue
+		}
 		mx := AbsMax(x)
 		if mx == 0 {
 			fill128(row)
@@ -161,6 +173,9 @@ func quantizeA(apack []uint8, sa, a []float32, m, k, lda int) {
 		fill128(row[k:])
 	}
 }
+
+// zeroRow is the mean subtracted by quantRow in quantizeA.
+var zeroRow [4096]float32
 
 func fill128(b []uint8) {
 	for i := range b {
