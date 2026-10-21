@@ -43,30 +43,40 @@ func ParallelN(limit, n, grain int, fn func(lo, hi int)) {
 		fn(0, n)
 		return
 	}
-	// About four slices per worker, taken as they come: on a hybrid
-	// processor, a slow core (E, LP-E) takes fewer slices instead of holding
-	// everyone up with an equal share. The slices are disjoint, so the
-	// result does not depend on who computes which.
-	step := max(grain, (n+4*workers-1)/(4*workers))
-	chunks := (n + step - 1) / step
-	workers = min(workers, chunks)
+	// Guided slices, taken as they come: each is a share of what remains
+	// (half of it divided among the workers), never less than grain. The
+	// first slices are long, which suits the products (each slice reads
+	// all the weights); the last ones short, so that on a hybrid processor
+	// a slow core (E, LP-E) holding the last slice keeps the others
+	// waiting a short time. The calling goroutine takes slices too. The
+	// slices are disjoint, so the result does not depend on who computes
+	// which.
+	workers = min(workers, (n+grain-1)/grain)
 	var next atomic.Int64
 	var wg sync.WaitGroup
-	wg.Add(workers)
-	for w := 0; w < workers; w++ {
-		go parallelWorker(&wg, &next, fn, n, step)
+	wg.Add(workers - 1)
+	for w := 1; w < workers; w++ {
+		go func() {
+			defer wg.Done()
+			guided(&next, fn, n, grain, workers)
+		}()
 	}
+	guided(&next, fn, n, grain, workers)
 	wg.Wait()
 }
 
-func parallelWorker(wg *sync.WaitGroup, next *atomic.Int64, fn func(lo, hi int), n, step int) {
-	defer wg.Done()
+// guided takes slices of [0, n) from next until none remain.
+func guided(next *atomic.Int64, fn func(lo, hi int), n, grain, workers int) {
 	for {
-		lo := int(next.Add(1)-1) * step
+		lo := int(next.Load())
 		if lo >= n {
 			return
 		}
-		fn(lo, min(lo+step, n))
+		step := max(grain, (n-lo)/(2*workers))
+		hi := min(lo+step, n)
+		if next.CompareAndSwap(int64(lo), int64(hi)) {
+			fn(lo, hi)
+		}
 	}
 }
 
