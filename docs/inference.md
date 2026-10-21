@@ -1,20 +1,22 @@
 # Inference speed and memory
 
-indecis runs on CPU, in pure Go, without cgo. On one laptop core (Core Ultra 7 265U), the prompt-injection detector judges a 15-token sentence in 1.5 ms and a 256-token text in 23 ms. A model ready to serve takes 18 to 30 MB of its own memory.
+indecis runs on CPU, in pure Go, without cgo. On one laptop core (Core Ultra 7 265U), the prompt-injection detector judges a 15-token sentence in 1.1 ms and a 256-token text in 15 ms. A model ready to serve takes 13 to 15 MB of its own memory, and loads in a few milliseconds with its `tokenizer.bin`.
 
 ## Measurements
 
 Prompt-injection detector, a8m, one core, measured with `go run ./tools/infbench -model … -int8`:
 
-| | Training forward | Inference path, float32 | int8 and portable SIMD | int8, compacted model |
-| --- | --- | --- | --- | --- |
-| 15 tokens | 10.7 ms | 4.9 ms | 1.5 ms | 1.5 ms |
-| 256 tokens | 79.8 ms | 57.4 ms | 23 ms | 23 ms |
-| Own memory, model ready | 486 MB | 53 MB | 30 MB | 18 MB |
-| Peak memory | 1,037 MB | 222 MB | 82 MB | 51 MB |
-| File | 289 MB | 289 MB | 289 MB | 58.5 MB |
+| | Training forward | Inference path, float32 | int8 and portable SIMD | int8, compacted model | AVX2 activation kernels, `tokenizer.bin` |
+| --- | --- | --- | --- | --- | --- |
+| 15 tokens | 10.7 ms | 4.9 ms | 1.5 ms | 1.5 ms | 1.1 ms |
+| 256 tokens | 79.8 ms | 57.4 ms | 23 ms | 23 ms | 14.7 ms |
+| Own memory, model ready | 486 MB | 53 MB | 30 MB | 18 MB | 13 MB |
+| Peak memory | 1,037 MB | 222 MB | 82 MB | 51 MB | 38 MB |
+| File | 289 MB | 289 MB | 289 MB | 58.5 MB | 58.5 MB + 4.4 MB |
 
-On the 636-example hand-reviewed reference, the AUC stays at 0.972, and 0.970 for the compacted model.
+The last column is the compacted model, measured on a performance core (`taskset -c 2`); on the same core, the previous code takes 1.6 ms and 19.4 ms. The full model (256,000 tokens) computes as fast and loads in 27 ms with its `tokenizer.bin`, against 470 ms by parsing its `tokenizer.json`; its own memory once ready drops from 28 to 15 MB, its peak from 76 to 45 MB. Spread over all cores, a 256-token text takes about 5 ms before and after: the wait for the slowest core dominates there.
+
+On the 636-example hand-reviewed reference, the AUC stays at 0.972, and 0.970 for the compacted model. The AVX2 kernels change no metric of the reference.
 
 ## Settings
 
@@ -47,6 +49,8 @@ Pruning is a decision to make knowingly:
 | same model, pruned, with an int8 table | 78,890 | 58.5 MB | none |
 | email classification in open mode, unforeseen texts | 256,000 → 119,480 | 260 → 160 MB | Enron 41.9 → 38.4%, ASN letters 23.8 → 18.4% |
 
+Every `indecis compact` also writes a `tokenizer.bin` next to the `tokenizer.json`: the tables of the tokenizer as they sit in memory, mapped at load time instead of parsed (13.7 MB for 256,000 tokens, 4.4 MB for the pruned vocabulary). `indecis compact -model dir`, without `-corpus` or `-int8-embeddings`, writes only that file; from Go, `tokenizer.WriteBinary`. The file is used only if it was written from the `tokenizer.json` beside it (SHA-256 digest): a JSON changed afterwards is parsed again.
+
 For a known domain, prune on the training data. For a model that will see unforeseen texts, keep the whole table and use `-int8-embeddings` only. Never put evaluation sets in the pruning corpus.
 
 ## What makes inference fast
@@ -55,7 +59,8 @@ For a known domain, prune on the training data. For a model that will see unfore
 - **int8**: weights quantized per channel, activations per token, exact integer sums. The micro-kernel uses the AVX-VNNI `VPDPBUSD` instruction, in its VEX form that the Go assembler does not know: `internal/linalg/gen_vnni.py` writes it byte by byte.
 - **Go 1.27 portable SIMD** for everything around the products: quantization, rescaling, GELU, normalization, softmax. Each operation has a scalar fallback with the same contract, and none is written in assembly.
 - **A memory-mapped embedding table**: only the pages of the tokens actually met are read.
-- **Lean loading**: the tokenizer is streamed and shared between models with identical tokenizer files, and the layer matrices are quantized one at a time.
+- **Few passes around the products**, in AVX2 assembly where portable SIMD lacks registers: the activations are quantized in one pass (maximum, then rounding narrowed 32 values at a time), the gated GELU keeps its 17 constants in memory operands rather than spilling them, and the last rows of a product, when the text length is not a multiple of 6, are rescaled in the kernel too.
+- **Lean loading**: the tokenizer is mapped from its `tokenizer.bin` (or streamed from its JSON) and shared between models with identical tokenizer files, and the layer matrices are quantized one at a time.
 
 ## Long texts
 

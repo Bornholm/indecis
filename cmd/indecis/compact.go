@@ -10,6 +10,7 @@ import (
 
 	"github.com/bornholm/indecis"
 	"github.com/bornholm/indecis/dataset"
+	"github.com/bornholm/indecis/tokenizer"
 )
 
 // runCompact reduces the size of a model and measures the effect on
@@ -20,6 +21,10 @@ import (
 //     texts it covers, with possible loss on unforeseen texts;
 //   - -int8-embeddings writes the embeddings table in int8
 //     (WithInt8Embeddings): twice as small, with no measured loss.
+//
+// The reduced model gets a tokenizer.bin (tokenizer.WriteBinary), which
+// loads in milliseconds and stays out of the heap. Without -corpus or
+// -int8-embeddings, only the tokenizer.bin of -model is written.
 //
 // The corpus should resemble the texts the model will judge; evaluation
 // sets must not be part of it.
@@ -32,11 +37,17 @@ func runCompact(args []string) error {
 	minCount := fs.Int("min-count", 1, "minimum occurrences of a token in the corpus")
 	int8Emb := fs.Bool("int8-embeddings", false, "write the embeddings table in int8")
 	fs.Parse(args)
+	if *corpusGlobs == "" && !*int8Emb {
+		if *out != "" {
+			return fmt.Errorf("compact: -out needs -corpus or -int8-embeddings; without them, compact writes the tokenizer.bin of -model")
+		}
+		if err := required(fs, "model"); err != nil {
+			return err
+		}
+		return writeTokenizerBinary(*modelDir)
+	}
 	if err := required(fs, "model", "out"); err != nil {
 		return err
-	}
-	if *corpusGlobs == "" && !*int8Emb {
-		return fmt.Errorf("nothing to do: -corpus and/or -int8-embeddings")
 	}
 	ctx := context.Background()
 	m, err := indecis.Load(*modelDir)
@@ -74,6 +85,9 @@ func runCompact(args []string) error {
 	if err := m.Save(*out); err != nil {
 		return err
 	}
+	if err := writeTokenizerBinary(*out); err != nil {
+		return err
+	}
 	for _, name := range []string{"model.safetensors", "tokenizer.json"} {
 		a, _ := os.Stat(filepath.Join(*modelDir, name))
 		b, _ := os.Stat(filepath.Join(*out, name))
@@ -88,6 +102,18 @@ func runCompact(args []string) error {
 		}
 		fmt.Println("after:")
 		return report(ctx, reduced, nil, evalEx, false)
+	}
+	return nil
+}
+
+// writeTokenizerBinary writes the tokenizer.bin of the model in dir.
+func writeTokenizerBinary(dir string) error {
+	path := filepath.Join(dir, "tokenizer.json")
+	if err := tokenizer.WriteBinary(path); err != nil {
+		return err
+	}
+	if st, err := os.Stat(tokenizer.BinaryPath(path)); err == nil {
+		log.Printf("%-18s %7.1f MB", filepath.Base(tokenizer.BinaryPath(path)), float64(st.Size())/(1<<20))
 	}
 	return nil
 }

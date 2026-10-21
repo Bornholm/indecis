@@ -1,15 +1,30 @@
 package tokenizer
 
 import (
-	"hash/maphash"
 	"slices"
+	"unsafe"
 )
 
 // The vocabulary holds 256,000 strings and as many merges. As
 // map[string]int32 and map[uint64]merge, it occupied 34 MB of heap; the
-// tables below occupy 8.
+// tables below occupy 8, and none when they are mapped from a
+// tokenizer.bin (see binary.go).
 
-var tableSeed = maphash.MakeSeed()
+// strHash is FNV-1a followed by MurmurHash3's finalizer, which spreads
+// the low bits the table masks. It does not depend on the process: the
+// slots of a tokenizer.bin stay valid. The table never grows after it is
+// built, so chosen strings can only lengthen a probe, not the table.
+func strHash(s string) uint64 {
+	h := uint64(14695981039346656037)
+	for i := 0; i < len(s); i++ {
+		h ^= uint64(s[i])
+		h *= 1099511628211
+	}
+	h ^= h >> 33
+	h *= 0xff51afd7ed558ccd
+	h ^= h >> 33
+	return h
+}
 
 // strTable maps strings to ids: the strings are concatenated into a
 // single block, and an open-addressing table finds the id of a string.
@@ -44,7 +59,7 @@ func newStrTable(byID []string) *strTable {
 		if s == "" {
 			continue
 		}
-		for h := maphash.String(tableSeed, s) & t.mask; ; h = (h + 1) & t.mask {
+		for h := strHash(s) & t.mask; ; h = (h + 1) & t.mask {
 			if t.slots[h] == 0 {
 				t.slots[h] = int32(id) + 1
 				break
@@ -62,7 +77,10 @@ func (t *strTable) lookup(s string) (int32, bool) {
 	if s == "" {
 		return 0, false
 	}
-	for h := maphash.String(tableSeed, s) & t.mask; ; h = (h + 1) & t.mask {
+	// At most one round of the table: one mapped from a damaged
+	// tokenizer.bin may have no free slot.
+	h := strHash(s) & t.mask
+	for range len(t.slots) {
 		v := t.slots[h]
 		if v == 0 {
 			return 0, false
@@ -70,23 +88,14 @@ func (t *strTable) lookup(s string) (int32, bool) {
 		if t.str(v-1) == s {
 			return v - 1, true
 		}
+		h = (h + 1) & t.mask
 	}
+	return 0, false
 }
 
 // lookupBytes is lookup without converting b to a string.
 func (t *strTable) lookupBytes(b []byte) (int32, bool) {
-	if len(b) == 0 {
-		return 0, false
-	}
-	for h := maphash.Bytes(tableSeed, b) & t.mask; ; h = (h + 1) & t.mask {
-		v := t.slots[h]
-		if v == 0 {
-			return 0, false
-		}
-		if t.str(v-1) == string(b) {
-			return v - 1, true
-		}
-	}
+	return t.lookup(unsafe.String(unsafe.SliceData(b), len(b)))
 }
 
 // mergeTable finds the merge of a pair of ids by binary search in the

@@ -143,6 +143,22 @@ func quantColsAVX2(dst *int8, x, inv *float32, n int)
 //go:noescape
 func interleave4AVX2(dst, src *int8, n, stride int)
 
+//go:noescape
+func geluMulAVX2(o, a, b *float32, n int)
+
+// geluMulFast computes GeluMul on the longest prefix of o that the AVX2
+// kernel handles (a multiple of 16 values) and returns its length.
+func geluMulFast(o, a, b []float32) int {
+	n := len(o) &^ 15
+	if !avx2 || n == 0 {
+		return 0
+	}
+	_ = a[n-1]
+	_ = b[n-1]
+	geluMulAVX2(&o[0], &a[0], &b[0], n)
+	return n
+}
+
 // quantFast reports whether the AVX2 quantization of the attention
 // operands applies to heads of D values.
 func quantFast(D int) bool { return avx2 && D%32 == 0 }

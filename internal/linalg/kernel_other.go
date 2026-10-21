@@ -28,6 +28,8 @@ func microKernel8Deq(kq int, ap []uint8, lda int, bp []int8, c []float32, ldc in
 
 func quantFast(D int) bool { return false }
 
+func geluMulFast(o, a, b []float32) int { return 0 }
+
 func quantRow(dst []int8, x, mean []float32, flip bool) (float32, int32) {
 	panic("linalg: no AVX2 quantization")
 }

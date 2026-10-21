@@ -1,6 +1,7 @@
 package linalg
 
 import (
+	"math"
 	"math/rand/v2"
 	"testing"
 )
@@ -84,6 +85,30 @@ func TestQuantAVX2(t *testing.T) {
 					t.Fatalf("n=%d interleave4 col %d row %d = %d, want %d", n, j, t4, got, src[t4*n+j])
 				}
 			}
+		}
+	}
+}
+
+// The AVX2 GELU keeps the precision of the portable one (see TestVectorOps), out
+// to the clamped tails.
+func TestGeluMulAVX2(t *testing.T) {
+	r := rand.New(rand.NewPCG(7, 8))
+	n := 1152
+	a, b, o := make([]float32, n), make([]float32, n), make([]float32, n)
+	for i := range a {
+		a[i] = float32(r.NormFloat64() * 4)
+		b[i] = float32(r.NormFloat64())
+	}
+	a[0], a[1], a[2] = 0, -50, 50
+	if got := geluMulFast(o, a, b); got != n && avx2 {
+		t.Fatalf("geluMulFast covered %d values of %d", got, n)
+	} else if got == 0 {
+		t.Skip("no AVX2")
+	}
+	for i := range o {
+		want := 0.5 * float64(a[i]) * (1 + math.Erf(float64(a[i])/math.Sqrt2)) * float64(b[i])
+		if math.Abs(float64(o[i])-want) > 1e-5*(1+math.Abs(want)) {
+			t.Fatalf("[%d] gelu(%v)·%v = %v, want %v", i, a[i], b[i], o[i], want)
 		}
 	}
 }
