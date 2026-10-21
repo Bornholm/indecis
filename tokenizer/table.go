@@ -77,7 +77,10 @@ func (t *strTable) lookup(s string) (int32, bool) {
 	if s == "" {
 		return 0, false
 	}
-	for h := strHash(s) & t.mask; ; h = (h + 1) & t.mask {
+	// At most one round of the table: one mapped from a damaged
+	// tokenizer.bin may have no free slot.
+	h := strHash(s) & t.mask
+	for range len(t.slots) {
 		v := t.slots[h]
 		if v == 0 {
 			return 0, false
@@ -85,7 +88,9 @@ func (t *strTable) lookup(s string) (int32, bool) {
 		if t.str(v-1) == s {
 			return v - 1, true
 		}
+		h = (h + 1) & t.mask
 	}
+	return 0, false
 }
 
 // lookupBytes is lookup without converting b to a string.

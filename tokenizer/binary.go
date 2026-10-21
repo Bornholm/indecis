@@ -36,8 +36,8 @@ import (
 // tokenizer.json beside it: a JSON modified afterwards is read again. The
 // digest does not cover the code that wrote it: a change of layout, of
 // strHash or of merge must change binMagic, so that older files are
-// rejected. The content of the sections is trusted: a damaged file can make
-// Encode panic, not read out of bounds.
+// rejected. The content of the sections is checked only where it is cheap:
+// a damaged file can make Encode panic, not read out of bounds or loop.
 
 const (
 	binMagic    = "INDTOK01"
@@ -93,6 +93,11 @@ func WriteBinary(jsonPath string) error {
 		return err
 	}
 	defer os.Remove(tmp.Name())
+	// As the other files of a model (os.CreateTemp creates it 0600).
+	if err := tmp.Chmod(0o644); err != nil {
+		tmp.Close()
+		return err
+	}
 	if _, err := tmp.Write(buf.Bytes()); err != nil {
 		tmp.Close()
 		return err
@@ -108,8 +113,8 @@ func (t *Tokenizer) writeBinary(w io.Writer, source [sha256.Size]byte) error {
 	if len(t.names) > 0 {
 		meta.Names = t.names
 	}
-	for _, list := range t.added {
-		for _, a := range list {
+	for c := range 256 {
+		for _, a := range t.added[byte(c)] {
 			meta.Added = append(meta.Added, binAdded{Content: a.content, ID: a.id, LStrip: a.lstrip, RStrip: a.rstrip})
 		}
 	}
@@ -233,12 +238,17 @@ func loadBinary(path string, source [sha256.Size]byte) (t *Tokenizer, err error)
 	}
 	slots := len(t.vocab.slots)
 	switch {
-	case len(t.vocab.off) != meta.Size+1 || int(t.vocab.off[meta.Size]) != len(t.vocab.blob):
+	case meta.Size < 0 || len(t.vocab.off) != meta.Size+1 || int(t.vocab.off[meta.Size]) != len(t.vocab.blob):
 		return nil, fmt.Errorf("tokenizer: %s: inconsistent vocabulary", path)
 	case slots == 0 || slots&(slots-1) != 0 || slots < 2*meta.Size:
 		return nil, fmt.Errorf("tokenizer: %s: inconsistent string table", path)
 	case len(t.merges.keys) != len(t.merges.vals):
 		return nil, fmt.Errorf("tokenizer: %s: inconsistent merges", path)
+	}
+	for i := 1; i < len(t.vocab.off); i++ {
+		if t.vocab.off[i] < t.vocab.off[i-1] {
+			return nil, fmt.Errorf("tokenizer: %s: inconsistent vocabulary", path)
+		}
 	}
 	t.vocab.mask = uint64(slots - 1)
 	if t.names == nil {

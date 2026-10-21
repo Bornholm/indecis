@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/bornholm/indecis/internal/mapfile"
 )
 
 // binaryCopy copies a tokenizer.json into a temporary directory, writes
@@ -34,10 +36,18 @@ func binaryCopy(t *testing.T, src string) string {
 // A mapped tokenizer encodes like the parsed one.
 func TestBinaryParity(t *testing.T) {
 	path := binaryCopy(t, "../testdata/siglip2-tiny/tokenizer.json")
+	b, mapped, err := mapfile.Map(BinaryPath(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mapfile.Unmap(b, mapped)
 	for _, load := range []func(string) (*Tokenizer, error){Load, LoadShared} {
 		tok, err := load(path)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if mapped && tok.mapping == nil {
+			t.Fatal("tokenizer.bin not mapped")
 		}
 		checkParity(t, tok, "../testdata/siglip2-tiny/tokenizer_cases.jsonl")
 		checkOffsets(t, tok, "../testdata/siglip2-tiny/offset_cases.jsonl")
@@ -82,8 +92,8 @@ func TestBinaryStale(t *testing.T) {
 	checkParity(t, tok, "../testdata/siglip2-tiny/tokenizer_cases.jsonl")
 }
 
-// A string table without free slots, where lookup would never stop, is
-// rejected.
+// A string table with fewer slots than the writer guarantees is rejected,
+// and lookup stops on a table without free slot.
 func TestBinaryFullSlots(t *testing.T) {
 	data, err := os.ReadFile("../testdata/siglip2-tiny/tokenizer.json")
 	if err != nil {
@@ -105,5 +115,38 @@ func TestBinaryFullSlots(t *testing.T) {
 	}
 	if _, err := loadBinary(path, sum); err == nil || !strings.Contains(err.Error(), "string table") {
 		t.Fatalf("loadBinary: %v, want an inconsistent string table", err)
+	}
+	tok.vocab.slots = tok.vocab.slots[:len(tok.vocab.slots)*2]
+	for i := range tok.vocab.slots {
+		if tok.vocab.slots[i] == 0 {
+			tok.vocab.slots[i] = 1
+		}
+	}
+	if _, ok := tok.vocab.lookup("not a token of the vocabulary"); ok {
+		t.Fatal("lookup found a missing string")
+	}
+}
+
+// The same tokenizer.json always gives the same tokenizer.bin.
+func TestBinaryDeterministic(t *testing.T) {
+	data, err := os.ReadFile("../testdata/siglip2-tiny/tokenizer.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var first []byte
+	for range 5 {
+		tok, err := Parse(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var buf bytes.Buffer
+		if err := tok.writeBinary(&buf, sha256.Sum256(data)); err != nil {
+			t.Fatal(err)
+		}
+		if first == nil {
+			first = buf.Bytes()
+		} else if !bytes.Equal(buf.Bytes(), first) {
+			t.Fatal("two writes of the same tokenizer differ")
+		}
 	}
 }
