@@ -16,6 +16,8 @@ import (
 	"runtime/pprof"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/bornholm/indecis"
@@ -30,6 +32,7 @@ func main() {
 	memprof := flag.String("memprofile", "", "heap profile after the first request")
 	int8 := flag.Bool("int8", false, "int8 layers (AVX-VNNI)")
 	eval := flag.String("eval", "", "reference sets (JSONL, comma-separated) to evaluate")
+	clients := flag.Int("clients", 0, "also measure the throughput of this many simultaneous clients")
 	flag.Parse()
 	if *dir == "" {
 		log.Fatal("-model is required")
@@ -97,6 +100,28 @@ func main() {
 		sort.Slice(lat, func(a, b int) bool { return lat[a] < lat[b] })
 		fmt.Printf("%-15s %3d tokens  median %6.2f ms  p90 %6.2f ms\n", c.name, n,
 			ms(lat[len(lat)/2]), ms(lat[len(lat)*9/10]))
+	}
+	if *clients > 0 {
+		for _, c := range cases {
+			n, _ := m.Tokens(c.in)
+			var done atomic.Int64
+			stop := time.Now().Add(3 * time.Second)
+			var wg sync.WaitGroup
+			for range *clients {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					for time.Now().Before(stop) {
+						if _, err := m.DecideInputs(ctx, c.in); err != nil {
+							log.Fatal(err)
+						}
+						done.Add(1)
+					}
+				}()
+			}
+			wg.Wait()
+			fmt.Printf("%-15s %3d tokens  %d clients  %7.0f req/s\n", c.name, n, *clients, float64(done.Load())/3)
+		}
 	}
 	fmt.Printf("final memory    RSS %s (clean %s, mapped file %s), peak %s\n",
 		mib(rss()), mib(procStatus("RssAnon:")), mib(procStatus("RssFile:")), mib(peak()))
