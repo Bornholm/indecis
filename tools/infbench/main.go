@@ -102,25 +102,35 @@ func main() {
 			ms(lat[len(lat)/2]), ms(lat[len(lat)*9/10]))
 	}
 	if *clients > 0 {
+		if *threads == 1 {
+			log.Print("-clients with -threads 1: each request stays on one core, -threads 0 measures the sharing of the cores")
+		}
 		for _, c := range cases {
 			n, _ := m.Tokens(c.in)
 			var done atomic.Int64
-			stop := time.Now().Add(3 * time.Second)
+			var failed atomic.Value
+			start := time.Now()
+			stop := start.Add(3 * time.Second)
 			var wg sync.WaitGroup
 			for range *clients {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
-					for time.Now().Before(stop) {
+					for time.Now().Before(stop) && failed.Load() == nil {
 						if _, err := m.DecideInputs(ctx, c.in); err != nil {
-							log.Fatal(err)
+							failed.CompareAndSwap(nil, err)
+							return
 						}
 						done.Add(1)
 					}
 				}()
 			}
 			wg.Wait()
-			fmt.Printf("%-15s %3d tokens  %d clients  %7.0f req/s\n", c.name, n, *clients, float64(done.Load())/3)
+			if err, _ := failed.Load().(error); err != nil {
+				log.Fatal(err)
+			}
+			fmt.Printf("%-15s %3d tokens  %d clients  %7.0f req/s\n", c.name, n, *clients,
+				float64(done.Load())/time.Since(start).Seconds())
 		}
 	}
 	fmt.Printf("final memory    RSS %s (clean %s, mapped file %s), peak %s\n",

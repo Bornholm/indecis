@@ -313,14 +313,22 @@ func (m *Model) run(seqs [][]int32, done func(xn []float32, offs []int)) error {
 		return nil
 	}
 	packs := m.packs()
-	// The cores are shared between the computations in progress: under
+	// The cores are shared between the computations that spread: under
 	// load, each one spreads less, and on a saturated server, not at all.
-	active := int(running.Add(1))
-	defer running.Add(-1)
-	w := 1
-	if N >= parallelRows {
-		w = max(1, linalg.Workers()/active)
+	// The share is read again at every layer, as computations come and go.
+	spread := N >= parallelRows
+	if spread {
+		running.Add(1)
+		defer running.Add(-1)
 	}
+	share := func() int {
+		if !spread {
+			return 1
+		}
+		n := int(running.Load())
+		return max(1, (linalg.Workers()+n-1)/n)
+	}
+	w := share()
 	slice := sliceRows(N)
 
 	ws, _ := workspaces.Get().(*workspace)
@@ -355,6 +363,7 @@ func (m *Model) run(seqs [][]int32, done func(xn []float32, offs []int)) error {
 	half := D / 2
 	for l, L := range m.Layers {
 		p := packs[l]
+		w = share()
 		rope := m.ropeFor(m.theta(l), T)
 		// Outside the attention, rows are independent: each worker takes
 		// slices of rows through the norm and the QKV projection, then
@@ -537,7 +546,8 @@ const (
 	parallelRows = 32
 )
 
-// running counts the computations in progress, of every model.
+// running counts the computations spread over several cores, of every
+// model.
 var running atomic.Int64
 
 // sliceRows is the smallest slice of rows a worker takes outside the
