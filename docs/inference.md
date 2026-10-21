@@ -14,7 +14,7 @@ Prompt-injection detector, a8m, one core, measured with `go run ./tools/infbench
 | Peak memory | 1,037 MB | 222 MB | 82 MB | 51 MB | 38 MB |
 | File | 289 MB | 289 MB | 289 MB | 58.5 MB | 58.5 MB + 4.4 MB |
 
-The last column is the compacted model, measured on a performance core (`taskset -c 2`); on the same core, the previous code takes 1.6 ms and 19.4 ms. The full model (256,000 tokens) computes as fast and loads in 27 ms with its `tokenizer.bin`, against 470 ms by parsing its `tokenizer.json`; its own memory once ready drops from 28 to 15 MB, its peak from 76 to 45 MB. Spread over all cores, a 256-token text takes about 5 ms before and after: the wait for the slowest core dominates there.
+The last column is the compacted model, measured on a performance core (`taskset -c 2`); on the same core, the previous code takes 1.6 ms and 19.4 ms. The full model (256,000 tokens) computes as fast and loads in 27 ms with its `tokenizer.bin`, against 470 ms by parsing its `tokenizer.json`; its own memory once ready drops from 28 to 15 MB, its peak from 76 to 45 MB. Spread over all cores, an 89-token text takes 2.5 ms instead of 5.5 ms on one core, a 34-token one 2.0 ms instead of 2.2. A 256-token text takes about 5 ms: there, the wait for the slowest core dominates, the low-power cores computing five times slower than the performance cores.
 
 On the 636-example hand-reviewed reference, the AUC stays at 0.972, and 0.970 for the compacted model. The AVX2 kernels change no metric of the reference.
 
@@ -30,7 +30,7 @@ On the 636-example hand-reviewed reference, the AUC stays at 0.972, and 0.970 fo
 | `WithEmbedCache(n)` | keeps the embeddings of open-mode options |
 | `WithBatching(w, r)` | groups simultaneous requests (see below) |
 
-Under 1,024 tokens, a computation stays on one core, the fastest for a sentence: on a hybrid CPU, spreading it would send it to the efficiency cores. Above that, it spreads over the allowed cores. `WithThreads(0)` therefore suits short and long texts alike.
+Under 32 tokens, a computation stays on one core: waking the others would cost more than it saves. Above that, it spreads over the allowed cores, in slices of rows that shrink with the text, so that a slow core does not hold up the others for long. The cores are shared between the computations in progress: on a saturated server, each stays on one core, and throughput is that of one core per request. `WithThreads(0)` therefore suits short and long texts alike.
 
 int8 does not change the decisions on our references (92.6% accuracy in int8, 92.5% in float32 for the prompt-injection detector). Check it on your own model: `indecis eval` computes in int8 by default, and in float32 with `-int8=false`.
 
@@ -79,3 +79,5 @@ The global layers (one in three) stay quadratic in compute. Our models were fine
 Each request holds its own buffers, about 10 MB for 256 tokens. Memory therefore levels off according to the number of simultaneous requests, which `indecis-serve -max-concurrent` and `-memory-limit` bound. With two models served and 16 parallel clients: 394 MB at most with the default settings, 246 MB with `-max-concurrent 8 -memory-limit 256`, for 12% less throughput.
 
 Grouping simultaneous requests into batches (`WithBatching`, `indecis-serve -batching`) brings little on CPU: 3 to 8% more throughput on one-sentence requests, nothing on 256-token requests, and more memory. It is off by default.
+
+`go run ./tools/infbench -model … -int8 -threads 0 -clients n` measures the throughput of n simultaneous clients. With 4 clients, sharing the cores raises it by 25 to 45% on 34- and 89-token texts; with 16, it stays that of one core per request.
