@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"sync"
+	"sync/atomic"
 
 	"github.com/bornholm/indecis/internal/linalg"
 )
@@ -312,10 +313,15 @@ func (m *Model) run(seqs [][]int32, done func(xn []float32, offs []int)) error {
 		return nil
 	}
 	packs := m.packs()
+	// The cores are shared between the computations in progress: under
+	// load, each one spreads less, and on a saturated server, not at all.
+	active := int(running.Add(1))
+	defer running.Add(-1)
 	w := 1
 	if N >= parallelRows {
-		w = linalg.Workers()
+		w = max(1, linalg.Workers()/active)
 	}
+	slice := sliceRows(N)
 
 	ws, _ := workspaces.Get().(*workspace)
 	if ws == nil {
@@ -356,7 +362,7 @@ func (m *Model) run(seqs [][]int32, done func(xn []float32, offs []int)) error {
 		// core. A layer waits three times for all workers, not at every
 		// product: on a hybrid processor, each wait is for the slowest
 		// core.
-		linalg.ParallelN(w, N, rowSlice, func(lo, hi int) {
+		linalg.ParallelN(w, N, slice, func(lo, hi int) {
 			in := x[lo*H : hi*H]
 			if L.AttnNorm != nil {
 				for r := lo; r < hi; r++ {
@@ -376,7 +382,7 @@ func (m *Model) run(seqs [][]int32, done func(xn []float32, offs []int)) error {
 			}
 		})
 		m.attentionInfer(l, offs, ws, w)
-		linalg.ParallelN(w, N, rowSlice, func(lo, hi int) {
+		linalg.ParallelN(w, N, slice, func(lo, hi int) {
 			p.o.mul(x[lo*H:hi*H], ws.ctx[lo*H:hi*H], hi-lo, true, 1) // x += attention
 			for r := lo; r < hi; r++ {
 				linalg.LayerNormRow(xn[r*H:(r+1)*H], x[r*H:(r+1)*H], L.MLPNorm.W, cfg.NormEps)
@@ -518,20 +524,30 @@ const (
 	// core.
 	mlpChunk = 64
 
-	// rowSlice is the smallest slice of rows a worker takes outside the
-	// attention.
+	// rowSlice is the largest grain of the slices of rows outside the
+	// attention (see sliceRows).
 	rowSlice = 24
 
 	// parallelRows is the number of positions (across all sequences in
 	// the batch) above which Encode spreads its computation over multiple
-	// cores. Below it, launching goroutines costs more than the
-	// computation, and a hybrid processor sends them to its slow cores: a
-	// sentence of 32 tokens computes twice as fast on a single core. Above
-	// it, the slices of rows (rowSlice) divide the work well: on a Core
-	// Ultra 7 265U, all cores compute 128 positions twice as fast as one,
-	// 512 three times as fast.
-	parallelRows = 96
+	// cores. Below it, waking the workers costs more than the computation.
+	// Above it, the slices of rows (sliceRows) divide the work well: on a
+	// Core Ultra 7 265U, all cores compute 34 positions 10% faster than
+	// one, 89 twice as fast, 256 three times as fast.
+	parallelRows = 32
 )
+
+// running counts the computations in progress, of every model.
+var running atomic.Int64
+
+// sliceRows is the smallest slice of rows a worker takes outside the
+// attention, for N rows: a multiple of the int8 kernel's 6 rows, about an
+// eighth of N, at most rowSlice. Long slices make the products efficient
+// (each slice reads all the weights); short texts need enough of them for
+// the cores to share them.
+func sliceRows(N int) int {
+	return min(rowSlice, max(6, (N/8+3)/6*6))
+}
 
 type blockBuffers struct {
 	s       []float32 // scores of a block, [qBlock, kBlock]
