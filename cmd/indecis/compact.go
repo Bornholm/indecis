@@ -38,6 +38,9 @@ func runCompact(args []string) error {
 	int8Emb := fs.Bool("int8-embeddings", false, "write the embeddings table in int8")
 	fs.Parse(args)
 	if *corpusGlobs == "" && !*int8Emb {
+		if *out != "" {
+			return fmt.Errorf("compact: -out needs -corpus or -int8-embeddings; without them, compact writes the tokenizer.bin of -model")
+		}
 		if err := required(fs, "model"); err != nil {
 			return err
 		}

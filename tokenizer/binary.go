@@ -34,8 +34,10 @@ import (
 //
 // The file is used only if its source digest is that of the
 // tokenizer.json beside it: a JSON modified afterwards is read again. The
-// content of the sections is trusted: a damaged file can make Encode
-// panic, not read out of bounds.
+// digest does not cover the code that wrote it: a change of layout, of
+// strHash or of merge must change binMagic, so that older files are
+// rejected. The content of the sections is trusted: a damaged file can make
+// Encode panic, not read out of bounds.
 
 const (
 	binMagic    = "INDTOK01"
@@ -226,11 +228,14 @@ func loadBinary(path string, source [sha256.Size]byte) (t *Tokenizer, err error)
 		added:  make(map[byte][]addedToken),
 		cache:  make(map[string][]int32),
 	}
+	if mapped {
+		t.mapping = b
+	}
 	slots := len(t.vocab.slots)
 	switch {
 	case len(t.vocab.off) != meta.Size+1 || int(t.vocab.off[meta.Size]) != len(t.vocab.blob):
 		return nil, fmt.Errorf("tokenizer: %s: inconsistent vocabulary", path)
-	case slots == 0 || slots&(slots-1) != 0 || slots < meta.Size:
+	case slots == 0 || slots&(slots-1) != 0 || slots < 2*meta.Size:
 		return nil, fmt.Errorf("tokenizer: %s: inconsistent string table", path)
 	case len(t.merges.keys) != len(t.merges.vals):
 		return nil, fmt.Errorf("tokenizer: %s: inconsistent merges", path)

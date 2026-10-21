@@ -32,6 +32,8 @@ import (
 	"sync"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/bornholm/indecis/internal/mapfile"
 )
 
 const metaspace = "▁"
@@ -53,6 +55,7 @@ type Tokenizer struct {
 	added   map[byte][]addedToken // by first byte, longest to shortest
 	cacheMu sync.RWMutex
 	cache   map[string][]int32
+	mapping []byte // tokenizer.bin mapped by loadBinary, nil otherwise
 }
 
 type merge struct {
@@ -97,27 +100,59 @@ var (
 // in memory (~12 MB each, nothing with a tokenizer.bin). A Tokenizer is
 // immutable and safe for concurrent access, including its word cache.
 func LoadShared(path string) (*Tokenizer, error) {
-	key, err := fileDigest(path)
-	if err != nil {
-		return nil, err
+	var (
+		t   *Tokenizer
+		key [sha256.Size]byte
+		err error
+	)
+	if _, statErr := os.Stat(BinaryPath(path)); statErr == nil {
+		if key, err = fileDigest(path); err != nil {
+			return nil, err
+		}
+		sharedMu.Lock()
+		prev, ok := shared[key]
+		sharedMu.Unlock()
+		if ok {
+			return prev, nil
+		}
+		t, err = loadDigest(path, key)
+	} else {
+		// No tokenizer.bin: the digest is computed while parsing, in one
+		// read of the file.
+		t, key, err = readDigest(path)
 	}
-	sharedMu.Lock()
-	prev, ok := shared[key]
-	sharedMu.Unlock()
-	if ok {
-		return prev, nil
-	}
-	t, err := loadDigest(path, key)
 	if err != nil {
 		return nil, err
 	}
 	sharedMu.Lock()
 	defer sharedMu.Unlock()
 	if prev, ok := shared[key]; ok {
+		// Loaded concurrently: nothing else refers to t.
+		if t.mapping != nil {
+			mapfile.Unmap(t.mapping, true)
+		}
 		return prev, nil
 	}
 	shared[key] = t
 	return t, nil
+}
+
+// readDigest parses the tokenizer.json at path and returns the SHA-256 of
+// its content.
+func readDigest(path string) (*Tokenizer, [sha256.Size]byte, error) {
+	var sum [sha256.Size]byte
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, sum, err
+	}
+	defer f.Close()
+	h := sha256.New()
+	t, err := read(bufio.NewReaderSize(io.TeeReader(f, h), 1<<16))
+	if err != nil {
+		return nil, sum, err
+	}
+	h.Sum(sum[:0])
+	return t, sum, nil
 }
 
 // loadDigest maps the tokenizer.bin of the JSON at path if it was written

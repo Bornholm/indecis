@@ -130,11 +130,12 @@ func MatMul8N(c, a []float32, b *PackedB8, m int, accumulate bool, limit int) {
 							copy(edge[r*nr8:(r+1)*nr8], c[(i0+r)*n+j0:])
 						}
 					}
-					microKernel8Deq(kq, ap, lda, bp, edge[:], nr8, b.scale[j0:], b.zc[j0:], sa[i0:], accumulate)
-					for r := 0; r < rows; r++ {
-						copy(c[(i0+r)*n+j0:(i0+r)*n+j0+nr8], edge[r*nr8:(r+1)*nr8])
+					if microKernel8Deq(kq, ap, lda, bp, edge[:], nr8, b.scale[j0:], b.zc[j0:], sa[i0:], accumulate) {
+						for r := 0; r < rows; r++ {
+							copy(c[(i0+r)*n+j0:(i0+r)*n+j0+nr8], edge[r*nr8:(r+1)*nr8])
+						}
+						continue
 					}
-					continue
 				}
 				microKernel8(kq, ap, lda, bp, &tile)
 				for r := 0; r < rows; r++ {
@@ -189,7 +190,8 @@ func quantizeA(apack []uint8, sa, a []float32, m, k, lda int) {
 	}
 }
 
-// zeroRow is the mean subtracted by quantRow in quantizeA.
+// zeroRow is the mean subtracted by quantRow in quantizeA. Its length
+// bounds the fast path: wider rows are quantized by the Go code.
 var zeroRow [4096]float32
 
 func fill128(b []uint8) {

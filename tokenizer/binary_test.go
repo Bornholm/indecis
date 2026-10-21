@@ -1,10 +1,12 @@
 package tokenizer
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -78,4 +80,30 @@ func TestBinaryStale(t *testing.T) {
 		t.Fatal(err)
 	}
 	checkParity(t, tok, "../testdata/siglip2-tiny/tokenizer_cases.jsonl")
+}
+
+// A string table without free slots, where lookup would never stop, is
+// rejected.
+func TestBinaryFullSlots(t *testing.T) {
+	data, err := os.ReadFile("../testdata/siglip2-tiny/tokenizer.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok, err := Parse(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok.vocab.slots = tok.vocab.slots[:len(tok.vocab.slots)/2]
+	var buf bytes.Buffer
+	sum := sha256.Sum256(data)
+	if err := tok.writeBinary(&buf, sum); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "tokenizer.bin")
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadBinary(path, sum); err == nil || !strings.Contains(err.Error(), "string table") {
+		t.Fatalf("loadBinary: %v, want an inconsistent string table", err)
+	}
 }
