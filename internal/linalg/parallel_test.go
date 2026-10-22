@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // The slices of ParallelN cover [0, n) exactly once, each at least grain
@@ -43,6 +44,7 @@ func TestParallelPanic(t *testing.T) {
 		t.Skip("one core")
 	}
 	var busy atomic.Int32
+	release := make(chan struct{})
 	func() {
 		defer func() {
 			if recover() == nil {
@@ -55,14 +57,17 @@ func TestParallelPanic(t *testing.T) {
 		caller := goid()
 		ParallelN(4, 1000, 1, func(lo, hi int) {
 			if goid() == caller {
-				for busy.Load() == 0 { // a worker is computing
+				// Panic while a worker is inside fn, and let it go on only
+				// later: without the wait, the panic would get through
+				// before it is done.
+				for busy.Load() == 0 {
+					runtime.Gosched()
 				}
+				time.AfterFunc(20*time.Millisecond, func() { close(release) })
 				panic("fn")
 			}
 			busy.Add(1)
-			for range 10000 {
-				busy.Load()
-			}
+			<-release
 			busy.Add(-1)
 		})
 	}()
