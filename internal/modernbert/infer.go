@@ -313,20 +313,18 @@ func (m *Model) run(seqs [][]int32, done func(xn []float32, offs []int)) error {
 		return nil
 	}
 	packs := m.packs()
-	// The cores are shared between the computations that spread: under
+	// A computation takes the cores the others leave free: each
+	// computation in progress, spread or not, occupies at least one. Under
 	// load, each one spreads less, and on a saturated server, not at all.
 	// The share is read again at every layer, as computations come and go.
 	spread := N >= parallelRows
-	if spread {
-		running.Add(1)
-		defer running.Add(-1)
-	}
+	running.Add(1)
+	defer running.Add(-1)
 	share := func() int {
 		if !spread {
 			return 1
 		}
-		n := int(running.Load())
-		return max(1, (linalg.Workers()+n-1)/n)
+		return max(1, linalg.Workers()-int(running.Load())+1)
 	}
 	w := share()
 	slice := sliceRows(N)
@@ -546,8 +544,7 @@ const (
 	parallelRows = 32
 )
 
-// running counts the computations spread over several cores, of every
-// model.
+// running counts the computations in progress, of every model.
 var running atomic.Int64
 
 // sliceRows is the smallest slice of rows a worker takes outside the

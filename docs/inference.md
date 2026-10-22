@@ -30,7 +30,7 @@ On the 636-example hand-reviewed reference, the AUC stays at 0.972, and 0.970 fo
 | `WithEmbedCache(n)` | keeps the embeddings of open-mode options |
 | `WithBatching(w, r)` | groups simultaneous requests (see below) |
 
-Under 32 tokens, a computation stays on one core: waking the others would cost more than it saves. Above that, it spreads over the allowed cores, in slices of rows that shrink with the text, so that a slow core does not hold up the others for long. The cores are shared between the computations in progress: on a saturated server, each stays on one core, and throughput is that of one core per request. `WithThreads(0)` therefore suits short and long texts alike.
+Under 32 tokens, a computation stays on one core: waking the others would cost more than it saves. Above that, it spreads over the allowed cores, in slices of rows that shrink with the text, so that a slow core does not hold up the others for long. A computation takes the cores the others leave free, each computation in progress occupying at least one: on a saturated server, each stays on one core. `WithThreads(0)` therefore suits short and long texts alike.
 
 int8 does not change the decisions on our references (92.6% accuracy in int8, 92.5% in float32 for the prompt-injection detector). Check it on your own model: `indecis eval` computes in int8 by default, and in float32 with `-int8=false`.
 
@@ -80,4 +80,4 @@ Each request holds its own buffers, about 10 MB for 256 tokens. Memory therefore
 
 Grouping simultaneous requests into batches (`WithBatching`, `indecis-serve -batching`) brings little on CPU: 3 to 8% more throughput on one-sentence requests, nothing on 256-token requests, and more memory. It is off by default.
 
-`go run ./tools/infbench -model … -int8 -threads 0 -clients n` measures the throughput of n simultaneous clients. With 4 clients, sharing the cores raises it by 25 to 45% on 34- and 89-token texts; with 16, it stays that of one core per request.
+`go run ./tools/infbench -model … -int8 -threads 0 -clients n` measures the throughput of n simultaneous clients, each sending one length of text, then all lengths in turn (15 to 256 tokens). On this mixed load, with 4 clients, throughput rises by 19% (604 to 719 requests/s) and the latency of 34- and 89-token texts halves, while 256-token texts take 15% longer (10.9 ms instead of 9.5): they no longer take every core. With 8 and 16 clients, throughput does not change; 89-token texts wait 22% less with 8 clients, 256-token texts 8 to 14% more.
