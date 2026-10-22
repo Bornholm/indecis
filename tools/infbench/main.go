@@ -108,8 +108,7 @@ func main() {
 		for i, c := range cases {
 			n, _ := m.Tokens(c.in)
 			lat, rate := runClients(ctx, m, *clients, 3*time.Second, len(cases), func(int, int) int { return i }, cases[i].in)
-			fmt.Printf("%-15s %3d tokens  %d clients  %7.0f req/s  median %6.2f ms  p90 %6.2f ms\n", c.name, n, *clients, rate,
-				ms(lat[i][len(lat[i])/2]), ms(lat[i][len(lat[i])*9/10]))
+			fmt.Printf("%-15s %3d tokens  %d clients  %7.0f req/s  %s\n", c.name, n, *clients, rate, quantiles(lat[i]))
 		}
 		// Mixed load: each client goes through the cases in turn, from its
 		// own starting point, so that short and long texts overlap.
@@ -121,8 +120,7 @@ func main() {
 		fmt.Printf("mixed           %d clients  %7.0f req/s\n", *clients, rate)
 		for i, c := range cases {
 			n, _ := m.Tokens(c.in)
-			fmt.Printf("  %-13s %3d tokens  median %6.2f ms  p90 %6.2f ms\n", c.name, n,
-				ms(lat[i][len(lat[i])/2]), ms(lat[i][len(lat[i])*9/10]))
+			fmt.Printf("  %-13s %3d tokens  %s\n", c.name, n, quantiles(lat[i]))
 		}
 	}
 	fmt.Printf("final memory    RSS %s (clean %s, mapped file %s), peak %s\n",
@@ -149,6 +147,14 @@ func main() {
 }
 
 func ms(d time.Duration) float64 { return float64(d.Microseconds()) / 1000 }
+
+// quantiles prints the median and the 90th percentile of sorted latencies.
+func quantiles(lat []time.Duration) string {
+	if len(lat) == 0 {
+		return "no request completed"
+	}
+	return fmt.Sprintf("median %6.2f ms  p90 %6.2f ms", ms(lat[len(lat)/2]), ms(lat[len(lat)*9/10]))
+}
 
 func mib(b uint64) string { return fmt.Sprintf("%.0f MiB", float64(b)/(1<<20)) }
 
@@ -185,7 +191,7 @@ func procStatus(field string) uint64 {
 // throughput in requests per second.
 func runClients(ctx context.Context, m *indecis.Model, clients int, d time.Duration, cases int, pick func(client, i int) int, ins ...indecis.Input) ([][]time.Duration, float64) {
 	per := make([][][]time.Duration, clients)
-	var failed atomic.Value
+	var failed atomic.Pointer[error]
 	start := time.Now()
 	stop := start.Add(d)
 	var wg sync.WaitGroup
@@ -202,7 +208,7 @@ func runClients(ctx context.Context, m *indecis.Model, clients int, d time.Durat
 				}
 				t := time.Now()
 				if _, err := m.DecideInputs(ctx, in); err != nil {
-					failed.CompareAndSwap(nil, err)
+					failed.CompareAndSwap(nil, &err)
 					return
 				}
 				per[k][c] = append(per[k][c], time.Since(t))
@@ -210,8 +216,8 @@ func runClients(ctx context.Context, m *indecis.Model, clients int, d time.Durat
 		}()
 	}
 	wg.Wait()
-	if err, _ := failed.Load().(error); err != nil {
-		log.Fatal(err)
+	if err := failed.Load(); err != nil {
+		log.Fatal(*err)
 	}
 	elapsed := time.Since(start).Seconds()
 	lat := make([][]time.Duration, cases)
