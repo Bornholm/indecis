@@ -313,10 +313,14 @@ func (m *Model) run(seqs [][]int32, done func(xn []float32, offs []int)) error {
 		return nil
 	}
 	packs := m.packs()
-	// A computation takes the cores the others leave free: each
-	// computation in progress, spread or not, occupies at least one. Under
-	// load, each one spreads less, and on a saturated server, not at all.
-	// The share is read again at every layer, as computations come and go.
+	// A computation takes the cores the others leave free, counting one
+	// core for each other computation in progress, spread or not. The
+	// count is optimistic: two spread computations together take more
+	// goroutines than there are cores. Dividing the cores exactly among
+	// them was measured with the same throughput and a slower 256-token
+	// latency (docs/inference.md). Under load, each one spreads less, and
+	// on a saturated server, not at all. The share is read again at every
+	// layer, as computations come and go.
 	spread := N >= parallelRows
 	running.Add(1)
 	defer running.Add(-1)
@@ -414,7 +418,7 @@ func (m *Model) run(seqs [][]int32, done func(xn []float32, offs []int)) error {
 			}
 		})
 	}
-	layerNormInfer(xn, x, m.FinalNorm.W, N, H, cfg.NormEps, w)
+	layerNormInfer(xn, x, m.FinalNorm.W, N, H, cfg.NormEps, share())
 	done(xn, offs)
 	return nil
 }
@@ -551,7 +555,9 @@ var running atomic.Int64
 // attention, for N rows: a multiple of the int8 kernel's 6 rows, about an
 // eighth of N, at most rowSlice. Long slices make the products efficient
 // (each slice reads all the weights); short texts need enough of them for
-// the cores to share them.
+// the cores to share them. Slices of 6 rows taken as they come, long
+// first and short last, were measured slower: 2.9 ms instead of 2.5 for
+// 89 tokens, and no faster for 256 (4.7 ms instead of 4.9, in the noise).
 func sliceRows(N int) int {
 	return min(rowSlice, max(6, (N/8+3)/6*6))
 }

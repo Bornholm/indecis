@@ -48,7 +48,7 @@ func main() {
 	flag.Var(&models, "model", "model to serve: directory, or name=directory (repeatable; the first is the default model)")
 	addr := flag.String("addr", "127.0.0.1:8080", "listen address")
 	apiKey := flag.String("api-key", os.Getenv("INDECIS_API_KEY"), "key required as Authorization: Bearer (empty: none)")
-	threads := flag.Int("threads", 0, "cores at most per request (0: all for a text model, where a text under 1024 tokens uses a single one anyway; one for an image model)")
+	threads := flag.Int("threads", 0, "cores at most per request (0: all for a text model, where a text under 32 tokens uses a single one anyway; one for an image model)")
 	maxPixels := flag.Int("max-pixels", decision.DefaultMaxImagePixels, "image models: largest image accepted, in pixels")
 	maxBody := flag.Int("max-body", 0, "largest request body, in MiB (0: 4, or 24 when an image model is served, enough for a 16-megapixel JPEG in base64)")
 	int8 := flag.Bool("int8", true, "layers in int8 if the processor has AVX-VNNI")

@@ -99,8 +99,9 @@ func WithMaxLen(n int) Option { return func(m *Model) { m.maxLen = n } }
 
 // WithThreads bounds the number of cores used by the computations (0:
 // all). The setting applies to the whole process. At inference, a batch
-// of fewer than 1024 positions is computed on a single core anyway, the
-// fastest for one sentence; long texts and large batches spread out.
+// of fewer than 32 positions is computed on a single core anyway, the
+// fastest for one sentence; longer texts and batches spread over the
+// cores the other requests leave free.
 func WithThreads(n int) Option { return func(*Model) { linalg.SetMaxWorkers(n) } }
 
 // WithInt8 makes the encoder's layers compute in int8 (per-channel
