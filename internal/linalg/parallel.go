@@ -24,7 +24,11 @@ func Workers() int {
 
 // Parallel splits [0, n) into slices of at least grain elements and calls
 // fn on each, in parallel. The slices are disjoint; fn may be called
-// several times by the same goroutine.
+// several times by the same goroutine, the calling one included, so fn
+// must not wait on the caller. If fn panics on the calling goroutine, the
+// panic waits for the other goroutines to leave fn: the caller's buffers
+// are not reused while they write. A panic on another goroutine stops the
+// process, as in any goroutine.
 func Parallel(n, grain int, fn func(lo, hi int)) {
 	ParallelN(Workers(), n, grain, fn)
 }
@@ -43,21 +47,17 @@ func ParallelN(limit, n, grain int, fn func(lo, hi int)) {
 		fn(0, n)
 		return
 	}
-	// Guided slices, taken as they come: each is a share of what remains
-	// (half of it divided among the workers), a multiple of grain, so of
-	// the int8 kernel's rows when grain is, except the last. From 4 ×
-	// workers × grain elements on (training batches, attention heads), the
-	// first slices are long and the last ones short, so that on a hybrid
-	// processor a slow core (E, LP-E) holding the last slice keeps the
-	// others waiting a short time. Below, every slice is grain elements:
-	// this is the case of inference, where shorter last slices were
-	// measured no faster (see sliceRows). The calling goroutine takes
-	// slices too. The slices are disjoint, so the result does not depend on
-	// who computes which. If fn panics on the calling goroutine, the panic waits for
-	// the workers: the caller's buffers are not reused while they write.
-	// fn must therefore not wait on the caller. A panic on a worker
-	// stops the process, as in any goroutine.
-	workers = min(workers, (n+grain-1)/grain)
+	// About four slices per worker, taken as they come: on a hybrid
+	// processor, a slow core (E, LP-E) takes fewer slices instead of holding
+	// everyone up with an equal share. The calling goroutine takes slices
+	// too. The slices are disjoint, so the result does not depend on who
+	// computes which. Each slice is a multiple of grain, so of the int8
+	// kernel's rows when grain is, except the last. Slices shrinking
+	// towards the end were measured no faster at inference (see
+	// modernbert's sliceRows), and they multiply the calls of fn for a
+	// grain of 1.
+	step := ((n+4*workers-1)/(4*workers) + grain - 1) / grain * grain
+	workers = min(workers, (n+step-1)/step)
 	var next atomic.Int64
 	var wg sync.WaitGroup
 	defer wg.Wait()
@@ -65,24 +65,21 @@ func ParallelN(limit, n, grain int, fn func(lo, hi int)) {
 	for w := 1; w < workers; w++ {
 		go func() {
 			defer wg.Done()
-			guided(&next, fn, n, grain, workers)
+			slices(&next, fn, n, step)
 		}()
 	}
-	guided(&next, fn, n, grain, workers)
+	slices(&next, fn, n, step)
 }
 
-// guided takes slices of [0, n) from next until none remain.
-func guided(next *atomic.Int64, fn func(lo, hi int), n, grain, workers int) {
+// slices takes slices of step elements of [0, n) from next until none
+// remain.
+func slices(next *atomic.Int64, fn func(lo, hi int), n, step int) {
 	for {
-		lo := int(next.Load())
+		lo := int(next.Add(1)-1) * step
 		if lo >= n {
 			return
 		}
-		step := max(1, (n-lo)/(2*workers)/grain) * grain
-		hi := min(lo+step, n)
-		if next.CompareAndSwap(int64(lo), int64(hi)) {
-			fn(lo, hi)
-		}
+		fn(lo, min(lo+step, n))
 	}
 }
 

@@ -548,16 +548,19 @@ const (
 	parallelRows = 32
 )
 
-// running counts the computations in progress, of every model.
+// running counts the computations in progress, of every text model; a
+// batch counts as one. Image models and training are not counted: a
+// server that runs them alongside takes more goroutines than it has
+// cores.
 var running atomic.Int64
 
 // sliceRows is the smallest slice of rows a worker takes outside the
 // attention, for N rows: a multiple of the int8 kernel's 6 rows, about an
 // eighth of N, at most rowSlice. Long slices make the products efficient
 // (each slice reads all the weights); short texts need enough of them for
-// the cores to share them. Slices of 6 rows taken as they come, long
-// first and short last, were measured slower: 2.9 ms instead of 2.5 for
-// 89 tokens, and no faster for 256 (4.7 ms instead of 4.9, in the noise).
+// the cores to share them. Slices of 6 rows handed out long first and
+// short last were measured slower: 2.9 ms instead of 2.5 for 89 tokens,
+// and no faster for 256 (4.7 ms instead of 4.9, in the noise).
 func sliceRows(N int) int {
 	return min(rowSlice, max(6, (N/8+3)/6*6))
 }

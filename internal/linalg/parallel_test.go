@@ -11,6 +11,7 @@ import (
 // The slices of ParallelN cover [0, n) exactly once, each at least grain
 // long and a multiple of it, except the last.
 func TestParallelSlices(t *testing.T) {
+	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(4))
 	for _, limit := range []int{1, 2, 3, 8, 64} {
 		for _, grain := range []int{0, 1, 6, 24} {
 			for _, n := range []int{0, 1, 5, 24, 25, 97, 256, 1000} {
@@ -40,9 +41,7 @@ func TestParallelSlices(t *testing.T) {
 
 // A panic in fn on the calling goroutine waits for the other workers.
 func TestParallelPanic(t *testing.T) {
-	if Workers() < 2 {
-		t.Skip("one core")
-	}
+	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(4))
 	var busy atomic.Int32
 	release := make(chan struct{})
 	func() {
@@ -73,7 +72,9 @@ func TestParallelPanic(t *testing.T) {
 	}()
 }
 
-// goid is the number of the current goroutine, read from its stack trace.
+// goid is the number of the current goroutine, read from the first line
+// of its stack trace ("goroutine N [running]:"). Should that format
+// change, the caller is never recognized and the test fails ("no panic").
 func goid() string {
 	b := make([]byte, 64)
 	b = b[:runtime.Stack(b, false)]
