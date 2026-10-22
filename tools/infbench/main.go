@@ -16,6 +16,8 @@ import (
 	"runtime/pprof"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/bornholm/indecis"
@@ -30,6 +32,7 @@ func main() {
 	memprof := flag.String("memprofile", "", "heap profile after the first request")
 	int8 := flag.Bool("int8", false, "int8 layers (AVX-VNNI)")
 	eval := flag.String("eval", "", "reference sets (JSONL, comma-separated) to evaluate")
+	clients := flag.Int("clients", 0, "also measure the throughput of this many simultaneous clients")
 	flag.Parse()
 	if *dir == "" {
 		log.Fatal("-model is required")
@@ -98,6 +101,28 @@ func main() {
 		fmt.Printf("%-15s %3d tokens  median %6.2f ms  p90 %6.2f ms\n", c.name, n,
 			ms(lat[len(lat)/2]), ms(lat[len(lat)*9/10]))
 	}
+	if *clients > 0 {
+		if *threads == 1 {
+			log.Print("-clients with -threads 1: each request stays on one core, -threads 0 measures the sharing of the cores")
+		}
+		for i, c := range cases {
+			n, _ := m.Tokens(c.in)
+			lat, rate := runClients(ctx, m, *clients, 3*time.Second, len(cases), func(int, int) int { return i }, cases[i].in)
+			fmt.Printf("%-15s %3d tokens  %d clients  %7.0f req/s  %s\n", c.name, n, *clients, rate, quantiles(lat[i]))
+		}
+		// Mixed load: each client goes through the cases in turn, from its
+		// own starting point, so that short and long texts overlap.
+		ins := make([]indecis.Input, len(cases))
+		for i, c := range cases {
+			ins[i] = c.in
+		}
+		lat, rate := runClients(ctx, m, *clients, 6*time.Second, len(cases), func(client, i int) int { return (client + i) % len(cases) }, ins...)
+		fmt.Printf("mixed           %d clients  %7.0f req/s\n", *clients, rate)
+		for i, c := range cases {
+			n, _ := m.Tokens(c.in)
+			fmt.Printf("  %-13s %3d tokens  %s\n", c.name, n, quantiles(lat[i]))
+		}
+	}
 	fmt.Printf("final memory    RSS %s (clean %s, mapped file %s), peak %s\n",
 		mib(rss()), mib(procStatus("RssAnon:")), mib(procStatus("RssFile:")), mib(peak()))
 
@@ -122,6 +147,14 @@ func main() {
 }
 
 func ms(d time.Duration) float64 { return float64(d.Microseconds()) / 1000 }
+
+// quantiles prints the median and the 90th percentile of sorted latencies.
+func quantiles(lat []time.Duration) string {
+	if len(lat) == 0 {
+		return "no request completed"
+	}
+	return fmt.Sprintf("median %6.2f ms  p90 %6.2f ms", ms(lat[len(lat)/2]), ms(lat[len(lat)*9/10]))
+}
 
 func mib(b uint64) string { return fmt.Sprintf("%.0f MiB", float64(b)/(1<<20)) }
 
@@ -150,4 +183,53 @@ func procStatus(field string) uint64 {
 		}
 	}
 	return 0
+}
+
+// runClients runs clients simultaneous clients during d, request i of a client
+// computing ins[pick(client, i)] (ins has one input per case, or one for
+// all). It returns the sorted latencies of each of the cases, and the
+// throughput in requests per second.
+func runClients(ctx context.Context, m *indecis.Model, clients int, d time.Duration, cases int, pick func(client, i int) int, ins ...indecis.Input) ([][]time.Duration, float64) {
+	per := make([][][]time.Duration, clients)
+	var failed atomic.Pointer[error]
+	start := time.Now()
+	stop := start.Add(d)
+	var wg sync.WaitGroup
+	for k := range clients {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			per[k] = make([][]time.Duration, cases)
+			for i := 0; time.Now().Before(stop) && failed.Load() == nil; i++ {
+				c := pick(k, i)
+				in := ins[0]
+				if len(ins) > 1 {
+					in = ins[c]
+				}
+				t := time.Now()
+				if _, err := m.DecideInputs(ctx, in); err != nil {
+					failed.CompareAndSwap(nil, &err)
+					return
+				}
+				per[k][c] = append(per[k][c], time.Since(t))
+			}
+		}()
+	}
+	wg.Wait()
+	if err := failed.Load(); err != nil {
+		log.Fatal(*err)
+	}
+	elapsed := time.Since(start).Seconds()
+	lat := make([][]time.Duration, cases)
+	total := 0
+	for _, p := range per {
+		for c, l := range p {
+			lat[c] = append(lat[c], l...)
+			total += len(l)
+		}
+	}
+	for _, l := range lat {
+		sort.Slice(l, func(a, b int) bool { return l[a] < l[b] })
+	}
+	return lat, float64(total) / elapsed
 }
