@@ -19,7 +19,7 @@ import (
 
 func runOCR(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: indecis ocr read|eval|train [options] (indecis ocr <command> -h)")
+		return fmt.Errorf("usage: indecis ocr read|eval|train|shard [options] (indecis ocr <command> -h)")
 	}
 	switch args[0] {
 	case "read":
@@ -28,8 +28,10 @@ func runOCR(args []string) error {
 		return runOCREval(args[1:])
 	case "train":
 		return runOCRTrain(args[1:])
+	case "shard":
+		return runOCRShard(args[1:])
 	}
-	return fmt.Errorf("unknown ocr command %q (read, eval, train)", args[0])
+	return fmt.Errorf("unknown ocr command %q (read, eval, train, shard)", args[0])
 }
 
 func runOCRRead(args []string) error {
@@ -261,4 +263,30 @@ func expandHome(p string) string {
 		return filepath.Join(home, p[2:])
 	}
 	return p
+}
+
+func runOCRShard(args []string) error {
+	fs := flag.NewFlagSet("ocr shard", flag.ExitOnError)
+	data := fs.String("data", "", "labeled lines (JSONL of samples)")
+	out := fs.String("out", "", "shard to write")
+	fs.Parse(args)
+	if err := required(fs, "data", "out"); err != nil {
+		return err
+	}
+	lines, err := ocr.LoadLines(*data, ocr.DefaultCrop())
+	if err != nil {
+		return err
+	}
+	w, err := ocr.CreateShard(*out)
+	if err != nil {
+		return err
+	}
+	for _, l := range lines {
+		if err := w.Write(l.Text, ocr.Crop{Ink: l.Ink, W: l.W}, l.Meta); err != nil {
+			w.Close()
+			return err
+		}
+	}
+	log.Printf("%d lines", len(lines))
+	return w.Close()
 }

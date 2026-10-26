@@ -33,13 +33,44 @@ type bboxDoc struct {
 		Width  float64 `xml:"width,attr"`
 		Height float64 `xml:"height,attr"`
 		Lines  []struct {
-			XMin  float64  `xml:"xMin,attr"`
-			YMin  float64  `xml:"yMin,attr"`
-			XMax  float64  `xml:"xMax,attr"`
-			YMax  float64  `xml:"yMax,attr"`
-			Words []string `xml:"word"`
+			XMin  float64 `xml:"xMin,attr"`
+			YMin  float64 `xml:"yMin,attr"`
+			XMax  float64 `xml:"xMax,attr"`
+			YMax  float64 `xml:"yMax,attr"`
+			Words []word  `xml:"word"`
 		} `xml:"flow>block>line"`
 	} `xml:"body>doc>page"`
+}
+
+type word struct {
+	XMin float64 `xml:"xMin,attr"`
+	YMin float64 `xml:"yMin,attr"`
+	XMax float64 `xml:"xMax,attr"`
+	YMax float64 `xml:"yMax,attr"`
+	Text string  `xml:",chardata"`
+}
+
+// lineText joins a line's words with a space only where the page shows
+// one: the text layer splits off superscripts ("option 2 .") and small
+// capitals ("M ARINIS") as words of their own.
+func lineText(ws []word) string {
+	if len(ws) == 0 {
+		return ""
+	}
+	hs := make([]float64, len(ws))
+	for i, w := range ws {
+		hs[i] = w.YMax - w.YMin
+	}
+	sort.Float64s(hs)
+	h := hs[len(hs)/2]
+	var b strings.Builder
+	for i, w := range ws {
+		if i > 0 && w.XMin-ws[i-1].XMax > 0.12*h {
+			b.WriteByte(' ')
+		}
+		b.WriteString(w.Text)
+	}
+	return b.String()
 }
 
 func main() {
@@ -103,7 +134,7 @@ func convert(pdf, doc, out, lang string, dpi, first, pages int, enc *ocr.Encoder
 		for _, l := range p.Lines {
 			for _, w := range l.Words {
 				words++
-				if brokenWord.MatchString(w) {
+				if brokenWord.MatchString(w.Text) {
 					odd++
 				}
 			}
@@ -130,7 +161,7 @@ func convert(pdf, doc, out, lang string, dpi, first, pages int, enc *ocr.Encoder
 		}
 		scale := float64(dpi) / 72
 		for _, l := range p.Lines {
-			text := ocr.NormalizeText(strings.Join(l.Words, " "))
+			text := ocr.NormalizeText(lineText(l.Words))
 			box := ocr.Box{X0: l.XMin * scale, Y0: l.YMin * scale, X1: l.XMax * scale, Y1: l.YMax * scale}
 			ink, ok := inkBox(page, box)
 			_, _, known := enc.Encode(text)
