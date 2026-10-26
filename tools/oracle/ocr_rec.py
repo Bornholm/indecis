@@ -9,6 +9,11 @@ those of rec.onnx's named initializers, under "rec." removed.
 
 Inputs: x [B, 1, window*height, W] ink maps (0 = paper, 1 = ink), W a
 multiple of the stride; widths [B], the true width of each line in pixels.
+
+A line's logits depend a little on how far its batch pads it: the context
+branch's 3x3 convolution sees the step past the line's end, which is zero
+pixels in a padded batch and nothing at the batch's edge.  The reference is
+a line alone, padded to a multiple of 8 (``alone``), whatever the batch.
 """
 
 from __future__ import annotations
@@ -132,6 +137,17 @@ class Recognizer(nn.Module):
         for b in self.blocks:
             h = b(h, mask)
         return self.head(h).transpose(1, 2), lengths
+
+
+def alone(x, width: int, multiple: int = 8):
+    """Line x [1, H, W] cut to its width rounded up to ``multiple``, as a batch
+    of one: (x [1, 1, H, W'], widths [1])."""
+    wp = -(-width // multiple) * multiple
+    out = torch.zeros((1, 1, x.shape[-2], wp), dtype=x.dtype)
+    n = min(wp, x.shape[-1])
+    out[0, 0, :, :n] = x[0, :, :n]
+    out[0, 0, :, width:] = 0
+    return out, torch.tensor([width])
 
 
 def greedy(logits, lengths, blank=0):

@@ -5,7 +5,8 @@ AdamW) according to PyTorch.
     tools/oracle/.venv/bin/python tools/oracle/ocr_fixtures.py --out testdata/ocr-tiny
 
 Writes, for each stem normalization (batch, layer), a folder holding
-config.json, model.safetensors, logits.f32 ([B, T, vocab]) and, for "layer"
+config.json, model.safetensors, logits.f32 (the valid steps of each line,
+concatenated: [sum of lengths, vocab]) and, for "layer"
 (the trainable variant), grads.safetensors and after.safetensors.  The
 inputs and targets are in cases.json at the top.
 """
@@ -21,7 +22,7 @@ import torch
 import torch.nn.functional as F
 from safetensors.torch import save_file
 
-from ocr_rec import Config, Recognizer
+from ocr_rec import Config, Recognizer, alone
 
 WIDTHS = [37, 64, 21]  # true widths: one line ends mid-step, one is short
 TARGETS = [[3, 3, 5], [1, 2, 3, 4, 5, 6, 7, 1], [9, 2]]
@@ -65,7 +66,7 @@ def main():
     for i, w in enumerate(WIDTHS):
         x[i, 0, :, :w] = rng.random((H, w)).astype(np.float32)
     (a.out / "x.f32").write_bytes(x.tobytes())
-    xt, wt = torch.from_numpy(x), torch.tensor(WIDTHS)
+    xt = torch.from_numpy(x)
 
     cases = {"shape": list(x.shape), "widths": WIDTHS, "targets": TARGETS,
              "lr": LR, "weight_decay": WD, "clip": CLIP}
@@ -77,16 +78,19 @@ def main():
         randomize(m, 7)
         (d / "config.json").write_text(c.to_json())
         save_file(tensors(m), str(d / "model.safetensors"))
-        logits, lengths = m(xt, wt)
-        (d / "logits.f32").write_bytes(logits.detach().numpy().astype(np.float32).tobytes())
-        cases[norm] = {"T": logits.shape[1], "lengths": lengths.tolist()}
+        # Each line alone, as the Go implementation reads it (see ocr_rec.alone).
+        outs = [m(*alone(xt[i], w)) for i, w in enumerate(WIDTHS)]
+        logits = [o[0][0, : int(o[1][0])] for o in outs]
+        (d / "logits.f32").write_bytes(torch.cat(logits).detach().numpy().astype(np.float32).tobytes())
+        cases[norm] = {"lengths": [len(l) for l in logits]}
         if norm != "layer":
             continue
 
-        lp = F.log_softmax(logits, -1).transpose(0, 1)  # [T, B, V]
-        tgt = torch.tensor([i for t in TARGETS for i in t])
-        tl = torch.tensor([len(t) for t in TARGETS])
-        loss = F.ctc_loss(lp, tgt, lengths, tl, blank=0, reduction="sum")
+        loss = sum(
+            F.ctc_loss(F.log_softmax(l, -1)[:, None], torch.tensor([t]), torch.tensor([len(l)]),
+                       torch.tensor([len(t)]), blank=0, reduction="sum")
+            for l, t in zip(logits, TARGETS)
+        )
         loss.backward()
         params = dict(m.named_parameters())
         save_file({k: p.grad.contiguous() for k, p in params.items()}, str(d / "grads.safetensors"))

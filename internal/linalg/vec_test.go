@@ -50,6 +50,30 @@ func TestVectorOps(t *testing.T) {
 			}
 		}
 
+		HardSwish(o, x)
+		for i := range o {
+			xv := float64(x[i])
+			g := xv * min(max(xv+3, 0), 6) / 6
+			if math.Abs(float64(o[i])-g) > 1e-6*(1+math.Abs(g)) {
+				t.Fatalf("n=%d HardSwish[%d] %v, want %v", n, i, o[i], g)
+			}
+		}
+
+		MulTo(o, x, b)
+		for i := range o {
+			if o[i] != x[i]*b[i] {
+				t.Fatalf("n=%d MulTo[%d] %v, want %v", n, i, o[i], x[i]*b[i])
+			}
+		}
+
+		fma := append([]float32(nil), b...)
+		MulAddTo(fma, x, b)
+		for i := range fma {
+			if g := float64(b[i]) + float64(x[i])*float64(b[i]); math.Abs(float64(fma[i])-g) > 1e-6*(1+math.Abs(g)) {
+				t.Fatalf("n=%d MulAddTo[%d] %v, want %v", n, i, fma[i], g)
+			}
+		}
+
 		d := make([]float32, n)
 		SubTo(d, x, b)
 		mx := append([]float32(nil), b...)

@@ -23,7 +23,7 @@ from onnx import numpy_helper
 from PIL import Image, ImageDraw, ImageFont
 from safetensors.torch import save_file
 
-from ocr_rec import Config, Recognizer, greedy
+from ocr_rec import Config, Recognizer, alone, greedy
 
 FONT = "/usr/share/fonts/TTF/DejaVuSerif.ttf"
 LINES = [
@@ -128,6 +128,20 @@ def main():
         save_file(tensors, str(a.out / "model.safetensors"))
         (a.out / "config.json").write_text(c.to_json())
         (a.out / "vocab.json").write_text(json.dumps(voc, ensure_ascii=False))
+        # Reference for the Go tests: each rendered line alone, its padded
+        # ink map and the logits of its valid steps.
+        xs, logits, widths = [], [], []
+        with torch.no_grad():
+            for t in LINES:
+                ink = torch.from_numpy(render(t, c))
+                x, w = alone(ink[None], ink.shape[1])
+                l, n = m(x, w)
+                xs.append(x[0, 0].numpy().ravel())
+                logits.append(l[0, : int(n[0])].numpy().ravel())
+                widths.append(int(w[0]))
+        (a.out / "check_x.f32").write_bytes(np.concatenate(xs).astype(np.float32).tobytes())
+        (a.out / "check_logits.f32").write_bytes(np.concatenate(logits).astype(np.float32).tobytes())
+        (a.out / "check.json").write_text(json.dumps({"texts": LINES, "widths": widths}, ensure_ascii=False))
         print("weights written to", a.out)
 
 

@@ -423,3 +423,51 @@ func Rope(x, cos, sin []float32) {
 		x2[i] = b*cos[i] + a*sin[i]
 	}
 }
+
+// MulAddTo adds a·b to o, element by element.
+//
+//go:noinline
+func MulAddTo(o, a, b []float32) {
+	var zero simd.Float32s
+	V := zero.Len()
+	i := 0
+	for ; i+V <= len(o); i += V {
+		simd.LoadFloat32s(a[i:]).MulAdd(simd.LoadFloat32s(b[i:]), simd.LoadFloat32s(o[i:])).Store(o[i:])
+	}
+	for ; i < len(o); i++ {
+		o[i] += a[i] * b[i]
+	}
+}
+
+// HardSwish writes o[i] = x·clamp(x+3, 0, 6)/6 of a[i].
+//
+//go:noinline
+func HardSwish(o, a []float32) {
+	three, six := simd.BroadcastFloat32s(3), simd.BroadcastFloat32s(6)
+	sixth := simd.BroadcastFloat32s(1.0 / 6)
+	var zero simd.Float32s
+	V := zero.Len()
+	i := 0
+	for ; i+V <= len(o); i += V {
+		x := simd.LoadFloat32s(a[i:])
+		x.Mul(x.Add(three).Max(zero).Min(six)).Mul(sixth).Store(o[i:])
+	}
+	for ; i < len(o); i++ {
+		o[i] = hardSwishScalar(a[i])
+	}
+}
+
+// MulTo writes o = a·b, element by element.
+//
+//go:noinline
+func MulTo(o, a, b []float32) {
+	var zero simd.Float32s
+	V := zero.Len()
+	i := 0
+	for ; i+V <= len(o); i += V {
+		simd.LoadFloat32s(a[i:]).Mul(simd.LoadFloat32s(b[i:])).Store(o[i:])
+	}
+	for ; i < len(o); i++ {
+		o[i] = a[i] * b[i]
+	}
+}
