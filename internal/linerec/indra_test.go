@@ -101,7 +101,11 @@ func BenchmarkIndraForward(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	m.Prepare()
+	if os.Getenv("INDECIS_INT8") == "1" {
+		m.PrepareInt8()
+	} else {
+		m.Prepare()
+	}
 	c, lines := indraLines(b, dir, m.Cfg.Rows())
 	b.Run("text", func(b *testing.B) {
 		var s State
@@ -132,5 +136,37 @@ func BenchmarkIndraForward(b *testing.B) {
 				m.Forward(&s, ink, w)
 			}
 		})
+	}
+}
+
+// TestIndraInt8 reads the reference lines in int8: the same text.
+func TestIndraInt8(t *testing.T) {
+	dir := indraDir(t)
+	f, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Prepare()
+	q.PrepareInt8()
+	c, lines := indraLines(t, dir, f.Cfg.Rows())
+	var sf, sq State
+	for i, w := range c.Widths {
+		f.Forward(&sf, lines[i], w)
+		q.Forward(&sq, lines[i], w)
+		a, _ := Greedy(sf.Logits, sf.L, f.Cfg.Vocab)
+		b, _ := Greedy(sq.Logits, sq.L, q.Cfg.Vocab)
+		if len(a) != len(b) {
+			t.Errorf("line %d: %d symbols in float32, %d in int8", i, len(a), len(b))
+			continue
+		}
+		for j := range a {
+			if a[j].ID != b[j].ID {
+				t.Errorf("line %d: symbol %d differs in int8", i, j)
+			}
+		}
 	}
 }

@@ -38,6 +38,7 @@ func runOCRRead(args []string) error {
 	fs := flag.NewFlagSet("ocr read", flag.ExitOnError)
 	model := fs.String("model", "", "recognizer (config.json, model.safetensors, vocab.json)")
 	boxFlag := fs.String("box", "", "line box x0,y0,x1,y1 in pixels (default: the image is one line)")
+	int8 := fs.Bool("int8", true, "int8 computation if the processor allows it")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: indecis ocr read -model dir [-box x0,y0,x1,y1] image...")
 		fs.PrintDefaults()
@@ -59,7 +60,7 @@ func runOCRRead(args []string) error {
 			return fmt.Errorf("-box needs 4 values")
 		}
 	}
-	r, err := ocr.Load(*model)
+	r, err := ocr.Load(*model, ocrOptions(*int8)...)
 	if err != nil {
 		return err
 	}
@@ -83,11 +84,12 @@ func runOCREval(args []string) error {
 	by := fs.String("by", "", "also measure by value of this meta field")
 	errorsOut := fs.String("errors", "", "write the misread lines here (JSONL)")
 	fold := fs.Bool("fold-case", false, "compare in upper case (references transcribed in capitals, as SROIE's)")
+	int8 := fs.Bool("int8", true, "int8 computation if the processor allows it")
 	fs.Parse(args)
 	if err := required(fs, "model", "data"); err != nil {
 		return err
 	}
-	r, err := ocr.Load(*model)
+	r, err := ocr.Load(*model, ocrOptions(*int8)...)
 	if err != nil {
 		return err
 	}
@@ -289,4 +291,11 @@ func runOCRShard(args []string) error {
 	}
 	log.Printf("%d lines", len(lines))
 	return w.Close()
+}
+
+func ocrOptions(int8 bool) []ocr.Option {
+	if int8 {
+		return []ocr.Option{ocr.WithInt8()}
+	}
+	return nil
 }

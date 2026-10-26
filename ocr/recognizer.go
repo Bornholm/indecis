@@ -39,9 +39,18 @@ type Vocab struct {
 	Chars []string `json:"chars"` // symbol i+1
 }
 
+// Option configures a recognizer.
+type Option func(*options)
+
+type options struct{ int8 bool }
+
+// WithInt8 computes the pointwise convolutions and the head in int8 when
+// the processor has the int8 kernel (AVX-VNNI).
+func WithInt8() Option { return func(o *options) { o.int8 = true } }
+
 // Load reads a recognizer from dir: config.json, model.safetensors and
 // vocab.json.
-func Load(dir string) (*Recognizer, error) {
+func Load(dir string, opts ...Option) (*Recognizer, error) {
 	m, err := linerec.Load(dir)
 	if err != nil {
 		return nil, err
@@ -54,18 +63,26 @@ func Load(dir string) (*Recognizer, error) {
 	if err := json.Unmarshal(b, &v); err != nil {
 		return nil, fmt.Errorf("ocr: vocab.json: %w", err)
 	}
-	return New(m, v)
+	return New(m, v, opts...)
 }
 
 // New wraps a line model and its vocabulary.
-func New(m *linerec.Model, v Vocab) (*Recognizer, error) {
+func New(m *linerec.Model, v Vocab, opts ...Option) (*Recognizer, error) {
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
 	if v.Blank != 0 {
 		return nil, fmt.Errorf("ocr: blank must be symbol 0, not %d", v.Blank)
 	}
 	if len(v.Chars)+1 != m.Cfg.Vocab {
 		return nil, fmt.Errorf("ocr: %d characters for %d symbols", len(v.Chars), m.Cfg.Vocab)
 	}
-	m.Prepare()
+	if o.int8 {
+		m.PrepareInt8()
+	} else {
+		m.Prepare()
+	}
 	crop := DefaultCrop()
 	crop.Height, crop.Window, crop.Multiple = m.Cfg.Height, m.Cfg.Window, 2*m.Cfg.Stride
 	return &Recognizer{m: m, chars: v.Chars, crop: crop}, nil

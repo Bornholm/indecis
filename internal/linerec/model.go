@@ -76,8 +76,9 @@ type Param struct {
 
 	// Set by Prepare, for inference: the matrix packed for linalg, or the
 	// depthwise kernel transposed to [taps, channels].
-	packed *linalg.PackedB
-	transp []float32
+	packed  *linalg.PackedB
+	packed8 *linalg.PackedB8 // int8, see PrepareInt8
+	transp  []float32
 }
 
 // kernelT returns a depthwise kernel [C, 1, taps…] transposed to [taps, C].
@@ -116,10 +117,30 @@ func (m *Model) Prepare() {
 	pack(m.Head, c.Vocab, c.Dim)
 }
 
+// PrepareInt8 is Prepare with the pointwise convolutions and the head in
+// int8 (activations quantized row by row, AVX-VNNI), when the processor has
+// the int8 kernel; Prepare otherwise.
+func (m *Model) PrepareInt8() {
+	m.Prepare()
+	if !linalg.Int8Fast() {
+		return
+	}
+	c := m.Cfg
+	pack := func(p *Param, out, k int) { p.packed8 = linalg.PackB8(p.W, k, out, true) }
+	pack(m.CtxPW, c.CtxDim, c.CtxChannels)
+	pack(m.CtxProj, c.Dim, c.CtxDim)
+	for i := range m.Blocks {
+		b := &m.Blocks[i]
+		pack(b.Expand, c.Expand, c.Dim)
+		pack(b.Project, c.Dim, c.Expand)
+	}
+	pack(m.Head, c.Vocab, c.Dim)
+}
+
 // Unprepare drops the packed weights.
 func (m *Model) Unprepare() {
 	for _, p := range m.Params() {
-		p.packed, p.transp = nil, nil
+		p.packed, p.packed8, p.transp = nil, nil, nil
 	}
 }
 

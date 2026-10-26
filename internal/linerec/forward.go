@@ -267,8 +267,13 @@ func denseHS(y, a, x []float32, w, bias *Param, n, k, out int) {
 	linalg.HardSwish(a[:n*out], y[:n*out])
 }
 
-// matMul computes y (+)= x·Wᵀ, with W packed when the model is prepared.
+// matMul computes y (+)= x·Wᵀ, with W packed when the model is prepared
+// (in int8 by PrepareInt8).
 func matMul(y, x []float32, w *Param, n, k, out int, accumulate bool) {
+	if w.packed8 != nil {
+		linalg.MatMul8(y, x, w.packed8, n, accumulate)
+		return
+	}
 	if w.packed != nil {
 		linalg.MatMulPacked(y, x, w.packed, n, accumulate)
 		return
