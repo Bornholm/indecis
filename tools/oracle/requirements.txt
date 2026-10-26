@@ -10,3 +10,4 @@ numpy
 pillow
 onnx
 onnxruntime
+opencv-python-headless
