@@ -25,11 +25,14 @@ type State struct {
 	Pooled []float32 // [L, CtxDim]
 	Pre    []float32 // [L, Dim] stem + context, before normalization
 	Normed []float32 // [L, Dim] after normalization, before HardSwish
+	Mean   []float32 // [L] layer norm: mean of each step
 	Rstd   []float32 // [L] layer norm: 1/σ of each step
 
 	Blocks []BlockState
 	H      []float32 // [L, Dim] output of the last block
 	Logits []float32 // [L, Vocab]
+
+	work work // gradients of the activations, for Backward
 }
 
 // BlockState holds a block's activations.
@@ -187,6 +190,7 @@ func (m *Model) normalize(s *State) {
 		}
 		return
 	}
+	s.Mean = grow(s.Mean, L)
 	s.Rstd = grow(s.Rstd, L)
 	for t := range L {
 		x, y := s.Pre[t*D:(t+1)*D], s.Normed[t*D:(t+1)*D]
@@ -201,7 +205,7 @@ func (m *Model) normalize(s *State) {
 			v2 += d * d
 		}
 		rstd := 1 / math.Sqrt(v2/float64(D)+normEps)
-		s.Rstd[t] = float32(rstd)
+		s.Mean[t], s.Rstd[t] = float32(mean), float32(rstd)
 		for j := range D {
 			y[j] = float32((float64(x[j])-mean)*rstd)*g[j] + b[j]
 		}
