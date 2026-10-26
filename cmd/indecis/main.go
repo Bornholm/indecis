@@ -9,6 +9,7 @@
 //	indecis train-vision -backbone siglip -schema schema.json -train images.jsonl -out model
 //	indecis ocr read -model dir line.png
 //	indecis ocr eval -model dir -data lines.jsonl
+//	indecis ocr train -train 'shards/*.lines' -val val.jsonl -out dir
 //	indecis check
 //
 // The guide docs/creating-a-model.md goes through these steps on an example.
@@ -39,7 +40,7 @@ var commands = []struct {
 	{"compact", "reduces the size of a model (vocabulary, int8 table)", runCompact},
 	{"split", "sets aside a part of a set of examples (by family or by example)", runSplit},
 	{"train-vision", "trains a head that answers questions on images (SigLIP encoder)", runTrainVision},
-	{"ocr", "reads text lines from images (read), measures a recognizer (eval)", runOCR},
+	{"ocr", "reads text lines from images (read), measures (eval) and trains (train) a recognizer", runOCR},
 	{"check", "checks that this processor runs the SIMD and assembly kernels", runCheck},
 	{"version", "prints the version", runVersion},
 }

@@ -71,6 +71,13 @@ func New(m *linerec.Model, v Vocab) (*Recognizer, error) {
 	return &Recognizer{m: m, chars: v.Chars, crop: crop}, nil
 }
 
+// Model returns the line model. Training it (Train) drops its packed
+// weights: call its Prepare afterwards to read at full speed again.
+func (r *Recognizer) Model() *linerec.Model { return r.m }
+
+// Vocab returns the recognizer's vocabulary.
+func (r *Recognizer) Vocab() Vocab { return Vocab{Chars: r.chars} }
+
 // CropOptions returns the crop the recognizer reads lines with.
 func (r *Recognizer) CropOptions() CropOptions { return r.crop }
 

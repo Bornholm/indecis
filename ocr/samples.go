@@ -7,6 +7,7 @@ import (
 	"image"
 	_ "image/jpeg" // line and page images
 	_ "image/png"
+	"io"
 	"os"
 	"path/filepath"
 )
@@ -71,4 +72,47 @@ func ReadImage(path string) (*image.Gray, error) {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return Gray(img), nil
+}
+
+// LoadLines reads labeled lines ready for training or evaluation: a shard
+// (any extension but .jsonl), or a JSONL file of samples, cut with o. Texts
+// are normalized (NormalizeText).
+func LoadLines(path string, o CropOptions) ([]ShardLine, error) {
+	if filepath.Ext(path) != ".jsonl" {
+		r, err := OpenShard(path)
+		if err != nil {
+			return nil, err
+		}
+		defer r.Close()
+		var out []ShardLine
+		for {
+			l, err := r.Next()
+			if err == io.EOF {
+				return out, nil
+			}
+			if err != nil {
+				return nil, err
+			}
+			l.Text = NormalizeText(l.Text)
+			out = append(out, l)
+		}
+	}
+	samples, err := ReadSamples(path)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ShardLine, len(samples))
+	pages := map[string]*image.Gray{}
+	for i, s := range samples {
+		page := pages[s.Image]
+		if page == nil {
+			if page, err = ReadImage(s.Image); err != nil {
+				return nil, err
+			}
+			pages[s.Image] = page
+		}
+		c := CropLine(page, s.BoxOf(page), o)
+		out[i] = ShardLine{Text: NormalizeText(s.Text), W: c.W, Rows: len(c.Ink) / c.W, Meta: s.Meta, Ink: c.Ink}
+	}
+	return out, nil
 }

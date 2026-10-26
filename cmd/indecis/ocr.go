@@ -1,29 +1,35 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"log"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/bornholm/indecis/internal/linalg"
+	"github.com/bornholm/indecis/internal/linerec"
 	"github.com/bornholm/indecis/ocr"
 )
 
 func runOCR(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: indecis ocr read|eval [options] (indecis ocr <command> -h)")
+		return fmt.Errorf("usage: indecis ocr read|eval|train [options] (indecis ocr <command> -h)")
 	}
 	switch args[0] {
 	case "read":
 		return runOCRRead(args[1:])
 	case "eval":
 		return runOCREval(args[1:])
+	case "train":
+		return runOCRTrain(args[1:])
 	}
-	return fmt.Errorf("unknown ocr command %q (read, eval)", args[0])
+	return fmt.Errorf("unknown ocr command %q (read, eval, train)", args[0])
 }
 
 func runOCRRead(args []string) error {
@@ -146,4 +152,99 @@ func runOCREval(args []string) error {
 func printRate(name string, e ocr.ErrorRate) {
 	fmt.Printf("%-24s lines %6d  CER %6.2f%%  WER %6.2f%%  exact %5.1f%%\n",
 		name, e.Lines, 100*e.CER(), 100*e.WER(), 100*float64(e.Exact)/float64(max(1, e.Lines)))
+}
+
+func runOCRTrain(args []string) error {
+	fs := flag.NewFlagSet("ocr train", flag.ExitOnError)
+	train := fs.String("train", "", "training shards (comma-separated patterns)")
+	val := fs.String("val", "", "validation lines (shard, or JSONL of samples)")
+	out := fs.String("out", "", "output directory (best model on -val)")
+	init := fs.String("init", "", "start from this recognizer instead of fresh weights")
+	charset := fs.String("charset", "", "file holding the characters of a fresh model (default: French and English)")
+	steps := fs.Int("steps", 20000, "optimizer steps")
+	batch := fs.Int("batch", 64, "lines per step")
+	lr := fs.Float64("lr", 2e-3, "peak learning rate")
+	warmup := fs.Int("warmup", 1000, "warmup steps")
+	wd := fs.Float64("wd", 0.01, "weight decay")
+	clip := fs.Float64("clip", 5, "gradient norm clipping")
+	buffer := fs.Int("buffer", 20000, "shuffle buffer, in lines")
+	evalEvery := fs.Int("eval-every", 1000, "validation every n steps")
+	seed := fs.Int64("seed", 1, "random seed")
+	fs.Parse(args)
+	if err := required(fs, "train", "out"); err != nil {
+		return err
+	}
+	var paths []string
+	for _, g := range strings.Split(*train, ",") {
+		files, err := filepath.Glob(expandHome(strings.TrimSpace(g)))
+		if err != nil {
+			return err
+		}
+		paths = append(paths, files...)
+	}
+	sort.Strings(paths)
+	src, err := ocr.NewShardSource(paths, *buffer, *seed)
+	if err != nil {
+		return err
+	}
+
+	var m *linerec.Model
+	var v ocr.Vocab
+	if *init != "" {
+		r, err := ocr.Load(*init)
+		if err != nil {
+			return err
+		}
+		m, v = r.Model(), r.Vocab()
+	} else {
+		cs := ocr.DefaultCharset
+		if *charset != "" {
+			b, err := os.ReadFile(*charset)
+			if err != nil {
+				return err
+			}
+			cs = strings.TrimRight(string(b), "\n")
+		}
+		if v, err = ocr.NewVocab(cs); err != nil {
+			return err
+		}
+		if m, err = linerec.New(linerec.Base(len(v.Chars)+1), *seed); err != nil {
+			return err
+		}
+	}
+	var evalLines []ocr.ShardLine
+	if *val != "" {
+		crop := ocr.DefaultCrop()
+		crop.Height, crop.Window = m.Cfg.Height, m.Cfg.Window
+		if evalLines, err = ocr.LoadLines(*val, crop); err != nil {
+			return err
+		}
+	}
+	log.Printf("%d shards, %d validation lines, %d parameters", len(paths), len(evalLines), countParams(m))
+	res, err := ocr.Train(context.Background(), m, v, src, ocr.TrainOptions{
+		Steps: *steps, Batch: *batch, LR: *lr, Warmup: *warmup, WeightDecay: *wd, Clip: *clip,
+		Eval: evalLines, EvalEvery: *evalEvery, Out: *out, LogEvery: 50, Log: os.Stderr,
+	})
+	if err != nil {
+		return err
+	}
+	log.Printf("%d steps, %d lines, %d skipped; best CER %.2f%% at step %d",
+		res.Steps, res.Lines, res.Skipped, 100*res.BestCER, res.BestStep)
+	return nil
+}
+
+func countParams(m *linerec.Model) int {
+	n := 0
+	for _, p := range m.Params() {
+		n += len(p.W)
+	}
+	return n
+}
+
+func expandHome(p string) string {
+	if strings.HasPrefix(p, "~/") {
+		home, _ := os.UserHomeDir()
+		return filepath.Join(home, p[2:])
+	}
+	return p
 }
