@@ -8,3 +8,5 @@ tokenizers
 safetensors
 numpy
 pillow
+onnx
+onnxruntime

@@ -53,6 +53,7 @@ fixtures:
 	$(ORACLE) tools/oracle/tokenizer_fixtures.py --model testdata/siglip2-tiny --random 1000 --out testdata/siglip2-tiny/tokenizer_cases.jsonl
 	$(ORACLE) tools/oracle/offset_fixtures.py --model $(BEKKO_DIR) --cases testdata/bekko/tokenizer_cases.jsonl --out testdata/bekko/offset_cases.jsonl
 	$(ORACLE) tools/oracle/offset_fixtures.py --model testdata/siglip2-tiny --cases testdata/siglip2-tiny/tokenizer_cases.jsonl --out testdata/siglip2-tiny/offset_cases.jsonl
+	cd tools/oracle && ../../$(ORACLE) ocr_fixtures.py --out ../../testdata/ocr-tiny
 
 clean:
 	rm -rf bin dist
