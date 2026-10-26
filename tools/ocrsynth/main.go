@@ -90,6 +90,9 @@ func main() {
 			for i := range jobs {
 				count := min(*shardSize, *n-i**shardSize)
 				path := filepath.Join(*out, fmt.Sprintf("%s-%d-%05d.lines", *prefix, *seed, i))
+				if _, err := os.Stat(path); err == nil {
+					continue // written by an earlier run: shard i always draws the same lines
+				}
 				if err := writeShard(g, path, count, *seed+int64(i), i == 0 && *preview > 0, *preview); err != nil {
 					log.Fatal(err)
 				}

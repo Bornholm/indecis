@@ -77,9 +77,10 @@ func runOCRRead(args []string) error {
 func runOCREval(args []string) error {
 	fs := flag.NewFlagSet("ocr eval", flag.ExitOnError)
 	model := fs.String("model", "", "recognizer")
-	data := fs.String("data", "", "labeled lines (JSONL: image, box, text, meta)")
+	data := fs.String("data", "", "labeled lines (JSONL: image, box, text, meta; or a shard)")
 	by := fs.String("by", "", "also measure by value of this meta field")
 	errorsOut := fs.String("errors", "", "write the misread lines here (JSONL)")
+	fold := fs.Bool("fold-case", false, "compare in upper case (references transcribed in capitals, as SROIE's)")
 	fs.Parse(args)
 	if err := required(fs, "model", "data"); err != nil {
 		return err
@@ -87,6 +88,15 @@ func runOCREval(args []string) error {
 	r, err := ocr.Load(*model)
 	if err != nil {
 		return err
+	}
+	if filepath.Ext(*data) != ".jsonl" {
+		lines, err := ocr.LoadLines(*data, r.CropOptions())
+		if err != nil {
+			return err
+		}
+		e := ocr.Evaluate(r.Model(), r.Vocab(), lines)
+		printRate("all", e)
+		return nil
 	}
 	samples, err := ocr.ReadSamples(*data)
 	if err != nil {
@@ -110,6 +120,10 @@ func runOCREval(args []string) error {
 	for i, s := range samples {
 		if errs[i] != nil {
 			return errs[i]
+		}
+		s.Text = ocr.NormalizeText(s.Text)
+		if *fold {
+			got[i], s.Text = strings.ToUpper(got[i]), strings.ToUpper(s.Text)
 		}
 		var e ocr.ErrorRate
 		e.Add(got[i], s.Text)
