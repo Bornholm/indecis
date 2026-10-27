@@ -12,6 +12,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"image"
@@ -40,6 +41,7 @@ func main() {
 	workers := flag.Int("workers", runtime.NumCPU(), "parallel workers")
 	preview := flag.Int("preview", 0, "also write the first lines' patches and crops as PNG")
 	charset := flag.String("charset", "", "file holding the vocabulary's characters (default: ocr.DefaultCharset)")
+	pages := flag.Int("pages", 0, "generate this many pages (out/pages.jsonl, out/pages/*.png) for detection, instead of lines")
 	flag.Parse()
 	if *fontDirs == "" || *texts == "" || *out == "" {
 		flag.Usage()
@@ -76,6 +78,10 @@ func main() {
 		log.Fatal(err)
 	}
 
+	if *pages > 0 {
+		writePages(fonts, corpora, runes, v, *pages, *out, *seed, *workers)
+		return
+	}
 	shards := (*n + *shardSize - 1) / *shardSize
 	jobs := make(chan int)
 	var wg sync.WaitGroup
@@ -163,4 +169,52 @@ func split(s string) []string {
 		}
 	}
 	return out
+}
+
+// writePages renders pages for detection training: page i draws from
+// seed+i.
+func writePages(fonts []*fontFile, corpora []*corpus, runes []rune, v ocr.Vocab, n int, out string, seed int64, workers int) {
+	set := newFontSet(fonts)
+	dir := filepath.Join(out, "pages")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		log.Fatal(err)
+	}
+	f, err := os.Create(filepath.Join(out, "pages.jsonl"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer f.Close()
+	enc := json.NewEncoder(f)
+	enc.SetEscapeHTML(false)
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	start := time.Now()
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			g := &generator{fonts: set, text: &texter{corpora: corpora, charset: runes, enc: v.Encoder()}, faces: faces{}, crop: ocr.DefaultCrop()}
+			for i := range jobs {
+				p := g.page(rand.New(rand.NewSource(seed + int64(i))))
+				name := fmt.Sprintf("synth-%d-%06d.png", seed, i)
+				savePNG(filepath.Join(dir, name), p.page)
+				s := ocr.PageSample{Image: filepath.Join("pages", name), Texts: p.texts, Meta: map[string]string{"source": "synth"}}
+				for _, b := range p.boxes {
+					s.Boxes = append(s.Boxes, [4]float64{b.X0, b.Y0, b.X1, b.Y1})
+				}
+				mu.Lock()
+				enc.Encode(s)
+				if (i+1)%100 == 0 {
+					log.Printf("%d pages (%.1f pages/s)", i+1, float64(i+1)/time.Since(start).Seconds())
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+	for i := range n {
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
 }
