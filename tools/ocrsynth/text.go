@@ -78,6 +78,7 @@ var (
 	streets    = []string{"rue de la République", "avenue Victor-Hugo", "boulevard Saint-Michel", "place de l'Église", "chemin des Écoliers", "allée des Tilleuls", "Main Street", "impasse du Moulin"}
 	cities     = []string{"Paris", "Lyon", "Marseille", "Toulouse", "Nantes", "Strasbourg", "Lille", "Rennes", "Dijon", "Besançon", "Saint-Étienne", "London", "Bruxelles", "Genève"}
 	months     = []string{"janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"}
+	items      = []string{"NASI LEMAK", "TEH TARIK", "MINERAL WATER 500ML", "BREAD WHITE", "CHICKEN RICE", "PAPER A4 80G", "BATTERY AA 4PCS", "PAIN AU CHOCOLAT", "BAGUETTE TRADITION", "CAFE CREME", "EAU MINERALE 1,5L", "SANDWICH JAMBON", "COCA COLA 33CL", "MILK 1L", "RICE 5KG", "SUGAR 1KG", "TISSUE BOX"}
 	labels     = []string{"Total TTC", "Montant HT", "TVA 20 %", "Référence", "Date", "Objet", "N° client", "Échéance", "Invoice", "Amount due", "Page", "Tél.", "Fax", "Siret", "IBAN", "Réf. dossier"}
 	domains    = []string{"example.fr", "mairie-dijon.fr", "gouv.fr", "entreprise.com", "laposte.net", "univ-lyon.fr"}
 )
@@ -102,6 +103,9 @@ func generated(r *rand.Rand, charset []rune) string {
 			s = fmt.Sprintf("%d %03d", n/1000, n%1000)
 		}
 		return s + "," + digits(r, 2)
+	}
+	if r.Float64() < 0.2 {
+		return receipt(r, amount)
 	}
 	switch r.Intn(14) {
 	case 0:
@@ -146,6 +150,62 @@ func generated(r *rand.Rand, charset []rune) string {
 	}
 }
 
+// receipt returns a line of a till receipt.
+func receipt(r *rand.Rand, amount func() string) string {
+	price := func() string { return fmt.Sprintf("%d.%s", r.Intn(200), digits(r, 2)) }
+	cur := pick(r, []string{"RM", "$", "€", "EUR", ""})
+	switch r.Intn(10) {
+	case 0, 1, 2:
+		return fmt.Sprintf("%s %d %s %s", pick(r, items), 1+r.Intn(5), price(), price())
+	case 3:
+		return fmt.Sprintf("%s %s %s", pick(r, []string{"TOTAL", "SUBTOTAL", "TOTAL (RM)", "NETT TOTAL", "ROUNDING", "CASH", "CHANGE", "TOTAL TTC", "TOTAL HT", "GST 6%", "TVA 20%", "DISCOUNT"}), cur, price())
+	case 4:
+		return fmt.Sprintf("%s: %s%s", pick(r, []string{"INVOICE NO", "RECEIPT #", "BILL NO", "TICKET N°", "CASHIER", "TERMINAL"}), pick(r, []string{"CS", "INV", "T", ""}), digits(r, 4+r.Intn(6)))
+	case 5:
+		return fmt.Sprintf("%02d/%02d/%d %02d:%02d:%02d", 1+r.Intn(28), 1+r.Intn(12), 2010+r.Intn(16), r.Intn(24), r.Intn(60), r.Intn(60))
+	case 6:
+		return pick(r, []string{"THANK YOU", "THANK YOU. PLEASE COME AGAIN.", "GOODS SOLD ARE NOT RETURNABLE", "*** COPY ***", "TAX INVOICE", "MERCI DE VOTRE VISITE", "E.&O.E.", "GST REG NO: "}) + strings.Repeat(digits(r, 1), r.Intn(2))
+	case 7:
+		return fmt.Sprintf("%s %s @ %s", digits(r, 13), pick(r, items), price())
+	case 8:
+		return fmt.Sprintf("%s SDN BHD (%s-%s)", strings.ToUpper(pick(r, lastNames)), digits(r, 6), string(rune('A'+r.Intn(26))))
+	default:
+		return fmt.Sprintf("QTY: %d  %s %s", 1+r.Intn(20), cur, amount())
+	}
+}
+
+// typography gives the straight quotes of a text their typographic form,
+// or the reverse: the corpora hardly hold “ ” and ‘, documents do.
+func typography(r *rand.Rand, s string) string {
+	switch x := r.Float64(); {
+	case x < 0.35:
+		rs := []rune(s)
+		open := true
+		for i, c := range rs {
+			letterBefore := i > 0 && unicode.IsLetter(rs[i-1])
+			switch c {
+			case '\'':
+				if letterBefore {
+					rs[i] = '’'
+				} else {
+					rs[i] = '‘'
+				}
+			case '"':
+				if open {
+					rs[i] = '“'
+				} else {
+					rs[i] = '”'
+				}
+				open = !open
+			}
+		}
+		return string(rs)
+	case x < 0.45:
+		return strings.NewReplacer("’", "'", "‘", "'", "“", "\"", "”", "\"").Replace(s)
+	}
+	return s
+}
+
 // texts draws the lines of a patch: the line to read, and the neighbours
 // above and below from the same source.
 type texter struct {
@@ -162,6 +222,7 @@ func (t *texter) line(r *rand.Rand) string {
 		} else {
 			s = pick(r, t.corpora).excerpt(r, targetLen(r))
 		}
+		s = typography(r, s)
 		switch x := r.Float64(); {
 		case x < 0.08:
 			s = strings.ToUpper(s)

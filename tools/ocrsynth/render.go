@@ -9,6 +9,7 @@ import (
 	"log"
 	"math"
 	"math/rand"
+	"strings"
 
 	xdraw "golang.org/x/image/draw"
 	"golang.org/x/image/font"
@@ -85,11 +86,23 @@ func (g *generator) try(r *rand.Rand) (sample, bool) {
 		tracking = float64(size) * (0.25*r.Float64() - 0.05)
 	}
 
+	// Columns: some spaces drawn wider than one, the text keeps one.
+	drawn := text
+	if r.Float64() < 0.12 {
+		var b strings.Builder
+		for _, c := range text {
+			b.WriteRune(c)
+			if c == ' ' && r.Float64() < 0.5 {
+				b.WriteString(strings.Repeat(" ", 1+r.Intn(5)))
+			}
+		}
+		drawn = b.String()
+	}
 	width := func(s string) float64 {
 		return float64(font.MeasureString(face, s).Ceil()) + tracking*float64(len([]rune(s)))
 	}
 	margin := float64(size) * (0.5 + 1.5*r.Float64())
-	textW := max(width(text), width(above), width(below))
+	textW := max(width(drawn), width(above), width(below))
 	W := int(textW + 2*margin + 2)
 	H := int(3*spacing + 2*margin)
 	if W > 6000 || W <= 0 || H <= 0 {
@@ -123,8 +136,8 @@ func (g *generator) try(r *rand.Rand) (sample, bool) {
 	if above != "" {
 		draw(page, src, above, jitter(), base-spacing)
 	}
-	draw(page, src, text, x0, base)
-	draw(mask, image.Opaque, text, x0, base)
+	draw(page, src, drawn, x0, base)
+	draw(mask, image.Opaque, drawn, x0, base)
 	if below != "" {
 		draw(page, src, below, jitter(), base+spacing)
 	}
@@ -160,6 +173,10 @@ func (g *generator) try(r *rand.Rand) (sample, bool) {
 		if box, ok = inkBox(mask); !ok {
 			return sample{}, false
 		}
+	}
+	if r.Float64() < 0.05 {
+		dotMatrix(page, max(3, size/7), paper)
+		meta["dots"] = "1"
 	}
 	degrade(page, r, paper, ink, meta)
 
@@ -373,4 +390,20 @@ func metrics(face font.Face) (m font.Metrics, ok bool) {
 		}
 	}()
 	return face.Metrics(), true
+}
+
+// dotMatrix keeps the ink only inside round dots on a k-pixel grid, as a
+// dot-matrix or worn thermal printer prints.
+func dotMatrix(g *image.Gray, k int, paper uint8) {
+	c := float64(k-1) / 2
+	rad2 := (0.42 * float64(k)) * (0.42 * float64(k))
+	for y := range g.Rect.Dy() {
+		for x := range g.Rect.Dx() {
+			dx, dy := float64(x%k)-c, float64(y%k)-c
+			if dx*dx+dy*dy > rad2 {
+				g.Pix[y*g.Stride+x] = paper
+			}
+		}
+	}
+	blur(g, 0.6)
 }
