@@ -178,7 +178,7 @@ func receipt(r *rand.Rand, amount func() string) string {
 // or the reverse: the corpora hardly hold “ ” and ‘, documents do.
 func typography(r *rand.Rand, s string) string {
 	switch x := r.Float64(); {
-	case x < 0.35:
+	case x < 0.55:
 		rs := []rune(s)
 		open := true
 		for i, c := range rs {
@@ -200,7 +200,7 @@ func typography(r *rand.Rand, s string) string {
 			}
 		}
 		return string(rs)
-	case x < 0.45:
+	case x < 0.62:
 		return strings.NewReplacer("’", "'", "‘", "'", "“", "\"", "”", "\"").Replace(s)
 	}
 	return s
