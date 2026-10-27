@@ -28,9 +28,16 @@ type LMOptions struct {
 // DefaultLM returns the default decoding options.
 func DefaultLM() LMOptions { return LMOptions{Alpha: 0.2, Beta: 1.0, Beam: 4, Top: 3, Gate: 0.9} }
 
+// LanguageModel is a character language model (indecis ocr lm).
+type LanguageModel = charlm.Model
+
+// LoadLanguageModel reads a character language model written by
+// `indecis ocr lm`.
+func LoadLanguageModel(path string) (*LanguageModel, error) { return charlm.Load(path) }
+
 // WithLanguageModel decodes uncertain lines with a character language
 // model (see LMOptions).
-func WithLanguageModel(lm *charlm.Model, o LMOptions) Option {
+func WithLanguageModel(lm *LanguageModel, o LMOptions) Option {
 	return func(opts *options) { opts.lm, opts.lmOpts = lm, o }
 }
 
