@@ -2,6 +2,7 @@ package ocr
 
 import (
 	"fmt"
+	"math/rand"
 	"strings"
 	"unicode/utf8"
 )
@@ -13,7 +14,12 @@ import (
 const DefaultCharset = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~" +
 	"àâäæçéèêëîïôöœùûüÿÀÂÄÆÇÉÈÊËÎÏÔÖŒÙÛÜŸ" +
 	"áíóúñãõåøßìòÁÍÓÚÑÃÕÅØÌÒ" +
-	"«»“”‘’„–—…•°€£¥§©®™×÷±²³¹½¼¾µ‰†·¿¡№"
+	"«»“”‘’„–—…•°€£¥§©®™×÷±²³¹½¼¾µ‰†·¿¡№" +
+	// Extended (models from v5 on): superscripts and subscripts, bullets
+	// and boxes, arrows, Greek and math signs, letters of Central Europe
+	// and Turkish.
+	"⁰⁴⁵⁶⁷⁸⁹⁺⁻⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉■□▪●○◆◇►▶✓✔✗☐☑←→↑↓⇒≤≥≠≈∞√∑∆∂ΩαβγδεθλπσφωΔΣ′″⅓⅔℃¢" +
+	"čšžřěůďťňĺľąęłńśźżćőűČŠŽŘĚŮĎŤŇĄĘŁŃŚŹŻĆŐŰğşıİĞŞ"
 
 // NewVocab builds a vocabulary from a charset, one symbol per character,
 // in the charset's order. Duplicates are an error.
@@ -113,3 +119,32 @@ var textReplacer = strings.NewReplacer(
 	" ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", "\t", " ",
 	"ﬁ", "fi", "ﬂ", "fl", "ﬀ", "ff", "ﬃ", "ffi", "ﬄ", "ffl", "­", "", "¬", "-",
 )
+
+// ExtendHead maps a recognizer's output head onto a new vocabulary: the
+// rows of the symbols both vocabularies hold are kept, the others drawn
+// small (uniform in ±0.01), so that training goes on from the old model
+// with new symbols to learn. head is [old symbols, dim], bias [old].
+func ExtendHead(head, bias []float32, dim int, old, new Vocab, seed int64) ([]float32, []float32) {
+	r := rand.New(rand.NewSource(seed))
+	idx := map[string]int{}
+	for i, c := range old.Chars {
+		idx[c] = i + 1
+	}
+	V := len(new.Chars) + 1
+	h, b := make([]float32, V*dim), make([]float32, V)
+	copy(h[:dim], head[:dim]) // blank
+	b[0] = bias[0]
+	for i, c := range new.Chars {
+		row := h[(i+1)*dim : (i+2)*dim]
+		if j, ok := idx[c]; ok {
+			copy(row, head[j*dim:(j+1)*dim])
+			b[i+1] = bias[j]
+			continue
+		}
+		for k := range row {
+			row[k] = (2*r.Float32() - 1) * 0.01
+		}
+		b[i+1] = bias[0] - 4 // new symbols start unlikely
+	}
+	return h, b
+}

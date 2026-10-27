@@ -107,6 +107,9 @@ func generated(r *rand.Rand, charset []rune) string {
 	if r.Float64() < 0.2 {
 		return receipt(r, amount)
 	}
+	if r.Float64() < 0.15 {
+		return symbols(r)
+	}
 	switch r.Intn(14) {
 	case 0:
 		return pick(r, labels) + " : " + amount() + " " + pick(r, []string{"€", "EUR", "$", "£", ""})
@@ -147,6 +150,36 @@ func generated(r *rand.Rand, charset []rune) string {
 			b = append(b, c)
 		}
 		return strings.TrimSpace(string(b))
+	}
+}
+
+// symbols returns a line with the characters running text rarely holds:
+// footnote calls, units, formulas, bullets and boxes, arrows, Greek
+// letters, names of Central Europe and Turkey.
+func symbols(r *rand.Rand) string {
+	sup := []string{"¹", "²", "³", "⁴", "⁵", "⁶", "⁷", "⁸", "⁹", "⁰"}
+	sub := []string{"₀", "₁", "₂", "₃", "₄", "₅", "₆", "₇", "₈", "₉"}
+	names := []string{"Dvořák", "Čapek", "Łukasz Wójcik", "Šimon Kovář", "Zoltán Erdős", "Mustafa Yılmaz", "Ağaoğlu", "Kraków", "Brno", "Žilina", "İstanbul", "Gdańsk", "Poznań", "Ostrava"}
+	switch r.Intn(9) {
+	case 0:
+		return fmt.Sprintf("%s %s%s, %s %s%s", pick(r, firstNames), pick(r, names), pick(r, sup), pick(r, firstNames), pick(r, lastNames), pick(r, sup))
+	case 1:
+		return fmt.Sprintf("%d m%s, %d cm%s, 10%s%s Pa", 1+r.Intn(900), pick(r, []string{"²", "³"}), 1+r.Intn(90), pick(r, []string{"²", "³"}), pick(r, []string{"⁻", ""}), pick(r, sup))
+	case 2:
+		return fmt.Sprintf("%s %s%s%s + %s%s → %s", pick(r, []string{"Le", "The", "Réaction :"}), pick(r, []string{"CO", "H", "SO", "NO", "CH"}), pick(r, sub), pick(r, []string{"", "⁻", "⁺"}), pick(r, []string{"O", "H", "N"}), pick(r, sub), pick(r, []string{"H₂O", "CO₂", "NH₃", "CH₄"}))
+	case 3:
+		return pick(r, []string{"■", "□", "▪", "●", "○", "◆", "►", "▶", "✓", "✔", "✗", "☐", "☑"}) + " " + strings.ToUpper(pick(r, labels)[:1]) + strings.ToLower(pick(r, labels))[1:]
+	case 4:
+		return fmt.Sprintf("%s %s %s %s %s", pick(r, labels), pick(r, []string{"←", "→", "↑", "↓", "⇒"}), pick(r, labels), pick(r, []string{"→", "⇒"}), pick(r, items))
+	case 5:
+		g := []string{"α", "β", "γ", "δ", "ε", "θ", "λ", "π", "σ", "φ", "ω", "Δ", "Σ", "Ω"}
+		return fmt.Sprintf("%s = %d,%d ; %s ≤ %d ; %s ≥ %s ; %s ≈ %s ; %s ≠ 0", pick(r, g), r.Intn(10), r.Intn(100), pick(r, g), r.Intn(100), pick(r, g), pick(r, g), pick(r, g), pick(r, []string{"√2", "∞", "∑x", "∂f", "∆t"}), pick(r, g))
+	case 6:
+		return fmt.Sprintf("%d %s %s %s, %s", 1+r.Intn(99), pick(r, []string{"ul.", "náměstí", "Caddesi", "utca"}), pick(r, names), digits(r, 2), pick(r, names))
+	case 7:
+		return fmt.Sprintf("%d′%d″ ; %d ℃ ; %s ⅓ ⅔ ; %d ¢", r.Intn(90), r.Intn(60), r.Intn(40), pick(r, []string{"recette", "dose", "part"}), r.Intn(100))
+	default:
+		return fmt.Sprintf("%s%s %s", pick(r, []string{"Note", "Voir", "See", "cf."}), pick(r, sup), strings.ToLower(pick(r, labels)))
 	}
 }
 

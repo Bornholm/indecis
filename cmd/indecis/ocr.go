@@ -18,6 +18,7 @@ import (
 	"github.com/bornholm/indecis/internal/linalg"
 	"github.com/bornholm/indecis/internal/linedet"
 	"github.com/bornholm/indecis/internal/linerec"
+	"github.com/bornholm/indecis/internal/safetensors"
 	"github.com/bornholm/indecis/ocr"
 )
 
@@ -230,6 +231,7 @@ func runOCRTrain(args []string) error {
 	out := fs.String("out", "", "output directory (best model on -val)")
 	init := fs.String("init", "", "start from this recognizer instead of fresh weights")
 	charset := fs.String("charset", "", "file holding the characters of a fresh model (default: French and English)")
+	extend := fs.Bool("extend", false, "with -init: extend the model's vocabulary to -charset (or the default charset), keeping the symbols it has")
 	steps := fs.Int("steps", 20000, "optimizer steps")
 	batch := fs.Int("batch", 64, "lines per step")
 	lr := fs.Float64("lr", 2e-3, "peak learning rate")
@@ -295,22 +297,42 @@ func runOCRTrain(args []string) error {
 
 	var m *linerec.Model
 	var v ocr.Vocab
+	newVocab := func() (ocr.Vocab, error) {
+		cs := ocr.DefaultCharset
+		if *charset != "" {
+			b, err := os.ReadFile(*charset)
+			if err != nil {
+				return ocr.Vocab{}, err
+			}
+			cs = strings.TrimRight(string(b), "\n")
+		}
+		return ocr.NewVocab(cs)
+	}
 	if *init != "" {
 		r, err := ocr.Load(*init)
 		if err != nil {
 			return err
 		}
 		m, v = r.Model(), r.Vocab()
-	} else {
-		cs := ocr.DefaultCharset
-		if *charset != "" {
-			b, err := os.ReadFile(*charset)
+		if *extend {
+			nv, err := newVocab()
 			if err != nil {
 				return err
 			}
-			cs = strings.TrimRight(string(b), "\n")
+			t := m.Tensors()
+			h, b := ocr.ExtendHead(t["head.weight"].Data, t["head.bias"].Data, m.Cfg.Dim, v, nv, *seed)
+			cfg := m.Cfg
+			cfg.Vocab = len(nv.Chars) + 1
+			t["head.weight"] = safetensors.Tensor{Shape: []int{cfg.Vocab, cfg.Dim, 1}, Data: h}
+			t["head.bias"] = safetensors.Tensor{Shape: []int{cfg.Vocab}, Data: b}
+			if m, err = linerec.FromTensors(cfg, t); err != nil {
+				return err
+			}
+			log.Printf("vocabulary extended from %d to %d characters", len(v.Chars), len(nv.Chars))
+			v = nv
 		}
-		if v, err = ocr.NewVocab(cs); err != nil {
+	} else {
+		if v, err = newVocab(); err != nil {
 			return err
 		}
 		if m, err = linerec.New(linerec.Base(len(v.Chars)+1), *seed); err != nil {

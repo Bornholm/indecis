@@ -89,3 +89,15 @@ func TestTrainRejectsOtherHeights(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestExtendHead(t *testing.T) {
+	old, _ := NewVocab("ab")
+	nv, _ := NewVocab("bca")
+	head := []float32{0, 0, 1, 1, 2, 2} // blank, a, b; dim 2
+	bias := []float32{9, 10, 20}
+	h, b := ExtendHead(head, bias, 2, old, nv, 1)
+	// New order: blank, b, c, a.
+	if h[2] != 2 || h[6] != 1 || b[1] != 20 || b[3] != 10 || b[0] != 9 || b[2] != 5 {
+		t.Fatalf("head %v bias %v", h, b)
+	}
+}
