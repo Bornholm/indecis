@@ -7,7 +7,7 @@ import (
 )
 
 func tiny() Config {
-	return Config{Stem: 4, StemLat: 2, FPN: 6, HeightScale: 8,
+	return Config{Stem: 4, StemLat: 2, FPN: 6, DistScale: 4,
 		Stages: []Stage{{5, 3, 1, 8}, {6, 3, 1, 8}, {7, 5, 1, 9}, {8, 5, 1, 10}}}
 }
 

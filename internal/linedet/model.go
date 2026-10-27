@@ -4,8 +4,8 @@
 // The architecture follows Indra OCR's det.onnx, read from its graph: a
 // stride-2 stem, four stages of MobileNet blocks (strides 4 to 32), an FPN
 // merged at stride 4, a shortcut from the stem, and a head giving three
-// maps at stride 2: text, picture (logits) and line height (through a
-// softplus).
+// maps at stride 2: the line cores (logits), and from each core pixel the
+// distances to its line's top and bottom (through a softplus).
 package linedet
 
 import (
@@ -35,15 +35,15 @@ type Config struct {
 	StemLat int     `json:"stem_lat"` // stem shortcut channels, before space-to-depth
 	FPN     int     `json:"fpn"`      // channels of the pyramid and the head
 	Stages  []Stage `json:"stages"`
-	// HeightScale converts the softplus of the height map to pixels of the
-	// output map.
-	HeightScale float32 `json:"height_scale"`
+	// DistScale converts the softplus of the distance maps to pixels of
+	// the output map.
+	DistScale float32 `json:"dist_scale"`
 }
 
 // Base is the configuration of Indra OCR's detector (91 k parameters).
 func Base() Config {
 	return Config{
-		Stem: 16, StemLat: 4, FPN: 24, HeightScale: 8,
+		Stem: 16, StemLat: 4, FPN: 24, DistScale: 4,
 		Stages: []Stage{{24, 3, 1, 48}, {32, 3, 2, 64}, {48, 5, 2, 96}, {64, 5, 2, 128}},
 	}
 }
@@ -208,7 +208,8 @@ func (m *Model) Dense(g *Grads) []optim.Dense {
 
 // Forward runs the detector on a page: ink [H, W] (0 = paper, 1 = ink),
 // H and W multiples of 32. It returns the output maps [H/2, W/2, 3]:
-// text and picture logits, and the raw height (see Height). With train,
+// core logits, and the raw distances to the top and the bottom of the line
+// (see Dist). With train,
 // the tape keeps what Backward needs.
 func (m *Model) Forward(t *Tape, ink []float32, H, W int, train bool) *Tensor {
 	if H%Multiple != 0 || W%Multiple != 0 {
@@ -259,10 +260,10 @@ func (m *Model) Backward(t *Tape, out *Tensor, dOut []float32, g *Grads) {
 	}
 }
 
-// Height converts a raw height value of the output maps to output pixels.
-func (m *Model) Height(raw float32) float32 {
+// Dist converts a raw distance of the output maps to output pixels.
+func (m *Model) Dist(raw float32) float32 {
 	if raw > 20 {
-		return raw * m.Cfg.HeightScale
+		return raw * m.Cfg.DistScale
 	}
-	return float32(math.Log1p(math.Exp(float64(raw)))) * m.Cfg.HeightScale
+	return float32(math.Log1p(math.Exp(float64(raw)))) * m.Cfg.DistScale
 }

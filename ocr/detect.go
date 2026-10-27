@@ -76,16 +76,25 @@ func prepare(page *image.Gray, longSide int) detInput {
 	return detInput{ink: ink, H: H, W: W, scale: scale}
 }
 
-// Detect returns the boxes of the page's lines, top to bottom.
+// Detect returns the boxes of the page's lines, top to bottom. When the
+// lines come out small (a dense page), the page is read again larger.
 func (d *Detector) Detect(page *image.Gray) []Box {
 	in := prepare(page, d.LongSide)
-	t, _ := d.tapes.Get().(*linedet.Tape)
-	if t == nil {
-		t = new(linedet.Tape)
+	boxes := d.detect(in)
+	if len(boxes) >= 8 {
+		hs := make([]float64, len(boxes))
+		for i, b := range boxes {
+			hs[i] = (b.Y1 - b.Y0) * 2 // input pixels
+		}
+		sort.Float64s(hs)
+		if med := hs[len(hs)/2]; med < adaptiveMinH {
+			long := int(min(adaptiveMaxSide, float64(d.LongSide)*adaptiveTargetH/max(med, 1))) / linedet.Multiple * linedet.Multiple
+			if long > d.LongSide {
+				in = prepare(page, long)
+				boxes = d.detect(in)
+			}
+		}
 	}
-	defer d.tapes.Put(t)
-	out := d.m.Forward(t, in.ink, in.H, in.W, false)
-	boxes := mergeFragments(d.decode(out.V, out.S.H, out.S.W))
 	// Output pixels are 2 input pixels; input pixels are 1/scale page
 	// pixels.
 	f := 2 / in.scale
@@ -101,33 +110,28 @@ func (d *Detector) Detect(page *image.Gray) []Box {
 	return boxes
 }
 
-// mergeFragments joins boxes of the same line that the core map left
-// apart (at word gaps): boxes that overlap vertically over most of the
-// smaller height and are less than a height apart.
-func mergeFragments(b []Box) []Box {
-	for merged := true; merged; {
-		merged = false
-		for i := 0; i < len(b) && !merged; i++ {
-			for j := i + 1; j < len(b); j++ {
-				hi, hj := b[i].Y1-b[i].Y0, b[j].Y1-b[j].Y0
-				h := min(hi, hj)
-				over := min(b[i].Y1, b[j].Y1) - max(b[i].Y0, b[j].Y0)
-				gap := max(b[i].X0, b[j].X0) - min(b[i].X1, b[j].X1)
-				if over > 0.6*h && gap < 0.8*h && max(hi, hj) < 1.6*h {
-					b[i] = Box{min(b[i].X0, b[j].X0), min(b[i].Y0, b[j].Y0), max(b[i].X1, b[j].X1), max(b[i].Y1, b[j].Y1)}
-					b = append(b[:j], b[j+1:]...)
-					merged = true
-					break
-				}
-			}
-		}
+// Small lines are read again at a larger scale (Indra OCR's rule): when
+// the median line is below adaptiveMinH input pixels, the page is resized
+// for adaptiveTargetH, up to adaptiveMaxSide.
+const (
+	adaptiveMinH    = 9
+	adaptiveTargetH = 12
+	adaptiveMaxSide = 2048
+)
+
+func (d *Detector) detect(in detInput) []Box {
+	t, _ := d.tapes.Get().(*linedet.Tape)
+	if t == nil {
+		t = new(linedet.Tape)
 	}
-	return b
+	defer d.tapes.Put(t)
+	out := d.m.Forward(t, in.ink, in.H, in.W, false)
+	return mergeFragments(d.decode(out.V, out.S.H, out.S.W))
 }
 
 // decode turns the output maps [H, W, 3] into line boxes in output
-// pixels: the connected cores above the threshold, grown back to the
-// predicted line height.
+// pixels: each connected core above the threshold, its top and bottom the
+// mean of its pixels' predictions, its ends grown back.
 func (d *Detector) decode(maps []float32, H, W int) []Box {
 	thr := float32(math.Log(float64(d.Threshold) / (1 - float64(d.Threshold)))) // on the logit
 	label := make([]int32, H*W)
@@ -141,16 +145,17 @@ func (d *Detector) decode(maps []float32, H, W int) []Box {
 		next++
 		label[start] = next
 		stack = append(stack[:0], start)
-		x0, y0, x1, y1 := W, H, 0, 0
-		var hsum float64
+		x0, x1 := W, 0
+		var top, bot float64
 		n := 0
 		for len(stack) > 0 {
 			p := stack[len(stack)-1]
 			stack = stack[:len(stack)-1]
 			y, x := p/W, p%W
 			x0, x1 = min(x0, x), max(x1, x+1)
-			y0, y1 = min(y0, y), max(y1, y+1)
-			hsum += float64(d.m.Height(maps[p*3+2]))
+			yc := float64(y) + 0.5
+			top += yc - float64(d.m.Dist(maps[p*3+1]))
+			bot += yc + float64(d.m.Dist(maps[p*3+2]))
 			n++
 			for _, q := range [4]int{p - 1, p + 1, p - W, p + W} {
 				if q < 0 || q >= H*W || (q == p-1 && x == 0) || (q == p+1 && x == W-1) {
@@ -162,25 +167,23 @@ func (d *Detector) decode(maps []float32, H, W int) []Box {
 				}
 			}
 		}
-		if n < 3 {
+		if n < 2 {
 			continue
 		}
-		h := max(hsum/float64(n), float64(y1-y0))
-		yc := float64(y0+y1) / 2
-		boxes = append(boxes, Box{
-			X0: float64(x0) - coreMarginX*h, Y0: yc - h/2,
-			X1: float64(x1) + coreMarginX*h, Y1: yc + h/2,
-		})
+		y0, y1 := top/float64(n), bot/float64(n)
+		lh := max(0.5, y1-y0)
+		ex := min(coreShrinkX*lh, 0.5*lh)
+		boxes = append(boxes, Box{X0: float64(x0) - ex, Y0: y0, X1: float64(x1) + ex, Y1: y1})
 	}
 	return boxes
 }
 
-// A line's core, the detector's target, is its box without coreMarginX of
-// its height on the left and right and with coreHeight of its height,
-// centered: neighbouring lines' cores never touch.
+// A line's core, the detector's target, is coreHeight of its height around
+// its middle, without coreShrinkX of its height at each end (Indra OCR's
+// geometry): neighbouring lines' cores never touch.
 const (
-	coreMarginX = 0.25
-	coreHeight  = 0.5
+	coreHeight  = 0.4
+	coreShrinkX = 0.15
 )
 
 // sortLines orders boxes top to bottom, then left to right among boxes on
@@ -261,4 +264,28 @@ func (s DetectionScore) F1() float64 {
 		return 0
 	}
 	return 2 * p * r / (p + r)
+}
+
+// mergeFragments joins boxes of the same line that the core map left
+// apart (at word gaps): boxes that overlap vertically over most of the
+// smaller height and are less than a height apart.
+func mergeFragments(b []Box) []Box {
+	for merged := true; merged; {
+		merged = false
+		for i := 0; i < len(b) && !merged; i++ {
+			for j := i + 1; j < len(b); j++ {
+				hi, hj := b[i].Y1-b[i].Y0, b[j].Y1-b[j].Y0
+				h := min(hi, hj)
+				over := min(b[i].Y1, b[j].Y1) - max(b[i].Y0, b[j].Y0)
+				gap := max(b[i].X0, b[j].X0) - min(b[i].X1, b[j].X1)
+				if over > 0.6*h && gap < 0.8*h && max(hi, hj) < 1.6*h {
+					b[i] = Box{min(b[i].X0, b[j].X0), min(b[i].Y0, b[j].Y0), max(b[i].X1, b[j].X1), max(b[i].Y1, b[j].Y1)}
+					b = append(b[:j], b[j+1:]...)
+					merged = true
+					break
+				}
+			}
+		}
+	}
+	return b
 }

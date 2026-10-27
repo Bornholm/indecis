@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"math/rand"
+	"sort"
 	"time"
 
 	"github.com/bornholm/indecis/internal/linalg"
@@ -237,77 +238,77 @@ func (c cachedPage) crop(r *rand.Rand, o DetTrainOptions) ([]float32, []Box) {
 
 // detLoss computes the detector's loss on one crop and writes its
 // gradient with respect to the output maps into d (scaled by scale):
-// binary cross-entropy of the text map on line cores (the rest of each
-// line ignored), L1 on the log of the line height on the cores. The
-// picture map has no target yet.
+// binary cross-entropy of the core map over the whole crop, and on the
+// cores L1 on the log of the distances to the line's top and bottom.
 func detLoss(m *linedet.Model, out, d []float32, H, W int, boxes []Box, scale float32) float64 {
 	linalg.ZeroUpper()
-	target := make([]int8, H*W) // 0 background, 1 core, -1 ignored
-	height := make([]float32, H*W)
-	for _, b := range boxes {
+	core := make([]bool, H*W)
+	dist := make([]float32, 2*H*W)
+	// Larger lines first: a smaller line drawn after keeps its own band.
+	order := make([]int, len(boxes))
+	for i := range order {
+		order[i] = i
+	}
+	sort.Slice(order, func(a, b int) bool {
+		return boxes[order[a]].Y1-boxes[order[a]].Y0 > boxes[order[b]].Y1-boxes[order[b]].Y0
+	})
+	for _, k := range order {
+		b := boxes[k]
 		// Crop pixels to output pixels (stride 2).
 		x0, y0, x1, y1 := b.X0/2, b.Y0/2, b.X1/2, b.Y1/2
-		h := y1 - y0
-		for y := max(0, int(math.Floor(y0))); y < min(H, int(math.Ceil(y1))); y++ {
-			for x := max(0, int(math.Floor(x0))); x < min(W, int(math.Ceil(x1))); x++ {
-				if target[y*W+x] == 0 {
-					target[y*W+x] = -1
-				}
-			}
+		lh := y1 - y0
+		if lh < 1 || x1-x0 < 1 {
+			continue
 		}
-		yc := (y0 + y1) / 2
-		cy0, cy1 := yc-coreHeight*h/2, yc+coreHeight*h/2
-		cx0, cx1 := x0+coreMarginX*h, x1-coreMarginX*h
-		if cx1 <= cx0 {
-			cx0, cx1 = (x0+x1)/2-0.5, (x0+x1)/2+0.5
-		}
-		for y := max(0, int(math.Round(cy0))); y < min(H, max(int(math.Round(cy0))+1, int(math.Round(cy1)))); y++ {
-			for x := max(0, int(math.Round(cx0))); x < min(W, int(math.Round(cx1))); x++ {
-				target[y*W+x] = 1
-				height[y*W+x] = float32(h)
+		cy, half := (y0+y1)/2, coreHeight*lh/2
+		r0 := max(0, int(math.Floor(cy-half)))
+		r1 := min(H, max(r0+1, int(math.Ceil(cy+half))))
+		sx := min(coreShrinkX*lh, 0.25*(x1-x0))
+		c0 := max(0, int(math.Floor(x0+sx)))
+		c1 := min(W, max(c0+1, int(math.Ceil(x1-sx))))
+		for y := r0; y < r1; y++ {
+			yc := float32(y) + 0.5
+			for x := c0; x < c1; x++ {
+				core[y*W+x] = true
+				dist[2*(y*W+x)] = yc - float32(y0)
+				dist[2*(y*W+x)+1] = float32(y1) - yc
 			}
 		}
 	}
 	clear(d[:H*W*3])
-	var loss float64
-	npix, ncore := 0, 0
-	for _, t := range target {
-		if t >= 0 {
-			npix++
-		}
-		if t == 1 {
+	ncore := 0
+	for _, c := range core {
+		if c {
 			ncore++
 		}
 	}
-	for i, t := range target {
-		if t < 0 {
+	npix := float64(H * W)
+	var loss float64
+	for i, c := range core {
+		z := float64(out[i*3])
+		y := 0.0
+		if c {
+			y = 1
+		}
+		loss += (math.Max(z, 0) - z*y + math.Log1p(math.Exp(-math.Abs(z)))) / npix
+		d[i*3] = float32((1/(1+math.Exp(-z))-y)/npix) * scale
+		if !c {
 			continue
 		}
-		z := float64(out[i*3])
-		y := float64(t)
-		w := 1.0
-		if t == 1 {
-			w = 2
-		}
-		// BCE with logits, stable.
-		loss += w * (math.Max(z, 0) - z*y + math.Log1p(math.Exp(-math.Abs(z)))) / float64(npix)
-		p := 1 / (1 + math.Exp(-z))
-		d[i*3] = float32(w*(p-y)/float64(npix)) * scale
-		if t == 1 {
-			raw := float64(out[i*3+2])
-			sp := math.Log1p(math.Exp(min(raw, 20))) // softplus
-			if raw > 20 {
-				sp = raw
+		for k := range 2 {
+			raw := float64(out[i*3+1+k])
+			sp := raw
+			if raw <= 20 {
+				sp = math.Log1p(math.Exp(raw))
 			}
-			pred := sp * float64(m.Cfg.HeightScale)
-			diff := math.Log(max(pred, 1e-4)) - math.Log(float64(height[i]))
-			loss += math.Abs(diff) / float64(ncore)
+			pred := sp * float64(m.Cfg.DistScale)
+			diff := math.Log(max(pred, 1e-3)) - math.Log(max(float64(dist[2*i+k]), 0.25))
+			loss += math.Abs(diff) / float64(2*ncore)
 			sign := 1.0
 			if diff < 0 {
 				sign = -1
 			}
-			sig := 1 / (1 + math.Exp(-raw))
-			d[i*3+2] = float32(sign*sig/max(sp, 1e-4)/float64(ncore)) * scale
+			d[i*3+1+k] = float32(sign/(1+math.Exp(-raw))/max(sp, 1e-3)/float64(2*ncore)) * scale
 		}
 	}
 	return loss
