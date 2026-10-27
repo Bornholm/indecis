@@ -1,10 +1,6 @@
 package linerec
 
-import (
-	"math"
-
-	"github.com/bornholm/indecis/internal/linalg"
-)
+import "github.com/bornholm/indecis/internal/linalg"
 
 // Symbol is a symbol read by greedy CTC decoding.
 type Symbol struct {
@@ -19,22 +15,18 @@ type Symbol struct {
 // lowest probability among the chosen symbols, blanks included: a line's
 // weakest step.
 func Greedy(logits []float32, L, V int) (syms []Symbol, confidence float32) {
-	linalg.ZeroUpper()
 	confidence = 1
 	prev := 0
+	row := make([]float32, V)
 	for t := range L {
-		row := logits[t*V : (t+1)*V]
+		copy(row, logits[t*V:(t+1)*V])
 		best, mx := 0, row[0]
 		for i, v := range row {
 			if v > mx {
 				best, mx = i, v
 			}
 		}
-		var sum float64
-		for _, v := range row {
-			sum += math.Exp(float64(v - mx))
-		}
-		p := float32(1 / sum)
+		p := 1 / linalg.ExpShift(row, mx)
 		confidence = min(confidence, p)
 		switch {
 		case best == 0:
