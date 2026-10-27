@@ -19,7 +19,7 @@ Measured on the Core Ultra 7 265U: onnxruntime, 1 thread, 2.0 ms for a line of 2
 
 ## Status (October 27, 2026)
 
-P1 to P7 done (see [ocr.md](ocr.md)): the v2 recognizer reads about as well as Indra's on born-digital pages given the same boxes, and still twice as badly on scanned receipts. P8 under way: the detector, its training and page reading work (F1 0.866 against Indra's 0.907); next, more training pages, real scans (CORD), and reading order. P9: docs written as the phases land.
+P1 to P7 done; P8 done but for reading order (see [ocr.md](ocr.md)): page reading, end to end, is on par with Indra on English PDFs and photographed receipts, behind on French PDFs (2.28% against 1.24%, the detector misses table cells). P9: docs written as the phases land. Next: reading order (XY-cut), more real scans, the detector's recall on tables.
 
 ## Phases
 

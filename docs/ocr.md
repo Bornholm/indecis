@@ -27,17 +27,19 @@ line.Confidence // the lowest probability among the line's steps
 
 Character error rate (CER), greedy decoding, against Indra's recognizer (v1.1.0) read by the same Go code on the same crops. Dot leaders ("......" in a table of contents) are cut to "..." in both texts before comparing (`ocr.CompareForm`): no reader counts them right.
 
-| Set | Lines | indecis v1 | indecis v2 | Indra |
-| --- | --- | --- | --- | --- |
-| Synthetic, held out | 2,000 | 2.90% | **2.58%** | 4.98% |
-| HAL born-digital PDFs, French (documents not trained on) | 3,270 | 1.01% | 0.91% | **0.60%** |
-| HAL born-digital PDFs, English | 3,543 | 0.55% | 0.51% | **0.38%** |
-| SROIE receipts, scanned (in capitals) | 2,000 | 7.11% | 6.50% | **3.04%** |
+| Set | Lines | v1 | v2 | v3 | Indra |
+| --- | --- | --- | --- | --- | --- |
+| Synthetic, held out | 2,000 | 2.90% | **2.58%** | 2.69% | 4.98% |
+| HAL born-digital PDFs, French (documents not trained on) | 3,270 | 1.01% | 0.91% | 0.75% | **0.60%** |
+| HAL born-digital PDFs, English | 3,543 | 0.55% | 0.51% | **0.36%** | 0.38% |
+| CORD receipts, photographed (validation split) | 1,413 | | 14.79% | **4.43%** | 5.86% |
+| SROIE receipts, scanned (in capitals) | 2,000 | 7.11% | 6.50% | 4.44% | **3.04%** |
 
-Indra stays ahead on real documents, and well ahead on scanned receipts, which our synthetic lines imitate poorly. The synthetic set is ours: Indra's numbers there say little.
+Real lines did most: v3 reads English PDFs as well as Indra and receipts photographed like CORD's better (it saw 200 of CORD's training receipts); French PDFs and scanned receipts are still a little behind. The synthetic set is ours: Indra's numbers there say little.
 
 - v1: Indra's architecture with a layer norm and 206 symbols (1.06 M parameters), 20,000 steps of 64 lines (1.28 M lines: 1 M synthetic lines, 25,000 lines of HAL PDFs), 80 minutes on the 14 cores of a Core Ultra 7 265U.
 - v2: v1 trained 15,000 more steps on v1's lines and 600,000 new ones (receipt lines, typographic quotes, columns of wide spaces, dot-matrix print).
+- v3: v2 trained 15,000 more steps, 70% synthetic lines, 20% lines of HAL PDFs (85,000), 10% lines of CORD receipts (3,181).
 
 int8 changes no rate by more than 0.02 point.
 
@@ -47,14 +49,15 @@ Reading a line 800 pixels wide on one core (P-core), decoding included: 6.8 ms i
 
 The detector follows Indra's `det.onnx` (same 90,568 parameters): a stride-2 stem, four stages of MobileNet blocks, an FPN merged at stride 4, and three maps at stride 2, the line cores and, from each core pixel, the distances to the line's top and bottom. Pages are read with their longer side at 1,024 pixels, again larger when the lines come out small.
 
-On the 153 pages of the HAL evaluation documents (7,305 lines), lines found at IoU 0.5, and end-to-end CER of the reference lines (a missed line counts as read empty):
+Lines found at IoU 0.5 (F1), and end-to-end CER of the reference lines (a missed line counts as read empty), on the HAL evaluation pages and CORD's validation receipts, against Indra's detector and recognizer:
 
-| Detector | F1 | French end to end, our recognizer | English end to end, our recognizer |
-| --- | --- | --- | --- |
-| indecis det v2 (557 pages of HAL PDFs, 8,000 steps) | 0.866 | 4.60% | 2.06% |
-| Indra | **0.907** | **1.42%** | **1.01%** |
+| Pages | indecis F1 | Indra F1 | indecis end to end | Indra end to end |
+| --- | --- | --- | --- | --- |
+| HAL, French (80 pages) | 0.893 | **0.908** | 2.28% | **1.24%** |
+| HAL, English (73 pages) | **0.907** | 0.906 | **1.14%** | 1.20% |
+| CORD receipts (100 photos) | **0.878** | 0.804 | **9.40%** | 10.11% |
 
-With Indra's boxes, our v2 recognizer reads about as well as Indra's (French 1.42% against 1.24%, English 1.01% against 1.20%): the detector is now the weak point. It misses the short text of table cells most, and has seen few pages.
+Detector v5: 1,789 pages of HAL PDFs, 3,000 synthetic pages (columns, lists, tables), CORD's 200 training receipts. On French pages it still misses lines Indra finds (recall 0.896 against 0.939), mostly short text in table cells.
 
 ## Measuring
 
