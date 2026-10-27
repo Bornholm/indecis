@@ -76,7 +76,8 @@ func prepare(page *image.Gray, longSide int) detInput {
 	return detInput{ink: ink, H: H, W: W, scale: scale}
 }
 
-// Detect returns the boxes of the page's lines, top to bottom. When the
+// Detect returns the boxes of the page's lines, in reading order (see
+// ReadingOrder). When the
 // lines come out small (a dense page), the page is read again larger.
 func (d *Detector) Detect(page *image.Gray) []Box {
 	in := prepare(page, d.LongSide)
@@ -106,8 +107,11 @@ func (d *Detector) Detect(page *image.Gray) []Box {
 		bx.X1 = min(float64(b.Max.X), float64(b.Min.X)+bx.X1*f)
 		bx.Y1 = min(float64(b.Max.Y), float64(b.Min.Y)+bx.Y1*f)
 	}
-	sortLines(boxes)
-	return boxes
+	ordered := make([]Box, len(boxes))
+	for i, j := range ReadingOrder(boxes) {
+		ordered[i] = boxes[j]
+	}
+	return ordered
 }
 
 // Small lines are read again at a larger scale (Indra OCR's rule): when
