@@ -363,6 +363,12 @@ func SaveDetector(dir string, m *linedet.Model) error {
 // vocabulary can write: a reference line reads as its matched box's text,
 // or as nothing when no box matches it.
 func EvaluatePages(d *Detector, r *Recognizer, pages []PageSample, minIoU float64) (ErrorRate, error) {
+	return EvaluatePagesWith(func(g *image.Gray, _ int) []Box { return d.Detect(g) }, r, pages, minIoU)
+}
+
+// EvaluatePagesWith is EvaluatePages with the boxes of page i given by
+// detect (another detector's, for a comparison).
+func EvaluatePagesWith(detect func(page *image.Gray, i int) []Box, r *Recognizer, pages []PageSample, minIoU float64) (ErrorRate, error) {
 	enc := r.Vocab().Encoder()
 	rates := make([]ErrorRate, len(pages))
 	errs := make([]error, len(pages))
@@ -377,7 +383,7 @@ func EvaluatePages(d *Detector, r *Recognizer, pages []PageSample, minIoU float6
 			for j, b := range pages[i].Boxes {
 				ref[j] = Box{b[0], b[1], b[2], b[3]}
 			}
-			pred := d.Detect(g)
+			pred := detect(g, i)
 			for j, k := range Match(ref, pred, minIoU) {
 				want := NormalizeText(pages[i].Texts[j])
 				if _, _, ok := enc.Encode(want); !ok {

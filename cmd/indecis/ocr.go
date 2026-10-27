@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"image"
 	"log"
 	"os"
 	"path/filepath"
@@ -423,21 +424,58 @@ func runOCREvalDet(args []string) error {
 	pages := fs.String("pages", "", "labeled pages (JSONL)")
 	iou := fs.Float64("iou", 0.5, "minimum IoU of a match")
 	int8 := fs.Bool("int8", true, "int8 computation if the processor allows it")
+	boxesFile := fs.String("boxes", "", "instead of -det, the boxes of another detector: JSONL of {image, boxes}, image as in -pages")
 	fs.Parse(args)
-	if err := required(fs, "det", "pages"); err != nil {
-		return err
-	}
-	d, err := ocr.LoadDetector(*det)
-	if err != nil {
+	if err := required(fs, "pages"); err != nil {
 		return err
 	}
 	ps, err := readPages(*pages)
 	if err != nil {
 		return err
 	}
-	s, err := ocr.EvaluateDetector(d, ps, *iou)
-	if err != nil {
-		return err
+	var detect func(*image.Gray, int) []ocr.Box
+	switch {
+	case *boxesFile != "":
+		given, err := ocr.ReadPageSamples(*boxesFile)
+		if err != nil {
+			return err
+		}
+		byImage := map[string][]ocr.Box{}
+		for _, g := range given {
+			var bs []ocr.Box
+			for _, b := range g.Boxes {
+				bs = append(bs, ocr.Box{X0: b[0], Y0: b[1], X1: b[2], Y1: b[3]})
+			}
+			byImage[filepath.Base(g.Image)] = bs
+		}
+		detect = func(_ *image.Gray, i int) []ocr.Box { return byImage[filepath.Base(ps[i].Image)] }
+	case *det != "":
+		d, err := ocr.LoadDetector(*det)
+		if err != nil {
+			return err
+		}
+		detect = func(g *image.Gray, _ int) []ocr.Box { return d.Detect(g) }
+	default:
+		return fmt.Errorf("-det or -boxes is required")
+	}
+	var s ocr.DetectionScore
+	for i, p := range ps {
+		g, err := ocr.ReadImage(p.Image)
+		if err != nil {
+			return err
+		}
+		ref := make([]ocr.Box, len(p.Boxes))
+		for j, b := range p.Boxes {
+			ref[j] = ocr.Box{X0: b[0], Y0: b[1], X1: b[2], Y1: b[3]}
+		}
+		pred := detect(g, i)
+		s.Ref += len(ref)
+		s.Pred += len(pred)
+		for _, k := range ocr.Match(ref, pred, *iou) {
+			if k >= 0 {
+				s.Matched++
+			}
+		}
 	}
 	fmt.Printf("detection  pages %d  lines %d  found %d  P %.3f  R %.3f  F1 %.3f\n", len(ps), s.Ref, s.Pred, s.Precision(), s.Recall(), s.F1())
 	if *model == "" {
@@ -447,7 +485,7 @@ func runOCREvalDet(args []string) error {
 	if err != nil {
 		return err
 	}
-	e, err := ocr.EvaluatePages(d, r, ps, *iou)
+	e, err := ocr.EvaluatePagesWith(detect, r, ps, *iou)
 	if err != nil {
 		return err
 	}
