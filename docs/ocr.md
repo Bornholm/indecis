@@ -93,11 +93,14 @@ Share of the text tests passed, on the 2,777 pages read (160 pages could not be 
 
 | Tests | Tests | indecis | Indra | Tesseract | Surya OCR 2 |
 | --- | --- | --- | --- | --- | --- |
-| Latin script, printed, no math, image pages | 1,322 | 53.1 | 63.5 | 19.4 | 79.0 |
-| Latin script, printed, no math, all pages | 2,732 | 55.9 | 68.1 | 33.4 | 78.7 |
-| All text tests | 8,007 | 23.8 | 59.2 | 17.8 | 80.5 |
+| Latin script, printed, no math, image pages | 1,322 | 56.8 | 63.5 | 19.4 | 79.0 |
+| Latin script, printed, no math, all pages | 2,732 | 58.9 | 68.1 | 33.4 | 78.7 |
+| Pages turned by a quarter, a half or three quarters | 183 | 76.5 | 79.2 | | |
+| All text tests | 8,007 | 27.2 | 59.2 | 17.8 | 80.5 |
 
-indecis passes far more than Tesseract and stays behind Indra. The whole benchmark is out of its reach in places: math (3,271 tests, written as LaTeX), handwriting, rotated pages, scripts other than Latin. On Latin printed pages, a quarter of its failures are a sentence one or two characters off (a test allows one), half are text partly found: lines cut or joined differently from the reference, form cells joined across a row.
+With recognizer v7, detector v6 and the language model version 3. indecis passes far more than Tesseract and stays behind Indra. The whole benchmark is out of its reach in places: math (3,271 tests, written as LaTeX), handwriting, scripts other than Latin, Greek and Cyrillic. On Latin printed pages, most failures are text partly found, lines cut short or broken into pieces by the detector on faint photocopies and typewritten forms; a quarter are a sentence one or two characters off.
+
+`indecis ocr page` turns a page scanned sideways or upside down upright first (`ocr.Orient`): it reads the page's twelve widest lines as it is and, unless they read surely, turned by each quarter, and keeps the way whose characters the recognizer is surest of. An upright page costs the reading of those lines; a turned one, three more detections.
 
 ## Measuring
 
