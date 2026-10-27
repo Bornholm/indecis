@@ -121,6 +121,9 @@ func Train(ctx context.Context, m *linerec.Model, v Vocab, src LineSource, o Tra
 			if err != nil {
 				return res, err
 			}
+			if l.Rows != m.Cfg.Rows() {
+				return res, fmt.Errorf("ocr: a line %d pixels high, the model reads %d (shards cut for another model?)", l.Rows, m.Cfg.Rows())
+			}
 			ids, bad, ok := enc.Encode(l.Text)
 			_, steps := m.Cfg.Steps(l.W)
 			if !ok || len(ids) == 0 || steps < minSteps(ids) {
@@ -128,7 +131,10 @@ func Train(ctx context.Context, m *linerec.Model, v Vocab, src LineSource, o Tra
 				if !ok {
 					unknown = bad
 				}
-				if skips++; skips > maxSkips && len(batch) == 0 {
+				if skips++; skips > maxSkips {
+					if len(batch) > 0 {
+						break // train on what was found
+					}
 					if unknown != 0 {
 						return res, fmt.Errorf("ocr: %d lines in a row unusable, for instance with %q outside the vocabulary", skips, unknown)
 					}

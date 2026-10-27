@@ -76,3 +76,16 @@ func TestMixSourceWeights(t *testing.T) {
 		}
 	}
 }
+
+// TestTrainRejectsOtherHeights: lines cut for another model stop the run.
+func TestTrainRejectsOtherHeights(t *testing.T) {
+	v, _ := NewVocab(DefaultCharset)
+	cfg := linerec.Base(len(v.Chars) + 1)
+	cfg.Dim, cfg.Expand, cfg.SE, cfg.Blocks, cfg.CtxChannels, cfg.CtxDim = 16, 16, 4, 1, 4, 8
+	m, _ := linerec.New(cfg, 1)
+	l := ShardLine{Text: "ab", W: 40, Rows: 64, Ink: make([]float32, 64*40)}
+	_, err := Train(context.Background(), m, v, NewMemorySource([]ShardLine{l}, 1), TrainOptions{Steps: 1, Batch: 1, LR: 1e-3})
+	if err == nil || !strings.Contains(err.Error(), "pixels high") {
+		t.Fatalf("err = %v", err)
+	}
+}

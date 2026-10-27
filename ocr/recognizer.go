@@ -15,11 +15,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"image"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 
+	"github.com/bornholm/indecis/internal/charlm"
 	"github.com/bornholm/indecis/internal/linalg"
 	"github.com/bornholm/indecis/internal/linerec"
 )
@@ -29,6 +31,8 @@ type Recognizer struct {
 	m     *linerec.Model
 	chars []string // symbol i+1; 0 is the CTC blank
 	crop  CropOptions
+	lm    *charlm.Model // nil: greedy decoding only
+	lmOpt LMOptions
 
 	states sync.Pool // *linerec.State
 }
@@ -42,7 +46,11 @@ type Vocab struct {
 // Option configures a recognizer.
 type Option func(*options)
 
-type options struct{ int8 bool }
+type options struct {
+	int8   bool
+	lm     *charlm.Model
+	lmOpts LMOptions
+}
 
 // WithInt8 computes the pointwise convolutions and the head in int8 when
 // the processor has the int8 kernel (AVX-VNNI).
@@ -83,7 +91,7 @@ func New(m *linerec.Model, v Vocab, opts ...Option) (*Recognizer, error) {
 	} else {
 		m.Prepare()
 	}
-	return &Recognizer{m: m, chars: v.Chars, crop: ModelCrop(m)}, nil
+	return &Recognizer{m: m, chars: v.Chars, crop: ModelCrop(m), lm: o.lm, lmOpt: o.lmOpts}, nil
 }
 
 // Model returns the line model. Training it (Train) drops its packed
@@ -142,7 +150,19 @@ func (r *Recognizer) ReadCrop(c Crop) Line {
 	}
 	defer r.states.Put(s)
 	r.m.Forward(s, c.Ink, c.W)
-	syms, conf := linerec.Greedy(s.Logits, s.L, r.m.Cfg.Vocab)
+	V := r.m.Cfg.Vocab
+	syms, conf := linerec.Greedy(s.Logits, s.L, V)
+	if r.lm != nil && conf < r.lmOpt.Gate {
+		syms = beamDecode(s.Logits, s.L, V, r.chars, r.lm, r.lmOpt)
+		// A symbol's probability: its highest over its steps.
+		for i := range syms {
+			sy := &syms[i]
+			for t := sy.Step; t < min(s.L, sy.Step+sy.Steps); t++ {
+				row := s.Logits[t*V : (t+1)*V]
+				sy.P = max(sy.P, softmaxAt(row, sy.ID))
+			}
+		}
+	}
 	line := Line{Confidence: conf, Chars: make([]Char, len(syms))}
 	var sb strings.Builder
 	S := float64(r.m.Cfg.Stride)
@@ -158,4 +178,17 @@ func (r *Recognizer) ReadCrop(c Crop) Line {
 	}
 	line.Text = sb.String()
 	return line
+}
+
+// softmaxAt is the softmax probability of row[i].
+func softmaxAt(row []float32, i int) float32 {
+	mx := row[0]
+	for _, v := range row {
+		mx = max(mx, v)
+	}
+	var sum float64
+	for _, v := range row {
+		sum += math.Exp(float64(v - mx))
+	}
+	return float32(math.Exp(float64(row[i]-mx)) / sum)
 }

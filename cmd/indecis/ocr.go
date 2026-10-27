@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"flag"
@@ -13,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/bornholm/indecis/internal/charlm"
 	"github.com/bornholm/indecis/internal/linalg"
 	"github.com/bornholm/indecis/internal/linedet"
 	"github.com/bornholm/indecis/internal/linerec"
@@ -21,7 +23,7 @@ import (
 
 func runOCR(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: indecis ocr read|page|eval|train|shard|train-det|eval-det [options] (indecis ocr <command> -h)")
+		return fmt.Errorf("usage: indecis ocr read|page|eval|train|shard|train-det|eval-det|lm [options] (indecis ocr <command> -h)")
 	}
 	switch args[0] {
 	case "read":
@@ -38,15 +40,17 @@ func runOCR(args []string) error {
 		return runOCRTrainDet(args[1:])
 	case "eval-det":
 		return runOCREvalDet(args[1:])
+	case "lm":
+		return runOCRLM(args[1:])
 	}
-	return fmt.Errorf("unknown ocr command %q (read, page, eval, train, shard, train-det, eval-det)", args[0])
+	return fmt.Errorf("unknown ocr command %q (read, page, eval, train, shard, train-det, eval-det, lm)", args[0])
 }
 
 func runOCRRead(args []string) error {
 	fs := flag.NewFlagSet("ocr read", flag.ExitOnError)
 	model := fs.String("model", "", "recognizer (config.json, model.safetensors, vocab.json)")
 	boxFlag := fs.String("box", "", "line box x0,y0,x1,y1 in pixels (default: the image is one line)")
-	int8 := fs.Bool("int8", true, "int8 computation if the processor allows it")
+	ro := recognizerFlags(fs)
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: indecis ocr read -model dir [-box x0,y0,x1,y1] image...")
 		fs.PrintDefaults()
@@ -68,7 +72,7 @@ func runOCRRead(args []string) error {
 			return fmt.Errorf("-box needs 4 values")
 		}
 	}
-	r, err := ocr.Load(*model, ocrOptions(*int8)...)
+	r, err := ocr.Load(*model, ro.options()...)
 	if err != nil {
 		return err
 	}
@@ -92,18 +96,19 @@ func runOCREval(args []string) error {
 	by := fs.String("by", "", "also measure by value of this meta field")
 	errorsOut := fs.String("errors", "", "write the misread lines here (JSONL)")
 	fold := fs.Bool("fold-case", false, "compare in upper case (references transcribed in capitals, as SROIE's)")
-	int8 := fs.Bool("int8", true, "int8 computation if the processor allows it")
+	ro := recognizerFlags(fs)
 	fs.Parse(args)
 	if err := required(fs, "model", "data"); err != nil {
 		return err
 	}
-	r, err := ocr.Load(*model, ocrOptions(*int8)...)
+	r, err := ocr.Load(*model, ro.options()...)
 	if err != nil {
 		return err
 	}
 	type item struct {
 		image, text string
 		box         []float64
+		line        int // index in a shard (no image, no box)
 		meta        map[string]string
 		got         string
 	}
@@ -118,7 +123,7 @@ func runOCREval(args []string) error {
 		linalg.Parallel(len(lines), 1, func(lo, hi int) {
 			for i := lo; i < hi; i++ {
 				l := lines[i]
-				items[i] = item{text: l.Text, meta: l.Meta, got: r.ReadCrop(ocr.Crop{Ink: l.Ink, W: l.W}).Text}
+				items[i] = item{image: *data, line: i, text: l.Text, meta: l.Meta, got: r.ReadCrop(ocr.Crop{Ink: l.Ink, W: l.W}).Text}
 			}
 		})
 	} else {
@@ -179,7 +184,13 @@ func runOCREval(args []string) error {
 			groups[k].Merge(e)
 		}
 		if ocr.CompareForm(got) != ocr.CompareForm(s.text) {
-			wrong = append(wrong, map[string]any{"image": s.image, "box": s.box, "want": s.text, "got": got})
+			w := map[string]any{"want": s.text, "got": got}
+			if s.box != nil {
+				w["image"], w["box"] = s.image, s.box
+			} else {
+				w["shard"], w["line"] = s.image, s.line
+			}
+			wrong = append(wrong, w)
 		}
 	}
 	printRate("all", all)
@@ -366,11 +377,83 @@ func runOCRShard(args []string) error {
 	return w.Close()
 }
 
-func ocrOptions(int8 bool) []ocr.Option {
-	if int8 {
-		return []ocr.Option{ocr.WithInt8()}
+// recognizerOpts are the reading flags shared by the ocr commands.
+type recognizerOpts struct {
+	int8        *bool
+	lm          *string
+	alpha, beta *float64
+	gate        *float64
+	beam        *int
+}
+
+func recognizerFlags(fs *flag.FlagSet) *recognizerOpts {
+	d := ocr.DefaultLM()
+	return &recognizerOpts{
+		int8:  fs.Bool("int8", true, "int8 computation if the processor allows it"),
+		lm:    fs.String("lm", "", "character language model (indecis ocr lm) to decode uncertain lines"),
+		alpha: fs.Float64("lm-alpha", d.Alpha, "weight of the language model"),
+		beta:  fs.Float64("lm-beta", d.Beta, "bonus per character"),
+		gate:  fs.Float64("lm-gate", float64(d.Gate), "lines read at least this surely skip the language model"),
+		beam:  fs.Int("lm-beam", d.Beam, "prefixes kept per step"),
 	}
-	return nil
+}
+
+// options returns the recognizer options; it exits on an unreadable model.
+func (o *recognizerOpts) options() []ocr.Option {
+	var opts []ocr.Option
+	if *o.int8 {
+		opts = append(opts, ocr.WithInt8())
+	}
+	if *o.lm != "" {
+		lm, err := charlm.Load(expandHome(*o.lm))
+		if err != nil {
+			log.Fatal(err)
+		}
+		lo := ocr.DefaultLM()
+		lo.Alpha, lo.Beta, lo.Gate, lo.Beam = *o.alpha, *o.beta, float32(*o.gate), *o.beam
+		opts = append(opts, ocr.WithLanguageModel(lm, lo))
+	}
+	return opts
+}
+
+func runOCRLM(args []string) error {
+	fs := flag.NewFlagSet("ocr lm", flag.ExitOnError)
+	text := fs.String("text", "", "text files, one paragraph per line (comma-separated patterns)")
+	out := fs.String("out", "", "model file")
+	order := fs.Int("order", 6, "longest n-gram, in characters")
+	minCount := fs.Uint("min", 2, "drop the n-grams seen fewer times")
+	maxBytes := fs.Int64("max-bytes", 40<<20, "text read per file")
+	fs.Parse(args)
+	if err := required(fs, "text", "out"); err != nil {
+		return err
+	}
+	b := charlm.NewBuilder(*order)
+	for _, g := range strings.Split(*text, ",") {
+		files, err := filepath.Glob(expandHome(strings.TrimSpace(g)))
+		if err != nil {
+			return err
+		}
+		for _, f := range files {
+			fh, err := os.Open(f)
+			if err != nil {
+				return err
+			}
+			sc := bufio.NewScanner(fh)
+			sc.Buffer(make([]byte, 1<<20), 1<<24)
+			var n int64
+			for sc.Scan() && n < *maxBytes {
+				t := ocr.NormalizeText(sc.Text())
+				n += int64(len(t))
+				b.Add(t)
+			}
+			fh.Close()
+			log.Printf("%s: %d MB", f, n>>20)
+		}
+	}
+	m := b.Build(uint32(*minCount))
+	ng, ctx := m.Size()
+	log.Printf("%d n-grams, %d contexts", ng, ctx)
+	return m.Save(*out)
 }
 
 func readPages(patterns string) ([]ocr.PageSample, error) {
@@ -399,7 +482,7 @@ func runOCRPage(args []string) error {
 	fs := flag.NewFlagSet("ocr page", flag.ExitOnError)
 	det := fs.String("det", "", "line detector")
 	model := fs.String("model", "", "recognizer")
-	int8 := fs.Bool("int8", true, "int8 computation if the processor allows it")
+	ro := recognizerFlags(fs)
 	fs.Parse(args)
 	if err := required(fs, "det", "model"); err != nil {
 		return err
@@ -408,7 +491,7 @@ func runOCRPage(args []string) error {
 	if err != nil {
 		return err
 	}
-	r, err := ocr.Load(*model, ocrOptions(*int8)...)
+	r, err := ocr.Load(*model, ro.options()...)
 	if err != nil {
 		return err
 	}
@@ -490,7 +573,7 @@ func runOCREvalDet(args []string) error {
 	model := fs.String("model", "", "recognizer: also measure the end-to-end CER of the reference lines")
 	pages := fs.String("pages", "", "labeled pages (JSONL)")
 	iou := fs.Float64("iou", 0.5, "minimum IoU of a match")
-	int8 := fs.Bool("int8", true, "int8 computation if the processor allows it")
+	ro := recognizerFlags(fs)
 	boxesFile := fs.String("boxes", "", "instead of -det, the boxes of another detector: JSONL of {image, boxes}, image as in -pages")
 	fs.Parse(args)
 	if err := required(fs, "pages"); err != nil {
@@ -566,7 +649,7 @@ func runOCREvalDet(args []string) error {
 	if *model == "" {
 		return nil
 	}
-	r, err := ocr.Load(*model, ocrOptions(*int8)...)
+	r, err := ocr.Load(*model, ro.options()...)
 	if err != nil {
 		return err
 	}
