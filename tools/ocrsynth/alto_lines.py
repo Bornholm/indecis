@@ -139,7 +139,11 @@ def main():
         if img is None:
             missing += 1
             continue
-        gray = np.asarray(Image.open(img).convert("L"))
+        try:
+            gray = np.asarray(Image.open(img).convert("L"))
+        except (Image.DecompressionBombError, OSError):
+            missing += 1  # a page too large to decode safely, or unreadable
+            continue
         raw = []
         for tl in root.iter():
             if local(tl.tag) != "TextLine":
@@ -170,7 +174,7 @@ def main():
         if boxes:
             pages_f.write(json.dumps({"image": img, "boxes": boxes, "texts": texts, "meta": {"source": source}}, ensure_ascii=False) + "\n")
             n_pages += 1
-    print(f"{source}: {n_pages} pages, {n_lines} lines, {missing} pages without image")
+    print(f"{source}: {n_pages} pages, {n_lines} lines, {missing} pages without a readable image")
 
 
 if __name__ == "__main__":
