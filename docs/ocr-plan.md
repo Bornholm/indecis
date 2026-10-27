@@ -19,7 +19,7 @@ Measured on the Core Ultra 7 265U: onnxruntime, 1 thread, 2.0 ms for a line of 2
 
 ## Status (October 27, 2026)
 
-P1 to P6 done, P7 under way: v1 trained and measured against Indra (see [ocr.md](ocr.md)), v2 (receipts, typographic quotes, wide spaces, dot-matrix print) training. P8 and P9 to do.
+P1 to P7 done (see [ocr.md](ocr.md)): the v2 recognizer reads about as well as Indra's on born-digital pages given the same boxes, and still twice as badly on scanned receipts. P8 under way: the detector, its training and page reading work (F1 0.866 against Indra's 0.907); next, more training pages, real scans (CORD), and reading order. P9: docs written as the phases land.
 
 ## Phases
 

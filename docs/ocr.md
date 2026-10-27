@@ -1,14 +1,15 @@
 # Reading text lines (OCR)
 
-indecis reads printed text lines from images with a small recognizer (1 M parameters) that it trains and runs in Go, on CPU. A line is given by its box on the page; finding the lines of a page is not done yet (see [ocr-plan.md](ocr-plan.md), P8).
+indecis reads printed text from images with two small models that it trains and runs in Go, on CPU: a line detector (91 k parameters) finds the lines of a page, a recognizer (1 M parameters) reads each line.
 
 The architecture is that of [Indra OCR](https://github.com/datalab-to/indra)'s recognizer, read from its ONNX graph: the line resized to 32 pixels high in a window of three line heights, one step every 4 pixels, a context branch over the window's rows, ten depthwise blocks, a CTC head. indecis trains its own weights: Indra's are under a license that forbids competing with Datalab's API, and are only used locally, as a reference.
 
 ## Reading
 
 ```bash
-indecis ocr read -model dir line.png                       # an image holding one line
-indecis ocr read -model dir -box 120,340,980,372 page.png  # a line of a page
+indecis ocr page -det det -model rec page.png               # a whole page: its lines, top to bottom
+indecis ocr read -model rec line.png                        # an image holding one line
+indecis ocr read -model rec -box 120,340,980,372 page.png   # a line of a page
 ```
 
 ```go
@@ -20,7 +21,7 @@ line.Chars      // each character with its x span on the page
 line.Confidence // the lowest probability among the line's steps
 ```
 
-`ReadLines` reads the lines of a page in parallel. The characters' positions on the page let a redaction hide a word read in an image.
+`ReadLines` reads the lines of a page in parallel; `ocr.ReadPage(det, rec, page)` finds them first. The characters' positions on the page let a redaction hide a word read in an image.
 
 ## In numbers
 
@@ -41,6 +42,19 @@ Indra stays ahead on real documents, and well ahead on scanned receipts, which o
 int8 changes no rate by more than 0.02 point.
 
 Reading a line 800 pixels wide on one core (P-core), decoding included: 6.8 ms in float32, **4.6 ms in int8**. Indra's recognizer (1,698 symbols) takes 8.2 ms in float32 and 5.4 ms in int8 in Go, 5.4 ms in onnxruntime (float32, one thread).
+
+### Pages
+
+The detector follows Indra's `det.onnx` (same 90,568 parameters): a stride-2 stem, four stages of MobileNet blocks, an FPN merged at stride 4, and three maps at stride 2, the line cores and, from each core pixel, the distances to the line's top and bottom. Pages are read with their longer side at 1,024 pixels, again larger when the lines come out small.
+
+On the 153 pages of the HAL evaluation documents (7,305 lines), lines found at IoU 0.5, and end-to-end CER of the reference lines (a missed line counts as read empty):
+
+| Detector | F1 | French end to end, our recognizer | English end to end, our recognizer |
+| --- | --- | --- | --- |
+| indecis det v2 (557 pages of HAL PDFs, 8,000 steps) | 0.866 | 4.60% | 2.06% |
+| Indra | **0.907** | **1.42%** | **1.01%** |
+
+With Indra's boxes, our v2 recognizer reads about as well as Indra's (French 1.42% against 1.24%, English 1.01% against 1.20%): the detector is now the weak point. It misses the short text of table cells most, and has seen few pages.
 
 ## Measuring
 
