@@ -70,14 +70,46 @@ func (e *Encoder) Encode(text string) ([]int, rune, bool) {
 }
 
 // NormalizeText puts a reference text in the form the recognizer reads:
-// spaces of all widths become one space, ligatures their letters, the ends
-// trimmed. CTC cannot read two spaces in a row anyway.
+// letters precomposed (a base letter followed by a combining accent, as
+// some transcriptions write them, becomes one letter), spaces of all widths
+// one space, ligatures their letters, the "¬" some transcriptions write
+// for a printed end-of-line hyphen a hyphen, the ends trimmed. CTC cannot
+// read two spaces in a row anyway.
 func NormalizeText(s string) string {
-	s = textReplacer.Replace(s)
+	s = textReplacer.Replace(Compose(s))
 	return strings.Join(strings.Fields(s), " ")
+}
+
+// Compose precomposes Latin letters followed by combining marks (the
+// canonical compositions of composeTable, applied repeatedly: "e" + U+0302
+// + U+0301 gives "ế").
+func Compose(s string) string {
+	if !hasCombining(s) {
+		return s
+	}
+	out := make([]rune, 0, len(s))
+	for _, r := range s {
+		if n := len(out); n > 0 {
+			if c, ok := composeTable[[2]rune{out[n-1], r}]; ok {
+				out[n-1] = c
+				continue
+			}
+		}
+		out = append(out, r)
+	}
+	return string(out)
+}
+
+func hasCombining(s string) bool {
+	for _, r := range s {
+		if r >= 0x300 && r <= 0x36F {
+			return true
+		}
+	}
+	return false
 }
 
 var textReplacer = strings.NewReplacer(
 	" ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", "\t", " ",
-	"ﬁ", "fi", "ﬂ", "fl", "ﬀ", "ff", "ﬃ", "ffi", "ﬄ", "ffl", "­", "",
+	"ﬁ", "fi", "ﬂ", "fl", "ﬀ", "ff", "ﬃ", "ffi", "ﬄ", "ffl", "­", "", "¬", "-",
 )

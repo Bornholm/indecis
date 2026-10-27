@@ -124,7 +124,7 @@ func TestVocab(t *testing.T) {
 	if _, r, ok := e.Encode("日本"); ok || r != '日' {
 		t.Fatalf("unknown character not reported")
 	}
-	if got := NormalizeText("  la ﬁn !  "); got != "la fin !" {
+	if got := NormalizeText("  la\u00a0ﬁn\u202f!  ne\u0301ces¬  "); got != "la fin ! néces-" {
 		t.Fatalf("NormalizeText: %q", got)
 	}
 	if _, err := NewVocab("aba"); err == nil {
