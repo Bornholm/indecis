@@ -4,7 +4,9 @@ import (
 	"image"
 	"math"
 	"sort"
+	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/bornholm/indecis/internal/linedet"
 )
@@ -210,10 +212,32 @@ func sortLines(b []Box) {
 	}
 }
 
-// ReadPage finds the lines of a page and reads them.
+// ReadPage finds the lines of a page and reads them (see Clean).
 func ReadPage(d *Detector, r *Recognizer, page *image.Gray) ([]Box, []Line) {
 	boxes := d.Detect(page)
-	return boxes, r.ReadLines(page, boxes)
+	return Clean(boxes, r.ReadLines(page, boxes))
+}
+
+// Clean drops the lines read as nothing (blank, or one or two characters
+// read unsurely: the detector's mistakes on photographs' textures, on
+// blurred or stained areas) and puts the others back in reading order,
+// which the dropped ones may have upset.
+func Clean(boxes []Box, lines []Line) ([]Box, []Line) {
+	var kb []Box
+	var kl []Line
+	for i, l := range lines {
+		t := strings.TrimSpace(l.Text)
+		if t == "" || (utf8.RuneCountInString(t) <= 2 && l.Confidence < 0.5) {
+			continue
+		}
+		kb, kl = append(kb, boxes[i]), append(kl, l)
+	}
+	ob := make([]Box, len(kb))
+	ol := make([]Line, len(kl))
+	for i, j := range ReadingOrder(kb) {
+		ob[i], ol[i] = kb[j], kl[j]
+	}
+	return ob, ol
 }
 
 // IoU is the intersection over union of two boxes.

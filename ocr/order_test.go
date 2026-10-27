@@ -1,6 +1,9 @@
 package ocr
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestReadingOrder(t *testing.T) {
 	line := func(x0, y float64, w float64) Box { return Box{X0: x0, Y0: y, X1: x0 + w, Y1: y + 10} }
@@ -63,5 +66,24 @@ func TestReadingOrderTable(t *testing.T) {
 		if j != i {
 			t.Fatalf("order %v", got)
 		}
+	}
+}
+
+func TestClean(t *testing.T) {
+	line := func(x0, y float64, w float64) Box { return Box{X0: x0, Y0: y, X1: x0 + w, Y1: y + 10} }
+	// A receipt's rows, and specks of texture read as nothing between the
+	// labels and the amounts: once they go, the rows read across again.
+	boxes := []Box{line(0, 0, 70), line(300, 0, 40), line(0, 20, 30), line(300, 20, 40), line(0, 40, 40), line(300, 40, 40),
+		line(150, 5, 8), line(150, 25, 8), line(150, 45, 8)}
+	lines := []Line{{Text: "Kopi", Confidence: 0.9}, {Text: "23.000", Confidence: 0.9}, {Text: "Total", Confidence: 0.9},
+		{Text: "23.000", Confidence: 0.9}, {Text: "Tunai", Confidence: 0.9}, {Text: "50.000", Confidence: 0.9},
+		{Text: "", Confidence: 0.4}, {Text: "R", Confidence: 0.2}, {Text: " ", Confidence: 0.3}}
+	_, got := Clean(boxes, lines)
+	var texts []string
+	for _, l := range got {
+		texts = append(texts, l.Text)
+	}
+	if want := "Kopi 23.000 Total 23.000 Tunai 50.000"; strings.Join(texts, " ") != want {
+		t.Fatalf("%q, want %q", strings.Join(texts, " "), want)
 	}
 }
