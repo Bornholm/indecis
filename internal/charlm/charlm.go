@@ -104,9 +104,9 @@ func Fold(r rune) rune {
 		return '"'
 	case '-', '‐', '–', '—', '−':
 		return '-'
-	case '•', '·', '*', '◦', '▪':
+	case '•', '·', '*', '◦', '▪', '■', '□', '●', '○', '◆', '◇', '►', '▶', '✓', '✔', '✗', '☐', '☑':
 		return '•'
-	case '²', '³', '¹', '⁰', '⁴', '⁵', '⁶', '⁷', '⁸', '⁹':
+	case '²', '³', '¹', '⁰', '⁴', '⁵', '⁶', '⁷', '⁸', '⁹', '₀', '₁', '₂', '₃', '₄', '₅', '₆', '₇', '₈', '₉':
 		return '0'
 	}
 	if r >= '0' && r <= '9' {
@@ -243,7 +243,7 @@ func (m *Model) prob(g []rune) float64 {
 // LogProb is log P(c | context).
 func (m *Model) LogProb(context []rune, c rune) float64 { return math.Log(m.Prob(context, c)) }
 
-const magic = "CLM2" // CLM1 had no folding
+const magic = "CLM3" // CLM1 had no folding, CLM2 fewer bullets and no subscripts
 
 // Save writes the model.
 func (m *Model) Save(path string) error {
