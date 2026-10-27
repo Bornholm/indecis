@@ -183,8 +183,7 @@ func printRate(name string, e ocr.ErrorRate) {
 func runOCRTrain(args []string) error {
 	fs := flag.NewFlagSet("ocr train", flag.ExitOnError)
 	train := fs.String("train", "", "training shards (comma-separated patterns)")
-	real := fs.String("real", "", "shards of real lines, drawn at -real-weight whatever their size")
-	realWeight := fs.Float64("real-weight", 0.2, "share of the lines drawn from -real")
+	mix := fs.String("mix", "", "other shard sets drawn at a fixed share whatever their size: 'patterns=share;patterns=share' (the -train shards get the rest)")
 	val := fs.String("val", "", "validation lines (shard, or JSONL of samples)")
 	out := fs.String("out", "", "output directory (best model on -val)")
 	init := fs.String("init", "", "start from this recognizer instead of fresh weights")
@@ -222,17 +221,32 @@ func runOCRTrain(args []string) error {
 	if src, err = ocr.NewShardSource(paths, *buffer, *seed); err != nil {
 		return err
 	}
-	if *real != "" {
-		realPaths, err := glob(*real)
-		if err != nil {
-			return err
+	if *mix != "" {
+		sources := []ocr.LineSource{src}
+		weights := []float64{1}
+		for i, entry := range strings.Split(*mix, ";") {
+			pat, share, ok := strings.Cut(entry, "=")
+			w, err := strconv.ParseFloat(share, 64)
+			if !ok || err != nil || w <= 0 || w >= 1 {
+				return fmt.Errorf("-mix: %q is not patterns=share", entry)
+			}
+			ps, err := glob(pat)
+			if err != nil {
+				return err
+			}
+			rs, err := ocr.NewShardSource(ps, *buffer, *seed+int64(i)+1)
+			if err != nil {
+				return err
+			}
+			sources = append(sources, rs)
+			weights = append(weights, w)
+			weights[0] -= w
+			paths = append(paths, ps...)
 		}
-		rs, err := ocr.NewShardSource(realPaths, *buffer, *seed+1)
-		if err != nil {
-			return err
+		if weights[0] <= 0 {
+			return fmt.Errorf("-mix: the shares leave nothing to -train")
 		}
-		src = ocr.NewMixSource([]ocr.LineSource{src, rs}, []float64{1 - *realWeight, *realWeight}, *seed+2)
-		paths = append(paths, realPaths...)
+		src = ocr.NewMixSource(sources, weights, *seed+100)
 	}
 
 	var m *linerec.Model
