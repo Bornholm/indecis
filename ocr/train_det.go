@@ -38,9 +38,10 @@ type DetTrainOptions struct {
 
 // cachedPage is a training page decoded once, longer side MaxSide.
 type cachedPage struct {
-	pix   []uint8
-	W, H  int
-	boxes []Box // in cached pixels
+	pix    []uint8
+	W, H   int
+	boxes  []Box // in cached pixels
+	ignore []Box // regions whose text is not labeled (PageSample.Ignore)
 }
 
 // TrainDetector trains m on labeled pages.
@@ -111,8 +112,8 @@ func TrainDetector(ctx context.Context, m *linedet.Model, pages []PageSample, o 
 	best := DetectionScore{}
 	bestF1 := -1.0
 	type crop struct {
-		ink   []float32
-		boxes []Box
+		ink           []float32
+		boxes, ignore []Box
 	}
 	batch := make([]crop, o.Batch)
 	var logLoss float64
@@ -129,8 +130,8 @@ func TrainDetector(ctx context.Context, m *linedet.Model, pages []PageSample, o 
 		}
 		linalg.Parallel(o.Batch, 1, func(lo, hi int) {
 			for i := lo; i < hi; i++ {
-				ink, boxes := cache[pick[i]].crop(rand.New(rand.NewSource(seeds[i])), o)
-				batch[i] = crop{ink, boxes}
+				ink, boxes, ignore := cache[pick[i]].crop(rand.New(rand.NewSource(seeds[i])), o)
+				batch[i] = crop{ink, boxes, ignore}
 			}
 		})
 		scale := float32(1 / float64(o.Batch))
@@ -142,7 +143,7 @@ func TrainDetector(ctx context.Context, m *linedet.Model, pages []PageSample, o 
 				for i := k; i < len(batch); i += len(slots) {
 					out := m.Forward(&sl.t, batch[i].ink, o.Crop, o.Crop, true)
 					sl.d = grow(sl.d, len(out.V))
-					sl.loss += detLoss(m, out.V, sl.d, out.S.H, out.S.W, batch[i].boxes, scale)
+					sl.loss += detLoss(m, out.V, sl.d, out.S.H, out.S.W, batch[i].boxes, batch[i].ignore, scale)
 					m.Backward(&sl.t, out, sl.d, sl.g)
 				}
 			}
@@ -205,12 +206,15 @@ func cachePage(g *image.Gray, p PageSample, longSide int) cachedPage {
 	for _, bx := range p.Boxes {
 		c.boxes = append(c.boxes, Box{bx[0] * s, bx[1] * s, bx[2] * s, bx[3] * s})
 	}
+	for _, bx := range p.Ignore {
+		c.ignore = append(c.ignore, Box{bx[0] * s, bx[1] * s, bx[2] * s, bx[3] * s})
+	}
 	return c
 }
 
 // crop draws a training crop: the page at a random scale, a random window
 // of o.Crop pixels (paper beyond the page), photometric damage.
-func (c cachedPage) crop(r *rand.Rand, o DetTrainOptions) ([]float32, []Box) {
+func (c cachedPage) crop(r *rand.Rand, o DetTrainOptions) ([]float32, []Box, []Box) {
 	long := o.MinSide + r.Intn(o.MaxSide-o.MinSide+1)
 	s := float64(long) / float64(max(c.W, c.H))
 	dw, dh := max(1, int(float64(c.W)*s)), max(1, int(float64(c.H)*s))
@@ -235,25 +239,131 @@ func (c cachedPage) crop(r *rand.Rand, o DetTrainOptions) ([]float32, []Box) {
 			if sx >= 0 && sy >= 0 && sx < dw && sy < dh {
 				v = 1 - px[sy*dw+sx]/255
 			}
-			v = v*contrast + shift + float32(r.NormFloat64()*noise)
-			ink[y*n+x] = min(max(v, 0), 1)
+			ink[y*n+x] = v
 		}
 	}
-	var boxes []Box
-	for _, b := range c.boxes {
-		bb := Box{b.X0*s - float64(ox), b.Y0*s - float64(oy), b.X1*s - float64(ox), b.Y1*s - float64(oy)}
-		if bb.X1 > 0 && bb.Y1 > 0 && bb.X0 < float64(n) && bb.Y0 < float64(n) {
-			boxes = append(boxes, bb)
+	if r.Float64() < 0.4 {
+		copyDamage(r, ink, n)
+		contrast = float32(0.3 + 0.7*r.Float64())
+	}
+	for i, v := range ink {
+		v = v*contrast + shift + float32(r.NormFloat64()*noise)
+		ink[i] = min(max(v, 0), 1)
+	}
+	inCrop := func(src []Box) []Box {
+		var out []Box
+		for _, b := range src {
+			bb := Box{b.X0*s - float64(ox), b.Y0*s - float64(oy), b.X1*s - float64(ox), b.Y1*s - float64(oy)}
+			if bb.X1 > 0 && bb.Y1 > 0 && bb.X0 < float64(n) && bb.Y0 < float64(n) {
+				out = append(out, bb)
+			}
+		}
+		return out
+	}
+	return ink, inCrop(c.boxes), inCrop(c.ignore)
+}
+
+// copyDamage spoils a crop's ink [n, n] as photocopies and old typewritten
+// forms do: strokes broken in places, a blur, stains of the paper, specks.
+func copyDamage(r *rand.Rand, ink []float32, n int) {
+	if r.Float64() < 0.6 {
+		// Broken strokes: ink thinned at random, by blotches of a few
+		// pixels rather than pixel by pixel.
+		keep := lowFreq(r, n, 4+r.Intn(5))
+		depth := float32(0.3 + 0.6*r.Float64())
+		for i := range ink {
+			ink[i] *= 1 - depth*keep[i]
 		}
 	}
-	return ink, boxes
+	if r.Float64() < 0.5 {
+		blur3(ink, n)
+	}
+	if r.Float64() < 0.6 {
+		// Stains: a smooth field of gray over the whole crop.
+		f := lowFreq(r, n, 32+r.Intn(64))
+		amp := float32(0.25 * r.Float64())
+		for i := range ink {
+			ink[i] += amp * f[i]
+		}
+	}
+	if r.Float64() < 0.5 {
+		// Specks: dark dots of one to three pixels.
+		k := int(float64(n*n) * 0.002 * r.Float64())
+		for range k {
+			x, y, sz := r.Intn(n), r.Intn(n), 1+r.Intn(3)
+			v := float32(0.4 + 0.6*r.Float64())
+			for dy := range sz {
+				for dx := range sz {
+					if x+dx < n && y+dy < n {
+						ink[(y+dy)*n+x+dx] = max(ink[(y+dy)*n+x+dx], v)
+					}
+				}
+			}
+		}
+	}
+}
+
+// lowFreq returns a smooth random field [n, n] in [0, 1]: random values on a
+// grid of cell pixels, interpolated bilinearly.
+func lowFreq(r *rand.Rand, n, cell int) []float32 {
+	g := n/cell + 2
+	grid := make([]float32, g*g)
+	for i := range grid {
+		grid[i] = r.Float32()
+	}
+	f := make([]float32, n*n)
+	for y := range n {
+		gy := float32(y) / float32(cell)
+		y0 := int(gy)
+		fy := gy - float32(y0)
+		for x := range n {
+			gx := float32(x) / float32(cell)
+			x0 := int(gx)
+			fx := gx - float32(x0)
+			a := grid[y0*g+x0]*(1-fx) + grid[y0*g+x0+1]*fx
+			b := grid[(y0+1)*g+x0]*(1-fx) + grid[(y0+1)*g+x0+1]*fx
+			f[y*n+x] = a*(1-fy) + b*fy
+		}
+	}
+	return f
+}
+
+// blur3 blurs v [n, n] with a 3×3 box.
+func blur3(v []float32, n int) {
+	tmp := make([]float32, len(v))
+	for y := range n {
+		for x := range n {
+			s, c := float32(0), float32(0)
+			for dx := -1; dx <= 1; dx++ {
+				if xx := x + dx; xx >= 0 && xx < n {
+					s += v[y*n+xx]
+					c++
+				}
+			}
+			tmp[y*n+x] = s / c
+		}
+	}
+	for y := range n {
+		for x := range n {
+			s, c := float32(0), float32(0)
+			for dy := -1; dy <= 1; dy++ {
+				if yy := y + dy; yy >= 0 && yy < n {
+					s += tmp[yy*n+x]
+					c++
+				}
+			}
+			v[y*n+x] = s / c
+		}
+	}
 }
 
 // detLoss computes the detector's loss on one crop and writes its
 // gradient with respect to the output maps into d (scaled by scale):
 // binary cross-entropy of the core map over the whole crop, and on the
 // cores L1 on the log of the distances to the line's top and bottom.
-func detLoss(m *linedet.Model, out, d []float32, H, W int, boxes []Box, scale float32) float64 {
+// Outside the cores, the pixels of the ignore regions (figures whose text
+// is not labeled) count for nothing.
+func detLoss(m *linedet.Model, out, d []float32, H, W int, boxes, ignore []Box, scale float32) float64 {
 	linalg.ZeroUpper()
 	core := make([]bool, H*W)
 	dist := make([]float32, 2*H*W)
@@ -288,6 +398,16 @@ func detLoss(m *linedet.Model, out, d []float32, H, W int, boxes []Box, scale fl
 			}
 		}
 	}
+	skip := make([]bool, H*W)
+	for _, b := range ignore {
+		c0, r0 := max(0, int(b.X0/2)), max(0, int(b.Y0/2))
+		c1, r1 := min(W, int(math.Ceil(b.X1/2))), min(H, int(math.Ceil(b.Y1/2)))
+		for y := r0; y < r1; y++ {
+			for x := c0; x < c1; x++ {
+				skip[y*W+x] = !core[y*W+x]
+			}
+		}
+	}
 	clear(d[:H*W*3])
 	ncore := 0
 	for _, c := range core {
@@ -298,6 +418,9 @@ func detLoss(m *linedet.Model, out, d []float32, H, W int, boxes []Box, scale fl
 	npix := float64(H * W)
 	var loss float64
 	for i, c := range core {
+		if skip[i] {
+			continue
+		}
 		z := float64(out[i*3])
 		y := 0.0
 		if c {

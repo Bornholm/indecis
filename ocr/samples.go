@@ -137,10 +137,14 @@ func EachLine(path string, o CropOptions, fn func(ShardLine) error) error {
 // and text of each of its lines, every line, readable or not. It trains and
 // measures line detection.
 type PageSample struct {
-	Image string            `json:"image"` // relative to the JSONL file
-	Boxes [][4]float64      `json:"boxes"`
-	Texts []string          `json:"texts"`
-	Meta  map[string]string `json:"meta,omitempty"`
+	Image string       `json:"image"` // relative to the JSONL file
+	Boxes [][4]float64 `json:"boxes"`
+	Texts []string     `json:"texts"`
+	// Ignore are regions whose text is not labeled (a figure's, when the
+	// lines come from a PDF's text layer): the detector learns nothing
+	// there.
+	Ignore [][4]float64      `json:"ignore,omitempty"`
+	Meta   map[string]string `json:"meta,omitempty"`
 }
 
 // ReadPageSamples reads a JSONL file of pages; relative image paths are

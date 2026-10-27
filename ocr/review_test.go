@@ -101,3 +101,30 @@ func TestExtendHead(t *testing.T) {
 		t.Fatalf("head %v bias %v", h, b)
 	}
 }
+
+func TestDetLossIgnore(t *testing.T) {
+	m := linedet.New(linedet.Base(), 1)
+	const H, W = 32, 32
+	out := make([]float32, H*W*3)
+	for i := range out {
+		out[i] = 0.3
+	}
+	d := make([]float32, len(out))
+	line := []Box{{X0: 4, Y0: 4, X1: 40, Y1: 12}}
+	fig := []Box{{X0: 0, Y0: 30, X1: 64, Y1: 64}, {X0: 0, Y0: 0, X1: 64, Y1: 16}}
+	detLoss(m, out, d, H, W, line, fig, 1)
+	for y := 15; y < H; y++ {
+		for x := range W {
+			if d[(y*W+x)*3] != 0 {
+				t.Fatalf("gradient %g at (%d, %d), in a figure", d[(y*W+x)*3], x, y)
+			}
+		}
+	}
+	// A labeled line inside an ignored region is learned all the same.
+	if d[(4*W+10)*3] == 0 {
+		t.Fatal("no gradient on a labeled line's core")
+	}
+	if d[(14*W+5)*3] == 0 {
+		t.Fatal("no gradient between the regions")
+	}
+}
