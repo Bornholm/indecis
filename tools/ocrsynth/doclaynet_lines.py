@@ -143,8 +143,14 @@ def main():
             for b, text in zip(boxes, texts):
                 lines_f.write(json.dumps({"image": "pages/" + name, "box": b, "text": text, "meta": m}, ensure_ascii=False) + "\n")
                 n_lines += 1
-            pages_f.write(json.dumps({"image": "pages/" + name, "boxes": boxes, "texts": texts,
-                                      "meta": {"source": "doclaynet", "category": meta["doc_category"]}}, ensure_ascii=False) + "\n")
+            # Text drawn inside pictures has no cells: the detector must not
+            # learn it is paper.
+            ignore = [[x, y, x + w, y + h] for (x, y, w, h), cat in zip(row["bboxes"], row["category_id"]) if cat == PICTURE]
+            page = {"image": "pages/" + name, "boxes": boxes, "texts": texts,
+                    "meta": {"source": "doclaynet", "category": meta["doc_category"]}}
+            if ignore:
+                page["ignore"] = ignore
+            pages_f.write(json.dumps(page, ensure_ascii=False) + "\n")
             n_pages += 1
     print(n_pages, "pages,", n_lines, "lines,", dropped, "pages dropped (text the cells miss)")
 
