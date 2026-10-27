@@ -17,6 +17,10 @@ Read from the ONNX graph:
 
 Measured on the Core Ultra 7 265U: onnxruntime, 1 thread, 2.0 ms for a line of 256 pixels, 5.7 ms for 800, 10.9 ms for 1,600. indecis's float32 GEMM: 80 to 95 GFLOPS on one P-core, 310 to 345 GFLOPS on 14 cores.
 
+## Status (October 27, 2026)
+
+P1 to P6 done, P7 under way: v1 trained and measured against Indra (see [ocr.md](ocr.md)), v2 (receipts, typographic quotes, wide spaces, dot-matrix print) training. P8 and P9 to do.
+
 ## Phases
 
 Each phase ends with a commit (or several) on `feat/ocr` and a measured acceptance criterion.
@@ -85,11 +89,16 @@ Acceptance: at least 2,000 French and 2,000 English test lines, sources and lice
 
 Acceptance: a measured report, with Indra's numbers on the same sets.
 
-### P8. Line detection and pages (separate plan, after P7)
+### P8. Line detection and pages
 
-- Small DBNet-style detector (Indra's `det.onnx`: 91 k parameters, depthwise convolutions, HardSwish, three maps).
-- Deskew, reading order (XY-cut first), `indecis ocr page`.
-- Data: born-digital PDFs (boxes from the text layer), DocLayNet (CDLA-Permissive-1.0). HierText (CC BY-SA 4.0) only after a decision on share-alike.
+Indra's `det.onnx` (91 k parameters), read from its graph: the page in gray, long side 1,024 pixels; a 3 × 3 stride-2 stem (16 channels, HardSwish); four stages of MobileNet blocks (depthwise 3 × 3 then 5 × 5, expansion, projection, residual) at strides 4, 8, 16 and 32 (24, 32, 48, 64 channels); an FPN (1 × 1 laterals to 24 channels, nearest upsampling, sums); a head of three maps (text, picture, and a third with a Softplus), brought back to full resolution by DepthToSpace.
+
+- Operators to add to Go, forward and backward: dense 3 × 3 convolution with stride (im2col + GEMM), depthwise 2D 3 × 3 and 5 × 5 with stride 1 or 2 (generalizing the context branch's), nearest upsampling, DepthToSpace, Softplus.
+- Targets, DBNet style: the line boxes shrunk to their core, a picture mask.
+- Training pages: born-digital PDFs (line boxes from the text layer, `ocrpdf` already cuts them), synthetic pages composed of rendered paragraphs with the line generator's damage, DocLayNet (CDLA-Permissive-1.0) for figures and tables. HierText (CC BY-SA 4.0) only after a decision on share-alike.
+- Post-processing: threshold, connected components, boxes grown back, deskew; reading order by XY-cut first.
+- `ocr.ReadPage`, `indecis ocr page`.
+- Measures: line detection F1 at IoU 0.5 on HAL pages, and end-to-end CER of a page (its text in reading order against the text layer).
 
 ### P9. Documentation
 
