@@ -1,6 +1,9 @@
 package ocr
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 // ErrorRate accumulates edit distances against references: the character
 // and word error rates of a set of lines (CER, WER), totals over totals.
@@ -10,8 +13,9 @@ type ErrorRate struct {
 	Lines, Exact     int
 }
 
-// Add counts one line: got read for want.
+// Add counts one line: got read for want, both in CompareForm.
 func (e *ErrorRate) Add(got, want string) {
+	got, want = CompareForm(got), CompareForm(want)
 	g, w := []rune(got), []rune(want)
 	e.CharEdits += levenshtein(g, w)
 	e.Chars += len(w)
@@ -69,4 +73,16 @@ func levenshtein[T comparable](a, b []T) int {
 		prev, cur = cur, prev
 	}
 	return prev[len(b)]
+}
+
+// leaders matches a run of dot leaders (a table of contents' "......"),
+// spaces included.
+var leaders = regexp.MustCompile(`\.(\s*\.){3,}`)
+
+// CompareForm is the form texts are compared in: dot leaders cut to
+// "...". A recognizer reading one step every few pixels cannot count dots
+// spaced closer than that; neither can the references' readers agree on
+// their number.
+func CompareForm(s string) string {
+	return leaders.ReplaceAllString(s, "...")
 }
