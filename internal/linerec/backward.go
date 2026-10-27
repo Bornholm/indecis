@@ -198,6 +198,7 @@ func (m *Model) normBackward(s *State, w *work, g *Grads) {
 	D, L := c.Dim, s.L
 	gw, gb := g.of(m.NormW), g.of(m.NormB)
 	gamma := m.NormW.W
+	linalg.ZeroUpper() // scalar below
 	if c.Norm == "batch" {
 		for t := range L {
 			dy, x, dx := w.dNorm[t*D:(t+1)*D], s.Pre[t*D:(t+1)*D], w.dPre[t*D:(t+1)*D]

@@ -1,6 +1,10 @@
 package linerec
 
-import "math"
+import (
+	"math"
+
+	"github.com/bornholm/indecis/internal/linalg"
+)
 
 // CTC computes the connectionist temporal classification loss of a line,
 // -log p(target | logits), and its gradient with respect to the logits
@@ -13,6 +17,7 @@ import "math"
 // The forward (α) and backward (β) recursions run in log space, in
 // float64.
 func CTC(logits []float32, L, V int, target []int, dLogits []float32) (loss float64, ok bool) {
+	linalg.ZeroUpper() // the recursions below are scalar float64
 	S := 2*len(target) + 1
 	label := func(s int) int {
 		if s%2 == 0 {

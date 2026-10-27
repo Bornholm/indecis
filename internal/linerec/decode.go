@@ -1,6 +1,10 @@
 package linerec
 
-import "math"
+import (
+	"math"
+
+	"github.com/bornholm/indecis/internal/linalg"
+)
 
 // Symbol is a symbol read by greedy CTC decoding.
 type Symbol struct {
@@ -15,6 +19,7 @@ type Symbol struct {
 // lowest probability among the chosen symbols, blanks included: a line's
 // weakest step.
 func Greedy(logits []float32, L, V int) (syms []Symbol, confidence float32) {
+	linalg.ZeroUpper()
 	confidence = 1
 	prev := 0
 	for t := range L {

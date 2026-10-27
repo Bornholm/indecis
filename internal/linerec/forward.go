@@ -180,6 +180,7 @@ func (m *Model) normalize(s *State) {
 	D, L := c.Dim, s.L
 	s.Normed = grow(s.Normed, L*D)
 	g, b := m.NormW.W, m.NormB.W
+	linalg.ZeroUpper() // scalar float64 below
 	if m.Cfg.Norm == "batch" {
 		for t := range L {
 			x, y := s.Pre[t*D:(t+1)*D], s.Normed[t*D:(t+1)*D]

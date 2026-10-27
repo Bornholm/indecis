@@ -88,3 +88,8 @@ TEXT ·xgetbv(SB), NOSPLIT, $0-8
 	MOVL AX, eax+0(FP)
 	MOVL DX, edx+4(FP)
 	RET
+
+// func zeroUpper()
+TEXT ·zeroUpper(SB), NOSPLIT, $0-0
+	VZEROUPPER
+	RET

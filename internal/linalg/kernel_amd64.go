@@ -192,3 +192,15 @@ func interleave4(dst, src []int8, n, stride int) {
 	_ = dst[(n/16-1)*stride+63]
 	interleave4AVX2(&dst[0], &src[0], n, stride)
 }
+
+func zeroUpper()
+
+// ZeroUpper clears the upper halves of the AVX registers (VZEROUPPER).
+// Go's portable SIMD code leaves them dirty, and every scalar float
+// instruction (SSE, as Go compiles math.Exp) then pays a transition
+// penalty: call it before a scalar-heavy loop that follows vector code.
+func ZeroUpper() {
+	if avx2 {
+		zeroUpper()
+	}
+}
