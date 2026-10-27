@@ -1,0 +1,264 @@
+package ocr
+
+import (
+	"image"
+	"math"
+	"sort"
+	"sync"
+
+	"github.com/bornholm/indecis/internal/linedet"
+)
+
+// Detector finds the text lines of a page. It is safe for concurrent use.
+type Detector struct {
+	m *linedet.Model
+
+	// LongSide is the length the page's longer side is resized to (1024,
+	// as Indra OCR).
+	LongSide int
+	// Threshold on the text probability (0.5).
+	Threshold float32
+
+	tapes sync.Pool // *linedet.Tape
+}
+
+// LoadDetector reads a detector from dir: config.json and
+// model.safetensors.
+func LoadDetector(dir string) (*Detector, error) {
+	m, err := linedet.Load(dir)
+	if err != nil {
+		return nil, err
+	}
+	return NewDetector(m), nil
+}
+
+// NewDetector wraps a line detection model.
+func NewDetector(m *linedet.Model) *Detector {
+	return &Detector{m: m, LongSide: 1024, Threshold: 0.5}
+}
+
+// Model returns the detection model.
+func (d *Detector) Model() *linedet.Model { return d.m }
+
+// detInput is a page resized for the detector: ink [H, W], sides multiples
+// of 32, and the scale from page pixels to input pixels.
+type detInput struct {
+	ink   []float32
+	H, W  int
+	scale float64
+}
+
+// prepare resizes page so that its longer side is longSide, as ink, padded
+// with paper to multiples of 32.
+func prepare(page *image.Gray, longSide int) detInput {
+	b := page.Bounds()
+	sw, sh := b.Dx(), b.Dy()
+	scale := float64(longSide) / float64(max(sw, sh))
+	dw, dh := max(1, int(math.Round(float64(sw)*scale))), max(1, int(math.Round(float64(sh)*scale)))
+	src := make([]uint8, sw*sh)
+	for y := range sh {
+		copy(src[y*sw:(y+1)*sw], page.Pix[page.PixOffset(b.Min.X, b.Min.Y+y):])
+	}
+	var r []float32
+	if scale < 1 {
+		r = resizeArea(src, sw, sh, dw, dh)
+	} else {
+		r = resizeLinear(src, sw, sh, dw, dh)
+	}
+	H := (dh + linedet.Multiple - 1) / linedet.Multiple * linedet.Multiple
+	W := (dw + linedet.Multiple - 1) / linedet.Multiple * linedet.Multiple
+	ink := make([]float32, H*W)
+	for y := range dh {
+		for x := range dw {
+			ink[y*W+x] = 1 - r[y*dw+x]/255
+		}
+	}
+	return detInput{ink: ink, H: H, W: W, scale: scale}
+}
+
+// Detect returns the boxes of the page's lines, top to bottom.
+func (d *Detector) Detect(page *image.Gray) []Box {
+	in := prepare(page, d.LongSide)
+	t, _ := d.tapes.Get().(*linedet.Tape)
+	if t == nil {
+		t = new(linedet.Tape)
+	}
+	defer d.tapes.Put(t)
+	out := d.m.Forward(t, in.ink, in.H, in.W, false)
+	boxes := mergeFragments(d.decode(out.V, out.S.H, out.S.W))
+	// Output pixels are 2 input pixels; input pixels are 1/scale page
+	// pixels.
+	f := 2 / in.scale
+	b := page.Bounds()
+	for i := range boxes {
+		bx := &boxes[i]
+		bx.X0 = max(float64(b.Min.X), float64(b.Min.X)+bx.X0*f)
+		bx.Y0 = max(float64(b.Min.Y), float64(b.Min.Y)+bx.Y0*f)
+		bx.X1 = min(float64(b.Max.X), float64(b.Min.X)+bx.X1*f)
+		bx.Y1 = min(float64(b.Max.Y), float64(b.Min.Y)+bx.Y1*f)
+	}
+	sortLines(boxes)
+	return boxes
+}
+
+// mergeFragments joins boxes of the same line that the core map left
+// apart (at word gaps): boxes that overlap vertically over most of the
+// smaller height and are less than a height apart.
+func mergeFragments(b []Box) []Box {
+	for merged := true; merged; {
+		merged = false
+		for i := 0; i < len(b) && !merged; i++ {
+			for j := i + 1; j < len(b); j++ {
+				hi, hj := b[i].Y1-b[i].Y0, b[j].Y1-b[j].Y0
+				h := min(hi, hj)
+				over := min(b[i].Y1, b[j].Y1) - max(b[i].Y0, b[j].Y0)
+				gap := max(b[i].X0, b[j].X0) - min(b[i].X1, b[j].X1)
+				if over > 0.6*h && gap < 0.8*h && max(hi, hj) < 1.6*h {
+					b[i] = Box{min(b[i].X0, b[j].X0), min(b[i].Y0, b[j].Y0), max(b[i].X1, b[j].X1), max(b[i].Y1, b[j].Y1)}
+					b = append(b[:j], b[j+1:]...)
+					merged = true
+					break
+				}
+			}
+		}
+	}
+	return b
+}
+
+// decode turns the output maps [H, W, 3] into line boxes in output
+// pixels: the connected cores above the threshold, grown back to the
+// predicted line height.
+func (d *Detector) decode(maps []float32, H, W int) []Box {
+	thr := float32(math.Log(float64(d.Threshold) / (1 - float64(d.Threshold)))) // on the logit
+	label := make([]int32, H*W)
+	var boxes []Box
+	var stack []int
+	next := int32(0)
+	for start := range H * W {
+		if label[start] != 0 || maps[start*3] <= thr {
+			continue
+		}
+		next++
+		label[start] = next
+		stack = append(stack[:0], start)
+		x0, y0, x1, y1 := W, H, 0, 0
+		var hsum float64
+		n := 0
+		for len(stack) > 0 {
+			p := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			y, x := p/W, p%W
+			x0, x1 = min(x0, x), max(x1, x+1)
+			y0, y1 = min(y0, y), max(y1, y+1)
+			hsum += float64(d.m.Height(maps[p*3+2]))
+			n++
+			for _, q := range [4]int{p - 1, p + 1, p - W, p + W} {
+				if q < 0 || q >= H*W || (q == p-1 && x == 0) || (q == p+1 && x == W-1) {
+					continue
+				}
+				if label[q] == 0 && maps[q*3] > thr {
+					label[q] = next
+					stack = append(stack, q)
+				}
+			}
+		}
+		if n < 3 {
+			continue
+		}
+		h := max(hsum/float64(n), float64(y1-y0))
+		yc := float64(y0+y1) / 2
+		boxes = append(boxes, Box{
+			X0: float64(x0) - coreMarginX*h, Y0: yc - h/2,
+			X1: float64(x1) + coreMarginX*h, Y1: yc + h/2,
+		})
+	}
+	return boxes
+}
+
+// A line's core, the detector's target, is its box without coreMarginX of
+// its height on the left and right and with coreHeight of its height,
+// centered: neighbouring lines' cores never touch.
+const (
+	coreMarginX = 0.25
+	coreHeight  = 0.5
+)
+
+// sortLines orders boxes top to bottom, then left to right among boxes on
+// the same band (their centers within half a height).
+func sortLines(b []Box) {
+	sort.SliceStable(b, func(i, j int) bool {
+		ci, cj := (b[i].Y0+b[i].Y1)/2, (b[j].Y0+b[j].Y1)/2
+		h := min(b[i].Y1-b[i].Y0, b[j].Y1-b[j].Y0)
+		if math.Abs(ci-cj) < h/2 {
+			return b[i].X0 < b[j].X0
+		}
+		return ci < cj
+	})
+}
+
+// ReadPage finds the lines of a page and reads them.
+func ReadPage(d *Detector, r *Recognizer, page *image.Gray) ([]Box, []Line) {
+	boxes := d.Detect(page)
+	return boxes, r.ReadLines(page, boxes)
+}
+
+// IoU is the intersection over union of two boxes.
+func IoU(a, b Box) float64 {
+	iw := min(a.X1, b.X1) - max(a.X0, b.X0)
+	ih := min(a.Y1, b.Y1) - max(a.Y0, b.Y0)
+	if iw <= 0 || ih <= 0 {
+		return 0
+	}
+	inter := iw * ih
+	return inter / ((a.X1-a.X0)*(a.Y1-a.Y0) + (b.X1-b.X0)*(b.Y1-b.Y0) - inter)
+}
+
+// Match pairs predicted boxes with reference boxes, best IoU first, one to
+// one, above minIoU: match[i] is the prediction of reference i, or -1.
+func Match(ref, pred []Box, minIoU float64) []int {
+	type pair struct {
+		i, j int
+		iou  float64
+	}
+	var ps []pair
+	for i, r := range ref {
+		for j, p := range pred {
+			if v := IoU(r, p); v >= minIoU {
+				ps = append(ps, pair{i, j, v})
+			}
+		}
+	}
+	sort.Slice(ps, func(a, b int) bool { return ps[a].iou > ps[b].iou })
+	match := make([]int, len(ref))
+	for i := range match {
+		match[i] = -1
+	}
+	used := make([]bool, len(pred))
+	for _, p := range ps {
+		if match[p.i] < 0 && !used[p.j] {
+			match[p.i] = p.j
+			used[p.j] = true
+		}
+	}
+	return match
+}
+
+// DetectionScore counts matched lines.
+type DetectionScore struct {
+	Ref, Pred, Matched int
+}
+
+// Precision is the share of predicted lines matched.
+func (s DetectionScore) Precision() float64 { return float64(s.Matched) / float64(max(1, s.Pred)) }
+
+// Recall is the share of reference lines matched.
+func (s DetectionScore) Recall() float64 { return float64(s.Matched) / float64(max(1, s.Ref)) }
+
+// F1 is the harmonic mean of precision and recall.
+func (s DetectionScore) F1() float64 {
+	p, r := s.Precision(), s.Recall()
+	if p+r == 0 {
+		return 0
+	}
+	return 2 * p * r / (p + r)
+}

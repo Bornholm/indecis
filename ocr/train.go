@@ -238,6 +238,12 @@ func Evaluate(m *linerec.Model, v Vocab, lines []ShardLine) ErrorRate {
 // SaveModel writes a recognizer to dir: config.json, model.safetensors and
 // vocab.json, each replaced at once.
 func SaveModel(dir string, m *linerec.Model, v Vocab) error {
+	return saveFiles(dir, m.Cfg, m.Tensors(), map[string]any{"vocab.json": v})
+}
+
+// saveFiles writes config.json, model.safetensors and the extra JSON
+// files to dir, each written aside then renamed.
+func saveFiles(dir string, cfg any, tensors map[string]safetensors.Tensor, extra ...map[string]any) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
@@ -263,14 +269,18 @@ func SaveModel(dir string, m *linerec.Model, v Vocab) error {
 			return e.Encode(x)
 		}
 	}
-	if err := write("config.json", jsonOf(m.Cfg)); err != nil {
+	if err := write("config.json", jsonOf(cfg)); err != nil {
 		return err
 	}
-	if err := write("vocab.json", jsonOf(v)); err != nil {
-		return err
+	for _, files := range extra {
+		for name, x := range files {
+			if err := write(name, jsonOf(x)); err != nil {
+				return err
+			}
+		}
 	}
 	return write("model.safetensors", func(w io.Writer) error {
-		return safetensors.Write(w, m.Tensors(), nil)
+		return safetensors.Write(w, tensors, nil)
 	})
 }
 

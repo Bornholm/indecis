@@ -116,3 +116,41 @@ func LoadLines(path string, o CropOptions) ([]ShardLine, error) {
 	}
 	return out, nil
 }
+
+// PageSample is a labeled page (one JSONL row): its image and the ink box
+// and text of each of its lines, every line, readable or not. It trains and
+// measures line detection.
+type PageSample struct {
+	Image string            `json:"image"` // relative to the JSONL file
+	Boxes [][4]float64      `json:"boxes"`
+	Texts []string          `json:"texts"`
+	Meta  map[string]string `json:"meta,omitempty"`
+}
+
+// ReadPageSamples reads a JSONL file of pages; image paths become relative
+// to the working directory.
+func ReadPageSamples(path string) ([]PageSample, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	dir := filepath.Dir(path)
+	var out []PageSample
+	dec := json.NewDecoder(f)
+	for {
+		var p PageSample
+		if err := dec.Decode(&p); err == io.EOF {
+			return out, nil
+		} else if err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		if len(p.Texts) != len(p.Boxes) {
+			return nil, fmt.Errorf("%s: %s: %d texts for %d boxes", path, p.Image, len(p.Texts), len(p.Boxes))
+		}
+		if !filepath.IsAbs(p.Image) {
+			p.Image = filepath.Join(dir, p.Image)
+		}
+		out = append(out, p)
+	}
+}

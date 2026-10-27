@@ -5,7 +5,9 @@
 //
 //	go run ./ocrpdf -pdfs ~/.cache/indecis/datasets/ocr/hal/fr -out hal-fr -lang fr
 //
-// Writes out/lines.jsonl (ocr.Sample) and out/pages/*.png.
+// Writes out/lines.jsonl (ocr.Sample: the lines a recognizer can be
+// measured on), out/pages.jsonl (ocr.PageSample: every inked line of each
+// page, for detection) and out/pages/*.png.
 package main
 
 import (
@@ -97,12 +99,19 @@ func main() {
 	defer f.Close()
 	jw := json.NewEncoder(f)
 	jw.SetEscapeHTML(false)
+	pf, err := os.Create(filepath.Join(*out, "pages.jsonl"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer pf.Close()
+	pw := json.NewEncoder(pf)
+	pw.SetEscapeHTML(false)
 	r := rand.New(rand.NewSource(*seed))
 	total, skipped := 0, 0
 	for _, pdf := range files {
 		doc := strings.TrimSuffix(filepath.Base(pdf), ".pdf")
 		dpi := []int{100, 150, 200, 300}[r.Intn(4)]
-		n, s, err := convert(pdf, doc, *out, *lang, dpi, *first, *pages, enc, jw)
+		n, s, err := convert(pdf, doc, *out, *lang, dpi, *first, *pages, enc, jw, pw)
 		if err != nil {
 			log.Printf("%s: %v", doc, err)
 			continue
@@ -113,7 +122,7 @@ func main() {
 	log.Printf("%d documents, %d lines, %d skipped", len(files), total, skipped)
 }
 
-func convert(pdf, doc, out, lang string, dpi, first, pages int, enc *ocr.Encoder, jw *json.Encoder) (int, int, error) {
+func convert(pdf, doc, out, lang string, dpi, first, pages int, enc *ocr.Encoder, jw, pw *json.Encoder) (int, int, error) {
 	last := first + pages - 1
 	html, err := exec.Command("pdftotext", "-bbox-layout", "-f", fmt.Sprint(first), "-l", fmt.Sprint(last), pdf, "-").Output()
 	if err != nil {
@@ -144,6 +153,7 @@ func convert(pdf, doc, out, lang string, dpi, first, pages int, enc *ocr.Encoder
 		return 0, 0, fmt.Errorf("text layer looks broken (%d/%d odd words)", odd, words)
 	}
 	var samples []ocr.Sample
+	var pageSamples []ocr.PageSample
 	n, skipped := 0, 0
 	for pi, p := range d.Pages {
 		if len(p.Lines) == 0 {
@@ -160,12 +170,20 @@ func convert(pdf, doc, out, lang string, dpi, first, pages int, enc *ocr.Encoder
 			return n, skipped, err
 		}
 		scale := float64(dpi) / 72
+		ps := ocr.PageSample{
+			Image: filepath.Join("pages", filepath.Base(base)+".png"),
+			Meta:  map[string]string{"source": "hal", "lang": lang, "doc": doc, "dpi": fmt.Sprint(dpi)},
+		}
 		for _, l := range p.Lines {
 			text := ocr.NormalizeText(lineText(l.Words))
 			box := ocr.Box{X0: l.XMin * scale, Y0: l.YMin * scale, X1: l.XMax * scale, Y1: l.YMax * scale}
 			ink, ok := inkBox(page, box)
 			_, _, known := enc.Encode(text)
 			h := ink.Y1 - ink.Y0
+			if ok && text != "" && h >= 3 {
+				ps.Boxes = append(ps.Boxes, [4]float64{ink.X0, ink.Y0, ink.X1, ink.Y1})
+				ps.Texts = append(ps.Texts, text)
+			}
 			if text == "" || !known || !ok || h < 6 || ink.X1-ink.X0 < h {
 				skipped++
 				continue
@@ -178,9 +196,15 @@ func convert(pdf, doc, out, lang string, dpi, first, pages int, enc *ocr.Encoder
 			})
 			n++
 		}
+		if len(ps.Boxes) > 0 {
+			pageSamples = append(pageSamples, ps)
+		}
 	}
 	for _, s := range samples {
 		jw.Encode(s)
+	}
+	for _, p := range pageSamples {
+		pw.Encode(p)
 	}
 	return n, skipped, nil
 }
