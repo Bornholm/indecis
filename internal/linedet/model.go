@@ -97,6 +97,21 @@ func spec(c Config) (names []string, shapes [][]int) {
 	return names, shapes
 }
 
+func (c Config) validate() error {
+	if c.Stem <= 0 || c.StemLat <= 0 || c.FPN <= 0 || !(c.DistScale > 0) {
+		return fmt.Errorf("linedet: invalid dimensions")
+	}
+	if len(c.Stages) != 4 {
+		return fmt.Errorf("linedet: %d stages, the strides need 4", len(c.Stages))
+	}
+	for i, s := range c.Stages {
+		if s.C <= 0 || s.Expand <= 0 || s.Blocks < 0 || s.K <= 0 || s.K%2 != 1 {
+			return fmt.Errorf("linedet: invalid stage %d", i)
+		}
+	}
+	return nil
+}
+
 // New creates a detector with fresh weights (PyTorch's default
 // initialization: uniform in ±1/√fan_in).
 func New(cfg Config, seed int64) *Model {
@@ -134,6 +149,9 @@ func Load(dir string) (*Model, error) {
 	var cfg Config
 	if err := json.Unmarshal(b, &cfg); err != nil {
 		return nil, fmt.Errorf("linedet: config.json: %w", err)
+	}
+	if err := cfg.validate(); err != nil {
+		return nil, err
 	}
 	tensors, _, err := safetensors.ReadFile(filepath.Join(dir, "model.safetensors"))
 	if err != nil {

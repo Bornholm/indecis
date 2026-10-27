@@ -21,8 +21,8 @@ type Sample struct {
 	Meta  map[string]string `json:"meta,omitempty"`
 }
 
-// ReadSamples reads a JSONL file of samples; image paths become relative to
-// the working directory.
+// ReadSamples reads a JSONL file of samples; relative image paths are
+// resolved against the JSONL file's directory.
 func ReadSamples(path string) ([]Sample, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -75,8 +75,9 @@ func ReadImage(path string) (*image.Gray, error) {
 }
 
 // LoadLines reads labeled lines ready for training or evaluation: a shard
-// (any extension but .jsonl), or a JSONL file of samples, cut with o. Texts
-// are normalized (NormalizeText).
+// (any extension but .jsonl), whose lines must have been cut at o's height
+// and window, or a JSONL file of samples, cut with o. Texts are normalized
+// (NormalizeText).
 func LoadLines(path string, o CropOptions) ([]ShardLine, error) {
 	if filepath.Ext(path) != ".jsonl" {
 		r, err := OpenShard(path)
@@ -92,6 +93,9 @@ func LoadLines(path string, o CropOptions) ([]ShardLine, error) {
 			}
 			if err != nil {
 				return nil, err
+			}
+			if l.Rows != o.Height*o.Window {
+				return nil, fmt.Errorf("%s: lines %d pixels high, the model reads %d", path, l.Rows, o.Height*o.Window)
 			}
 			l.Text = NormalizeText(l.Text)
 			out = append(out, l)
@@ -139,8 +143,8 @@ type PageSample struct {
 	Meta  map[string]string `json:"meta,omitempty"`
 }
 
-// ReadPageSamples reads a JSONL file of pages; image paths become relative
-// to the working directory.
+// ReadPageSamples reads a JSONL file of pages; relative image paths are
+// resolved against the JSONL file's directory.
 func ReadPageSamples(path string) ([]PageSample, error) {
 	f, err := os.Open(path)
 	if err != nil {

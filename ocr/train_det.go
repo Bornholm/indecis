@@ -48,16 +48,29 @@ func TrainDetector(ctx context.Context, m *linedet.Model, pages []PageSample, o 
 	if o.Slots <= 0 {
 		o.Slots = 8
 	}
-	if o.Crop <= 0 {
+	if o.Crop == 0 {
 		o.Crop = 512
 	}
-	if o.MinSide <= 0 {
-		o.MinSide, o.MaxSide = 640, 1280
+	if o.MinSide == 0 {
+		o.MinSide = 640
+	}
+	if o.MaxSide == 0 {
+		o.MaxSide = max(1280, o.MinSide)
 	}
 	if o.Log == nil {
 		o.Log = io.Discard
 	}
 	o.Crop = o.Crop / linedet.Multiple * linedet.Multiple
+	switch {
+	case o.Steps <= 0 || o.Batch <= 0:
+		return DetectionScore{}, fmt.Errorf("ocr: Steps and Batch must be positive")
+	case len(pages) == 0:
+		return DetectionScore{}, fmt.Errorf("ocr: no training page")
+	case o.Crop < linedet.Multiple:
+		return DetectionScore{}, fmt.Errorf("ocr: Crop must be at least %d pixels", linedet.Multiple)
+	case o.MinSide <= 0 || o.MaxSide < o.MinSide:
+		return DetectionScore{}, fmt.Errorf("ocr: invalid page sides [%d, %d]", o.MinSide, o.MaxSide)
+	}
 
 	cache := make([]cachedPage, len(pages))
 	errs := make([]error, len(pages))
@@ -304,11 +317,15 @@ func detLoss(m *linedet.Model, out, d []float32, H, W int, boxes []Box, scale fl
 			pred := sp * float64(m.Cfg.DistScale)
 			diff := math.Log(max(pred, 1e-3)) - math.Log(max(float64(dist[2*i+k]), 0.25))
 			loss += math.Abs(diff) / float64(2*ncore)
+			if pred < 1e-3 {
+				continue // the loss is clamped flat there: no gradient
+			}
 			sign := 1.0
 			if diff < 0 {
 				sign = -1
 			}
-			d[i*3+1+k] = float32(sign/(1+math.Exp(-raw))/max(sp, 1e-3)/float64(2*ncore)) * scale
+			// d|log(pred) - log(t)|/draw = sign · σ(raw) / softplus(raw).
+			d[i*3+1+k] = float32(sign/(1+math.Exp(-raw))/sp/float64(2*ncore)) * scale
 		}
 	}
 	return loss

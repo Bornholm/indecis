@@ -20,6 +20,11 @@ import (
 
 const shardMagic = "ILN1"
 
+// maxRecord bounds a record's declared length: a line 4,096 pixels wide and
+// 96 high is 400 kB raw, far less as PNG. A damaged length is then an error,
+// not a 4 GB allocation.
+const maxRecord = 16 << 20
+
 // ShardLine is a line read from a shard.
 type ShardLine struct {
 	Text string            `json:"text"`
@@ -141,6 +146,9 @@ func (r *ShardReader) record() ([]byte, error) {
 	var n uint32
 	if err := binary.Read(r.r, binary.LittleEndian, &n); err != nil {
 		return nil, err // io.EOF between records
+	}
+	if n > maxRecord {
+		return nil, fmt.Errorf("%s: record of %d bytes: not a line shard, or a damaged one", r.path, n)
 	}
 	b := make([]byte, n)
 	if _, err := io.ReadFull(r.r, b); err != nil {

@@ -83,9 +83,7 @@ func New(m *linerec.Model, v Vocab, opts ...Option) (*Recognizer, error) {
 	} else {
 		m.Prepare()
 	}
-	crop := DefaultCrop()
-	crop.Height, crop.Window, crop.Multiple = m.Cfg.Height, m.Cfg.Window, 2*m.Cfg.Stride
-	return &Recognizer{m: m, chars: v.Chars, crop: crop}, nil
+	return &Recognizer{m: m, chars: v.Chars, crop: ModelCrop(m)}, nil
 }
 
 // Model returns the line model. Training it (Train) drops its packed
@@ -94,6 +92,14 @@ func (r *Recognizer) Model() *linerec.Model { return r.m }
 
 // Vocab returns the recognizer's vocabulary.
 func (r *Recognizer) Vocab() Vocab { return Vocab{Chars: r.chars} }
+
+// ModelCrop returns the crop a line model reads: the defaults, at the
+// model's line height and window.
+func ModelCrop(m *linerec.Model) CropOptions {
+	crop := DefaultCrop()
+	crop.Height, crop.Window = m.Cfg.Height, m.Cfg.Window
+	return crop
+}
 
 // CropOptions returns the crop the recognizer reads lines with.
 func (r *Recognizer) CropOptions() CropOptions { return r.crop }

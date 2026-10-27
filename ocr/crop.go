@@ -22,12 +22,12 @@ type CropOptions struct {
 	PadY     float64 // margin above and below the line, × its height (0.2)
 	PadX     float64 // margin left and right, × its height (0.3)
 	MaxWidth int     // widest resized line in pixels (4096)
-	Multiple int     // the width is rounded up to a multiple of this (8)
+	MinWidth int     // narrowest resized line in pixels (8); the recognizer pads the width itself
 }
 
 // DefaultCrop returns the default crop options.
 func DefaultCrop() CropOptions {
-	return CropOptions{Height: 32, Window: 3, PadY: 0.2, PadX: 0.3, MaxWidth: 4096, Multiple: 8}
+	return CropOptions{Height: 32, Window: 3, PadY: 0.2, PadX: 0.3, MaxWidth: 4096, MinWidth: 8}
 }
 
 // Crop is a line cut from its page, as the recognizer reads it.
@@ -150,7 +150,7 @@ func cropLine(page *image.Gray, box Box, o CropOptions, dark bool) Crop {
 	}
 
 	outW := int(math.Round(float64(cw) * float64(height) / float64(ch)))
-	outW = max(o.Multiple, min(o.MaxWidth, outW))
+	outW = max(o.MinWidth, min(o.MaxWidth, outW))
 	var resized []float32
 	if ch > height {
 		resized = resizeArea(crop, cw, ch, outW, height)

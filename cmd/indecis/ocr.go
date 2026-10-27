@@ -101,54 +101,85 @@ func runOCREval(args []string) error {
 	if err != nil {
 		return err
 	}
+	type item struct {
+		image, text string
+		box         []float64
+		meta        map[string]string
+		got         string
+	}
+	var items []item
+	var firstErr error
 	if filepath.Ext(*data) != ".jsonl" {
 		lines, err := ocr.LoadLines(*data, r.CropOptions())
 		if err != nil {
 			return err
 		}
-		e := ocr.Evaluate(r.Model(), r.Vocab(), lines)
-		printRate("all", e)
-		return nil
-	}
-	samples, err := ocr.ReadSamples(*data)
-	if err != nil {
-		return err
-	}
-	got := make([]string, len(samples))
-	errs := make([]error, len(samples))
-	linalg.Parallel(len(samples), 1, func(lo, hi int) {
-		for i := lo; i < hi; i++ {
-			page, err := ocr.ReadImage(samples[i].Image)
-			if err != nil {
-				errs[i] = err
-				continue
+		items = make([]item, len(lines))
+		linalg.Parallel(len(lines), 1, func(lo, hi int) {
+			for i := lo; i < hi; i++ {
+				l := lines[i]
+				items[i] = item{text: l.Text, meta: l.Meta, got: r.ReadCrop(ocr.Crop{Ink: l.Ink, W: l.W}).Text}
 			}
-			got[i] = r.ReadLine(page, samples[i].BoxOf(page)).Text
+		})
+	} else {
+		samples, err := ocr.ReadSamples(*data)
+		if err != nil {
+			return err
 		}
-	})
+		// One decode per page, its lines read together.
+		var pages []string
+		byPage := map[string][]int{}
+		items = make([]item, len(samples))
+		for i, s := range samples {
+			if _, ok := byPage[s.Image]; !ok {
+				pages = append(pages, s.Image)
+			}
+			byPage[s.Image] = append(byPage[s.Image], i)
+			items[i] = item{image: s.Image, text: s.Text, box: s.Box, meta: s.Meta}
+		}
+		errs := make([]error, len(pages))
+		linalg.Parallel(len(pages), 1, func(lo, hi int) {
+			for k := lo; k < hi; k++ {
+				page, err := ocr.ReadImage(pages[k])
+				if err != nil {
+					errs[k] = err
+					continue
+				}
+				for _, i := range byPage[pages[k]] {
+					items[i].got = r.ReadLine(page, samples[i].BoxOf(page)).Text
+				}
+			}
+		})
+		for _, err := range errs {
+			if err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	if firstErr != nil {
+		return firstErr
+	}
 	all := ocr.ErrorRate{}
 	groups := map[string]*ocr.ErrorRate{}
 	var wrong []map[string]any
-	for i, s := range samples {
-		if errs[i] != nil {
-			return errs[i]
-		}
-		s.Text = ocr.NormalizeText(s.Text)
+	for _, s := range items {
+		got := s.got
+		s.text = ocr.NormalizeText(s.text)
 		if *fold {
-			got[i], s.Text = strings.ToUpper(got[i]), strings.ToUpper(s.Text)
+			got, s.text = strings.ToUpper(got), strings.ToUpper(s.text)
 		}
 		var e ocr.ErrorRate
-		e.Add(got[i], s.Text)
+		e.Add(got, s.text)
 		all.Merge(e)
 		if *by != "" {
-			k := s.Meta[*by]
+			k := s.meta[*by]
 			if groups[k] == nil {
 				groups[k] = &ocr.ErrorRate{}
 			}
 			groups[k].Merge(e)
 		}
-		if got[i] != s.Text {
-			wrong = append(wrong, map[string]any{"image": s.Image, "box": s.Box, "want": s.Text, "got": got[i]})
+		if ocr.CompareForm(got) != ocr.CompareForm(s.text) {
+			wrong = append(wrong, map[string]any{"image": s.image, "box": s.box, "want": s.text, "got": got})
 		}
 	}
 	printRate("all", all)
@@ -246,7 +277,9 @@ func runOCRTrain(args []string) error {
 		if weights[0] <= 0 {
 			return fmt.Errorf("-mix: the shares leave nothing to -train")
 		}
-		src = ocr.NewMixSource(sources, weights, *seed+100)
+		if src, err = ocr.NewMixSource(sources, weights, *seed+100); err != nil {
+			return err
+		}
 	}
 
 	var m *linerec.Model
@@ -275,9 +308,7 @@ func runOCRTrain(args []string) error {
 	}
 	var evalLines []ocr.ShardLine
 	if *val != "" {
-		crop := ocr.DefaultCrop()
-		crop.Height, crop.Window = m.Cfg.Height, m.Cfg.Window
-		if evalLines, err = ocr.LoadLines(*val, crop); err != nil {
+		if evalLines, err = ocr.LoadLines(*val, ocr.ModelCrop(m)); err != nil {
 			return err
 		}
 	}
@@ -431,13 +462,15 @@ func runOCRTrainDet(args []string) error {
 			return err
 		}
 	}
-	m := linedet.New(linedet.Base(), *seed)
+	var m *linedet.Model
 	if *init != "" {
 		d, err := ocr.LoadDetector(*init)
 		if err != nil {
 			return err
 		}
 		m = d.Model()
+	} else {
+		m = linedet.New(linedet.Base(), *seed)
 	}
 	log.Printf("%d training pages, %d validation pages", len(train), len(evalPages))
 	s, err := ocr.TrainDetector(context.Background(), m, train, ocr.DetTrainOptions{
@@ -474,13 +507,31 @@ func runOCREvalDet(args []string) error {
 		if err != nil {
 			return err
 		}
+		// Pages are matched by file name: the two files may sit in
+		// different directories. A name must then be unique, and every
+		// page must have its boxes.
 		byImage := map[string][]ocr.Box{}
 		for _, g := range given {
-			var bs []ocr.Box
+			k := filepath.Base(g.Image)
+			if _, dup := byImage[k]; dup {
+				return fmt.Errorf("-boxes: two pages named %s", k)
+			}
+			bs := []ocr.Box{}
 			for _, b := range g.Boxes {
 				bs = append(bs, ocr.Box{X0: b[0], Y0: b[1], X1: b[2], Y1: b[3]})
 			}
-			byImage[filepath.Base(g.Image)] = bs
+			byImage[k] = bs
+		}
+		seen := map[string]bool{}
+		for _, p := range ps {
+			k := filepath.Base(p.Image)
+			if seen[k] {
+				return fmt.Errorf("-pages: two pages named %s, -boxes cannot tell them apart", k)
+			}
+			seen[k] = true
+			if _, ok := byImage[k]; !ok {
+				return fmt.Errorf("-boxes has no entry for %s", k)
+			}
 		}
 		detect = func(_ *image.Gray, i int) []ocr.Box { return byImage[filepath.Base(ps[i].Image)] }
 	case *det != "":

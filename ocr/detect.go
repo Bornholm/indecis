@@ -186,17 +186,24 @@ const (
 	coreShrinkX = 0.15
 )
 
-// sortLines orders boxes top to bottom, then left to right among boxes on
-// the same band (their centers within half a height).
+// sortLines orders boxes top to bottom, then left to right within a band:
+// boxes sorted by their centers, a band grows while the next center lies
+// within half the band's tallest box of the band's first center. Two
+// passes rather than one comparator, which a pair-dependent band would make
+// intransitive.
 func sortLines(b []Box) {
-	sort.SliceStable(b, func(i, j int) bool {
-		ci, cj := (b[i].Y0+b[i].Y1)/2, (b[j].Y0+b[j].Y1)/2
-		h := min(b[i].Y1-b[i].Y0, b[j].Y1-b[j].Y0)
-		if math.Abs(ci-cj) < h/2 {
-			return b[i].X0 < b[j].X0
+	center := func(x Box) float64 { return (x.Y0 + x.Y1) / 2 }
+	sort.SliceStable(b, func(i, j int) bool { return center(b[i]) < center(b[j]) })
+	for start := 0; start < len(b); {
+		end, tall := start+1, b[start].Y1-b[start].Y0
+		for end < len(b) && center(b[end])-center(b[start]) < tall/2 {
+			tall = max(tall, b[end].Y1-b[end].Y0)
+			end++
 		}
-		return ci < cj
-	})
+		band := b[start:end]
+		sort.SliceStable(band, func(i, j int) bool { return band[i].X0 < band[j].X0 })
+		start = end
+	}
 }
 
 // ReadPage finds the lines of a page and reads them.

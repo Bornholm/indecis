@@ -103,7 +103,17 @@ func Train(ctx context.Context, m *linerec.Model, v Vocab, src LineSource, o Tra
 			return res, err
 		}
 		batch = batch[:0]
+		// The sources are endless: a step that finds no usable line within
+		// maxSkips draws stops the run instead of drawing forever.
+		maxSkips := 100 * o.Batch
+		skips := 0
+		var unknown rune
 		for len(batch) < o.Batch {
+			if skips > 0 && skips%o.Batch == 0 {
+				if err := ctx.Err(); err != nil {
+					return res, err
+				}
+			}
 			l, err := src.Next()
 			if errors.Is(err, io.EOF) {
 				break
@@ -111,10 +121,19 @@ func Train(ctx context.Context, m *linerec.Model, v Vocab, src LineSource, o Tra
 			if err != nil {
 				return res, err
 			}
-			ids, _, ok := enc.Encode(l.Text)
+			ids, bad, ok := enc.Encode(l.Text)
 			_, steps := m.Cfg.Steps(l.W)
 			if !ok || len(ids) == 0 || steps < minSteps(ids) {
 				res.Skipped++
+				if !ok {
+					unknown = bad
+				}
+				if skips++; skips > maxSkips && len(batch) == 0 {
+					if unknown != 0 {
+						return res, fmt.Errorf("ocr: %d lines in a row unusable, for instance with %q outside the vocabulary", skips, unknown)
+					}
+					return res, fmt.Errorf("ocr: %d lines in a row unusable (empty, or too narrow for their text)", skips)
+				}
 				continue
 			}
 			batch = append(batch, item{l, ids})
@@ -412,11 +431,18 @@ type MixSource struct {
 	rng     *rand.Rand
 }
 
-// NewMixSource mixes sources with weights (normalized).
-func NewMixSource(sources []LineSource, weights []float64, seed int64) *MixSource {
+// NewMixSource mixes sources with weights (normalized): one positive
+// weight per source.
+func NewMixSource(sources []LineSource, weights []float64, seed int64) (*MixSource, error) {
+	if len(sources) == 0 || len(weights) != len(sources) {
+		return nil, fmt.Errorf("ocr: %d weights for %d sources", len(weights), len(sources))
+	}
 	m := &MixSource{sources: sources, rng: rand.New(rand.NewSource(seed))}
 	var total float64
 	for _, w := range weights {
+		if !(w > 0) {
+			return nil, fmt.Errorf("ocr: source weight %v is not positive", w)
+		}
 		total += w
 	}
 	acc := 0.0
@@ -424,7 +450,7 @@ func NewMixSource(sources []LineSource, weights []float64, seed int64) *MixSourc
 		acc += w / total
 		m.cum = append(m.cum, acc)
 	}
-	return m
+	return m, nil
 }
 
 // Next returns a line of a source drawn at its rate.
