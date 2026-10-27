@@ -168,7 +168,7 @@ func symbols(r *rand.Rand) string {
 	case 2:
 		return fmt.Sprintf("%s %s%s%s + %s%s → %s", pick(r, []string{"Le", "The", "Réaction :"}), pick(r, []string{"CO", "H", "SO", "NO", "CH"}), pick(r, sub), pick(r, []string{"", "⁻", "⁺"}), pick(r, []string{"O", "H", "N"}), pick(r, sub), pick(r, []string{"H₂O", "CO₂", "NH₃", "CH₄"}))
 	case 3:
-		return pick(r, []string{"■", "□", "▪", "●", "○", "◆", "►", "▶", "✓", "✔", "✗", "☐", "☑"}) + " " + strings.ToUpper(pick(r, labels)[:1]) + strings.ToLower(pick(r, labels))[1:]
+		return pick(r, []string{"■", "□", "▪", "●", "○", "◆", "►", "▶", "✓", "✔", "✗", "☐", "☑"}) + " " + pick(r, labels) + " " + strings.ToLower(pick(r, items))
 	case 4:
 		return fmt.Sprintf("%s %s %s %s %s", pick(r, labels), pick(r, []string{"←", "→", "↑", "↓", "⇒"}), pick(r, labels), pick(r, []string{"→", "⇒"}), pick(r, items))
 	case 5:
