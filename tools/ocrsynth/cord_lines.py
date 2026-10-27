@@ -25,12 +25,14 @@ def main():
     t = pq.read_table(src)
     lines_f = open(os.path.join(out, "lines.jsonl"), "a", encoding="utf-8")
     pages_f = open(os.path.join(out, "pages.jsonl"), "a", encoding="utf-8")
-    split = os.path.basename(src).split("-")[0]
+    parts = os.path.basename(src).split("-")
+    split = parts[0]
+    shard = parts[1] if len(parts) > 2 else "0"
     n_lines = 0
     for i in range(t.num_rows):
         img = t.column("image")[i].as_py()
         gt = json.loads(t.column("ground_truth")[i].as_py())
-        name = f"cord-{split}-{i:04d}.png"
+        name = f"cord-{split}-{shard}-{i:04d}.png"
         im = Image.open(io.BytesIO(img["bytes"])).convert("L")
         im.save(os.path.join(out, "pages", name))
         rows = defaultdict(list)
