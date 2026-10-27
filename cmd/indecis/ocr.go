@@ -13,13 +13,14 @@ import (
 	"strings"
 
 	"github.com/bornholm/indecis/internal/linalg"
+	"github.com/bornholm/indecis/internal/linedet"
 	"github.com/bornholm/indecis/internal/linerec"
 	"github.com/bornholm/indecis/ocr"
 )
 
 func runOCR(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: indecis ocr read|eval|train|shard [options] (indecis ocr <command> -h)")
+		return fmt.Errorf("usage: indecis ocr read|page|eval|train|shard|train-det|eval-det [options] (indecis ocr <command> -h)")
 	}
 	switch args[0] {
 	case "read":
@@ -30,8 +31,14 @@ func runOCR(args []string) error {
 		return runOCRTrain(args[1:])
 	case "shard":
 		return runOCRShard(args[1:])
+	case "page":
+		return runOCRPage(args[1:])
+	case "train-det":
+		return runOCRTrainDet(args[1:])
+	case "eval-det":
+		return runOCREvalDet(args[1:])
 	}
-	return fmt.Errorf("unknown ocr command %q (read, eval, train, shard)", args[0])
+	return fmt.Errorf("unknown ocr command %q (read, page, eval, train, shard, train-det, eval-det)", args[0])
 }
 
 func runOCRRead(args []string) error {
@@ -297,5 +304,153 @@ func ocrOptions(int8 bool) []ocr.Option {
 	if int8 {
 		return []ocr.Option{ocr.WithInt8()}
 	}
+	return nil
+}
+
+func readPages(patterns string) ([]ocr.PageSample, error) {
+	var out []ocr.PageSample
+	for _, g := range strings.Split(patterns, ",") {
+		files, err := filepath.Glob(expandHome(strings.TrimSpace(g)))
+		if err != nil {
+			return nil, err
+		}
+		if len(files) == 0 {
+			return nil, fmt.Errorf("no file for %q", g)
+		}
+		sort.Strings(files)
+		for _, f := range files {
+			ps, err := ocr.ReadPageSamples(f)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, ps...)
+		}
+	}
+	return out, nil
+}
+
+func runOCRPage(args []string) error {
+	fs := flag.NewFlagSet("ocr page", flag.ExitOnError)
+	det := fs.String("det", "", "line detector")
+	model := fs.String("model", "", "recognizer")
+	int8 := fs.Bool("int8", true, "int8 computation if the processor allows it")
+	fs.Parse(args)
+	if err := required(fs, "det", "model"); err != nil {
+		return err
+	}
+	d, err := ocr.LoadDetector(*det)
+	if err != nil {
+		return err
+	}
+	r, err := ocr.Load(*model, ocrOptions(*int8)...)
+	if err != nil {
+		return err
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetEscapeHTML(false)
+	for _, path := range fs.Args() {
+		page, err := ocr.ReadImage(path)
+		if err != nil {
+			return err
+		}
+		boxes, lines := ocr.ReadPage(d, r, page)
+		type line struct {
+			Box        [4]float64 `json:"box"`
+			Text       string     `json:"text"`
+			Confidence float32    `json:"confidence"`
+		}
+		out := make([]line, len(lines))
+		for i, l := range lines {
+			b := boxes[i]
+			out[i] = line{[4]float64{b.X0, b.Y0, b.X1, b.Y1}, l.Text, l.Confidence}
+		}
+		enc.Encode(map[string]any{"image": path, "lines": out})
+	}
+	return nil
+}
+
+func runOCRTrainDet(args []string) error {
+	fs := flag.NewFlagSet("ocr train-det", flag.ExitOnError)
+	pages := fs.String("pages", "", "training pages (JSONL of ocr.PageSample, comma-separated patterns)")
+	val := fs.String("val", "", "validation pages")
+	out := fs.String("out", "", "output directory")
+	init := fs.String("init", "", "start from this detector")
+	steps := fs.Int("steps", 10000, "optimizer steps")
+	batch := fs.Int("batch", 16, "crops per step")
+	crop := fs.Int("crop", 512, "crop side in pixels")
+	lr := fs.Float64("lr", 3e-3, "peak learning rate")
+	warmup := fs.Int("warmup", 300, "warmup steps")
+	evalEvery := fs.Int("eval-every", 1000, "validation every n steps")
+	seed := fs.Int64("seed", 1, "random seed")
+	fs.Parse(args)
+	if err := required(fs, "pages", "out"); err != nil {
+		return err
+	}
+	train, err := readPages(*pages)
+	if err != nil {
+		return err
+	}
+	var evalPages []ocr.PageSample
+	if *val != "" {
+		if evalPages, err = readPages(*val); err != nil {
+			return err
+		}
+	}
+	m := linedet.New(linedet.Base(), *seed)
+	if *init != "" {
+		d, err := ocr.LoadDetector(*init)
+		if err != nil {
+			return err
+		}
+		m = d.Model()
+	}
+	log.Printf("%d training pages, %d validation pages", len(train), len(evalPages))
+	s, err := ocr.TrainDetector(context.Background(), m, train, ocr.DetTrainOptions{
+		Steps: *steps, Batch: *batch, LR: *lr, Warmup: *warmup, WeightDecay: 0.01, Clip: 5, Crop: *crop,
+		Seed: *seed, Eval: evalPages, EvalEvery: *evalEvery, Out: *out, LogEvery: 50, Log: os.Stderr,
+	})
+	if err != nil {
+		return err
+	}
+	log.Printf("best: P %.3f R %.3f F1 %.3f", s.Precision(), s.Recall(), s.F1())
+	return nil
+}
+
+func runOCREvalDet(args []string) error {
+	fs := flag.NewFlagSet("ocr eval-det", flag.ExitOnError)
+	det := fs.String("det", "", "line detector")
+	model := fs.String("model", "", "recognizer: also measure the end-to-end CER of the reference lines")
+	pages := fs.String("pages", "", "labeled pages (JSONL)")
+	iou := fs.Float64("iou", 0.5, "minimum IoU of a match")
+	int8 := fs.Bool("int8", true, "int8 computation if the processor allows it")
+	fs.Parse(args)
+	if err := required(fs, "det", "pages"); err != nil {
+		return err
+	}
+	d, err := ocr.LoadDetector(*det)
+	if err != nil {
+		return err
+	}
+	ps, err := readPages(*pages)
+	if err != nil {
+		return err
+	}
+	s, err := ocr.EvaluateDetector(d, ps, *iou)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("detection  pages %d  lines %d  found %d  P %.3f  R %.3f  F1 %.3f\n", len(ps), s.Ref, s.Pred, s.Precision(), s.Recall(), s.F1())
+	if *model == "" {
+		return nil
+	}
+	r, err := ocr.Load(*model, ocrOptions(*int8)...)
+	if err != nil {
+		return err
+	}
+	e, err := ocr.EvaluatePages(d, r, ps, *iou)
+	if err != nil {
+		return err
+	}
+	printRate("end to end", e)
 	return nil
 }

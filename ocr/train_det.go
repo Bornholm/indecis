@@ -356,3 +356,46 @@ func EvaluateDetector(d *Detector, pages []PageSample, minIoU float64) (Detectio
 func SaveDetector(dir string, m *linedet.Model) error {
 	return saveFiles(dir, m.Cfg, m.Tensors())
 }
+
+// EvaluatePages reads the pages end to end, detection then recognition,
+// and measures the error rates of the reference lines the recognizer's
+// vocabulary can write: a reference line reads as its matched box's text,
+// or as nothing when no box matches it.
+func EvaluatePages(d *Detector, r *Recognizer, pages []PageSample, minIoU float64) (ErrorRate, error) {
+	enc := r.Vocab().Encoder()
+	rates := make([]ErrorRate, len(pages))
+	errs := make([]error, len(pages))
+	linalg.Parallel(len(pages), 1, func(lo, hi int) {
+		for i := lo; i < hi; i++ {
+			g, err := ReadImage(pages[i].Image)
+			if err != nil {
+				errs[i] = err
+				continue
+			}
+			ref := make([]Box, len(pages[i].Boxes))
+			for j, b := range pages[i].Boxes {
+				ref[j] = Box{b[0], b[1], b[2], b[3]}
+			}
+			pred := d.Detect(g)
+			for j, k := range Match(ref, pred, minIoU) {
+				want := NormalizeText(pages[i].Texts[j])
+				if _, _, ok := enc.Encode(want); !ok {
+					continue
+				}
+				got := ""
+				if k >= 0 {
+					got = r.ReadLine(g, pred[k]).Text
+				}
+				rates[i].Add(got, want)
+			}
+		}
+	})
+	var e ErrorRate
+	for i, x := range rates {
+		if errs[i] != nil {
+			return e, errs[i]
+		}
+		e.Merge(x)
+	}
+	return e, nil
+}
