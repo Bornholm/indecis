@@ -80,8 +80,10 @@ Training it on HierText's photographs (v7, v8) helped photographs (F1 0.564 to 0
 
 Uncertain lines (one step below 0.9) can be decoded with a character language model: a CTC prefix beam search whose score adds 0.2·log P of each new character and 1 per character. The model is a 6-gram with Witten-Bell smoothing (`indecis ocr lm`), over Wikipedia and the email corpora, plus the texts of CORD's training receipts, repeated: domain text counts more than volume. It sees quotes, dashes, bullets and boxes, and digits (superscripts and subscripts included) as one class each, so that it has no say where only the glyph's shape decides: without that, it turned "•" into "*" and curly quotes into straight ones.
 
+Version 4 adds 800 kB of Wikipedia in each of 39 more languages, for the 680 characters of recognizer v7. Contexts seen fewer than five times are left out with their n-grams (`-min 5`): 69 MB rather than 172, for the same error rates within 0.1 point.
+
 ```bash
-indecis ocr lm -text 'wiki_fr.txt,wiki_en.txt,receipts.txt' -order 6 -out lm.bin
+indecis ocr lm -text 'wiki_fr.txt,wiki_en.txt,receipts.txt,wiki-multi/*.txt' -order 6 -min 5 -out lm.bin
 indecis ocr page -det det -model rec -lm lm.bin page.png
 ```
 

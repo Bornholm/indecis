@@ -184,9 +184,13 @@ func (b *Builder) Build(minCount uint32) *Model {
 	for i, k := range keys {
 		m.ngramVals[i] = b.ngrams[k]
 	}
+	// A context seen fewer than minCount times keeps none of its n-grams:
+	// it goes too, its characters then drawn from the shorter context.
 	ck := make([]uint64, 0, len(b.ctx))
-	for k := range b.ctx {
-		ck = append(ck, k)
+	for k, st := range b.ctx {
+		if st[0] >= minCount {
+			ck = append(ck, k)
+		}
 	}
 	slices.Sort(ck)
 	m.ctxKeys = ck
