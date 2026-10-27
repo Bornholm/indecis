@@ -612,6 +612,8 @@ func runOCREvalDet(args []string) error {
 	iou := fs.Float64("iou", 0.5, "minimum IoU of a match")
 	ro := recognizerFlags(fs)
 	boxesFile := fs.String("boxes", "", "instead of -det, the boxes of another detector: JSONL of {image, boxes}, image as in -pages")
+	longSide := fs.Int("long-side", 0, "with -det: the length pages are read at (default: the detector's, 1024)")
+	threshold := fs.Float64("threshold", 0, "with -det: the line probability threshold (default: the detector's, 0.5)")
 	fs.Parse(args)
 	if err := required(fs, "pages"); err != nil {
 		return err
@@ -658,6 +660,12 @@ func runOCREvalDet(args []string) error {
 		d, err := ocr.LoadDetector(*det)
 		if err != nil {
 			return err
+		}
+		if *longSide > 0 {
+			d.LongSide = *longSide
+		}
+		if *threshold > 0 {
+			d.Threshold = float32(*threshold)
 		}
 		detect = func(g *image.Gray, _ int) []ocr.Box { return d.Detect(g) }
 	default:
