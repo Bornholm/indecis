@@ -484,6 +484,7 @@ func runOCRPage(args []string) error {
 	det := fs.String("det", "", "line detector")
 	model := fs.String("model", "", "recognizer")
 	ro := recognizerFlags(fs)
+	format := fs.String("format", "json", "json (lines with boxes), html (paragraphs) or text (paragraphs)")
 	fs.Parse(args)
 	if err := required(fs, "det", "model"); err != nil {
 		return err
@@ -508,6 +509,14 @@ func runOCRPage(args []string) error {
 			Box        [4]float64 `json:"box"`
 			Text       string     `json:"text"`
 			Confidence float32    `json:"confidence"`
+		}
+		switch *format {
+		case "html":
+			enc.Encode(map[string]any{"image": path, "html": ocr.PageHTML(ocr.Paragraphs(boxes, lines))})
+			continue
+		case "text":
+			enc.Encode(map[string]any{"image": path, "text": strings.Join(ocr.Paragraphs(boxes, lines), "\n\n")})
+			continue
 		}
 		out := make([]line, len(lines))
 		for i, l := range lines {
