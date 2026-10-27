@@ -19,7 +19,7 @@ Measured on the Core Ultra 7 265U: onnxruntime, 1 thread, 2.0 ms for a line of 2
 
 ## Status (October 27, 2026)
 
-P1 to P7 done; P8 done but for reading order (see [ocr.md](ocr.md)): page reading, end to end, is on par with Indra on English PDFs and photographed receipts, behind on French PDFs (2.28% against 1.24%, the detector misses table cells). P9: docs written as the phases land. Next: reading order (XY-cut), more real scans, the detector's recall on tables.
+P1 to P8 done, P10 measured (see [ocr.md](ocr.md)). Recognizer v5 with its language model reads ahead of Indra on French and English PDFs, receipts photographed and old French prints, behind on scanned English receipts. Page reading, end to end, is ahead of Indra on English PDFs, receipts and old prints, behind on French PDFs, where the detector misses table cells. On Omni Parse Bench's Latin printed image pages, 51.4 against Indra's 63.5. Next: tables and forms (cells kept apart), more real scans, longer training.
 
 ## Phases
 
