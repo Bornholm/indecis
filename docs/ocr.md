@@ -56,7 +56,7 @@ int8 changes no rate by more than 0.02 point. Reading a line 800 pixels wide on 
 
 ### Pages
 
-The detector follows Indra's `det.onnx` (same 90,568 parameters): a stride-2 stem, four stages of MobileNet blocks, an FPN merged at stride 4, and three maps at stride 2, the line cores and, from each core pixel, the distances to the line's top and bottom. Pages are read with their longer side at 1,024 pixels, again larger when the lines come out small. Lines come in reading order, by recursive XY-cut (columns before rows when a gutter is wider than the gaps between blocks, or, narrower, between two columns of text; short cells facing each other row by row, as a receipt's labels and amounts, read row by row), and `Paragraphs` groups them.
+The detector follows Indra's `det.onnx` (same 90,568 parameters): a stride-2 stem, four stages of MobileNet blocks, an FPN merged at stride 4, and three maps at stride 2, the line cores and, from each core pixel, the distances to the line's top and bottom. Pages are read with their longer side at 1,024 pixels, again larger when the lines come out small. `indecis ocr page` first straightens a slanted page (`ocr.Deskew`, up to 8°: the angle at which the ink is most concentrated on rows, unless each half of the page is level on its own, as two columns set at different heights are); a line tilted by its height over its length would otherwise be cut by its box. On Omni Parse Bench's pages turned by 2°, it took the share of text tests passed from 33% to 56%. Lines come in reading order, by recursive XY-cut (columns before rows when a gutter is wider than the gaps between blocks, or, narrower, between two columns of text; short cells facing each other row by row, as a receipt's labels and amounts, read row by row), and `Paragraphs` groups them.
 
 Lines found at IoU 0.5 (F1), and end-to-end CER of the reference lines (a missed line counts as read empty), against Indra's detector and recognizer (its decoding re-implemented over its ONNX file):
 
@@ -88,9 +88,9 @@ Share of the text tests passed, on the 2,777 pages read (160 pages could not be 
 
 | Tests | Tests | indecis | Indra | Tesseract | Surya OCR 2 |
 | --- | --- | --- | --- | --- | --- |
-| Latin script, printed, no math, image pages | 1,322 | 51.1 | 63.5 | 19.4 | 79.0 |
-| Latin script, printed, no math, all pages | 2,732 | 54.8 | 68.1 | 33.4 | 78.7 |
-| All text tests | 8,007 | 23.4 | 59.2 | 17.8 | 80.5 |
+| Latin script, printed, no math, image pages | 1,322 | 53.1 | 63.5 | 19.4 | 79.0 |
+| Latin script, printed, no math, all pages | 2,732 | 55.9 | 68.1 | 33.4 | 78.7 |
+| All text tests | 8,007 | 23.8 | 59.2 | 17.8 | 80.5 |
 
 indecis passes far more than Tesseract and stays behind Indra. The whole benchmark is out of its reach in places: math (3,271 tests, written as LaTeX), handwriting, rotated pages, scripts other than Latin. On Latin printed pages, a quarter of its failures are a sentence one or two characters off (a test allows one), half are text partly found: lines cut or joined differently from the reference, form cells joined across a row.
 
