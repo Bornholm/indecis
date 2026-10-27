@@ -100,6 +100,14 @@ Indra's `det.onnx` (91 k parameters), read from its graph: the page in gray, lon
 - `ocr.ReadPage`, `indecis ocr page`.
 - Measures: line detection F1 at IoU 0.5 on HAL pages, and end-to-end CER of a page (its text in reading order against the text layer).
 
+### P10. Indra's benchmarks
+
+Measure indecis where Indra publishes its numbers, so that the two can be compared on its own ground.
+
+- [OmniParseBench](https://github.com/datalab-to/omni_parse_bench) (Apache-2.0 code; tests CC BY 4.0, ODC-BY and MIT by source; data on Hugging Face `datalab-to/omni_parse_bench`): 2,937 pages, pass/fail tests in three families. indecis outputs lines, so only the **text** family applies (`present`, `order`, `repeat`), as for Tesseract in Indra's table; tables and layout stay unscored. Compare with Indra's OCR-only text score (40.7: no text layer, as indecis), on all pages and on the Latin-script ones (Indra: 61.6).
+- olmOCR-bench (ODC-BY), where Indra reports headers and footers, tables, multi-column pages and old scans: the text-presence, absence and reading-order tests apply.
+- Needs first: reading order (XY-cut, columns), lines grouped into paragraphs, pages rendered from the PDFs (pdftoppm), and the page output as HTML for the benchmark's scorer (`opb score --pred outputs.json --gold`), run as published so the numbers compare.
+
 ### P9. Documentation
 
 `docs/ocr.md` (usage, numbers), `docs/architecture.md`, `ROADMAP.md`, README.
