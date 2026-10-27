@@ -406,6 +406,7 @@ type recognizerOpts struct {
 	alpha, beta *float64
 	gate        *float64
 	beam, top   *int
+	lower       *bool
 }
 
 func recognizerFlags(fs *flag.FlagSet) *recognizerOpts {
@@ -418,6 +419,7 @@ func recognizerFlags(fs *flag.FlagSet) *recognizerOpts {
 		gate:  fs.Float64("lm-gate", float64(d.Gate), "lines read at least this surely skip the language model"),
 		beam:  fs.Int("lm-beam", d.Beam, "prefixes kept per step"),
 		top:   fs.Int("lm-top", d.Top, "characters tried per step"),
+		lower: fs.Bool("lm-lower", d.LowerOnly, "the language model weighs small letters only"),
 	}
 }
 
@@ -433,7 +435,7 @@ func (o *recognizerOpts) options() []ocr.Option {
 			log.Fatal(err)
 		}
 		lo := ocr.DefaultLM()
-		lo.Alpha, lo.Beta, lo.Gate, lo.Beam, lo.Top = *o.alpha, *o.beta, float32(*o.gate), *o.beam, *o.top
+		lo.Alpha, lo.Beta, lo.Gate, lo.Beam, lo.Top, lo.LowerOnly = *o.alpha, *o.beta, float32(*o.gate), *o.beam, *o.top, *o.lower
 		opts = append(opts, ocr.WithLanguageModel(lm, lo))
 	}
 	return opts

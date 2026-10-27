@@ -31,6 +31,7 @@ def main():
     ap.add_argument("--det", required=True)
     ap.add_argument("--model", required=True)
     ap.add_argument("--lm", default="")
+    ap.add_argument("--extra", default="", help="more flags for indecis ocr page, space-separated")
     ap.add_argument("--dpi", type=int, default=200)
     ap.add_argument("--batch", type=int, default=40)
     ap.add_argument("--procs", type=int, default=3)
@@ -64,6 +65,7 @@ def main():
     cmd = [a.indecis, "ocr", "page", "-format", "html", "-det", a.det, "-model", a.model]
     if a.lm:
         cmd += ["-lm", a.lm]
+    cmd += a.extra.split()
     ids = {path: pid for pid, path in todo}
 
     def read(batch):

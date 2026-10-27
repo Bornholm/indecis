@@ -4,6 +4,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/bornholm/indecis/internal/charlm"
 	"github.com/bornholm/indecis/internal/linalg"
@@ -23,10 +24,14 @@ type LMOptions struct {
 	// is (0.9): the search costs time and only helps where the recognizer
 	// hesitates.
 	Gate float32
+	// LowerOnly: the language model weighs small letters only (false).
+	LowerOnly bool
 }
 
 // DefaultLM returns the default decoding options.
-func DefaultLM() LMOptions { return LMOptions{Alpha: 0.2, Beta: 1.0, Beam: 4, Top: 3, Gate: 0.9} }
+func DefaultLM() LMOptions {
+	return LMOptions{Alpha: 0.2, Beta: 1.0, Beam: 4, Top: 3, Gate: 0.9}
+}
 
 // LanguageModel is a character language model (indecis ocr lm).
 type LanguageModel = charlm.Model
@@ -115,7 +120,13 @@ func beamDecode(logits []float32, L, V int, chars []string, lm *charlm.Model, o 
 				p.steps = append(append([]int(nil), from.steps...), t)
 				p.runes = append([]rune(nil), from.runes...)
 				for _, r := range chars[add-1] {
-					p.lm += o.Alpha*lmLog(p.runes, r) + o.Beta
+					// Only small letters are the language model's to weigh:
+					// capitals, digits and signs make codes, references,
+					// formulas, which its text hardly holds.
+					if !o.LowerOnly || unicode.IsLower(r) {
+						p.lm += o.Alpha * lmLog(p.runes, r)
+					}
+					p.lm += o.Beta
 					p.runes = append(p.runes, r)
 				}
 			}
