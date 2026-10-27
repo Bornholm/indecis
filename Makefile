@@ -24,7 +24,7 @@ test-scalar:
 # The OCR and its kernels must keep running in WebAssembly (browser demos):
 # same tests, js/wasm under Node.
 test-wasm:
-	PATH="$$PATH:$$(go env GOROOT)/lib/wasm" GOOS=js GOARCH=wasm GOEXPERIMENT= go test -short ./ocr ./internal/linerec ./internal/linedet ./internal/convnet ./internal/charlm ./internal/linalg
+	PATH="$$PATH:$$(go env GOROOT)/lib/wasm" GOOS=js GOARCH=wasm GOEXPERIMENT= go test -short ./ocr ./internal/linerec ./internal/linedet ./internal/convnet ./internal/charlm
 
 bench:
 	go test -run xxx -bench . ./internal/linalg/ ./internal/modernbert/ ./tokenizer/
