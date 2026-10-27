@@ -313,9 +313,10 @@ func (s *MemorySource) Next() (ShardLine, error) {
 
 // ShardSource streams the lines of shard files in a random order: shards
 // in a shuffled order, lines through a shuffle buffer, pass after pass.
+// The buffer keeps the ink in bytes: a line in float32 takes 150 kB.
 type ShardSource struct {
 	paths  []string
-	buffer []ShardLine
+	buffer []bufferedLine
 	size   int
 	rng    *rand.Rand
 	order  []int
@@ -339,13 +340,30 @@ func (s *ShardSource) Next() (ShardLine, error) {
 		if err != nil {
 			return l, err
 		}
-		s.buffer = append(s.buffer, l)
+		ink := make([]uint8, len(l.Ink))
+		for j, v := range l.Ink {
+			ink[j] = uint8(v*255 + 0.5)
+		}
+		l.Ink = nil
+		s.buffer = append(s.buffer, bufferedLine{l, ink})
 	}
 	i := s.rng.Intn(len(s.buffer))
-	l := s.buffer[i]
+	b := s.buffer[i]
 	s.buffer[i] = s.buffer[len(s.buffer)-1]
 	s.buffer = s.buffer[:len(s.buffer)-1]
+	l := b.line
+	l.Ink = make([]float32, len(b.ink))
+	for j, v := range b.ink {
+		l.Ink[j] = float32(v) / 255
+	}
 	return l, nil
+}
+
+// bufferedLine is a line waiting in a ShardSource's buffer, its ink in
+// 255ths (as the shard stores it).
+type bufferedLine struct {
+	line ShardLine
+	ink  []uint8
 }
 
 // read returns the next line of the current shard, opening the next shard
