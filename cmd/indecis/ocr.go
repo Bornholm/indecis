@@ -283,21 +283,20 @@ func runOCRShard(args []string) error {
 	if err := required(fs, "data", "out"); err != nil {
 		return err
 	}
-	lines, err := ocr.LoadLines(*data, ocr.DefaultCrop())
-	if err != nil {
-		return err
-	}
 	w, err := ocr.CreateShard(*out)
 	if err != nil {
 		return err
 	}
-	for _, l := range lines {
-		if err := w.Write(l.Text, ocr.Crop{Ink: l.Ink, W: l.W}, l.Meta); err != nil {
-			w.Close()
-			return err
-		}
+	n := 0
+	err = ocr.EachLine(*data, ocr.DefaultCrop(), func(l ocr.ShardLine) error {
+		n++
+		return w.Write(l.Text, ocr.Crop{Ink: l.Ink, W: l.W}, l.Meta)
+	})
+	if err != nil {
+		w.Close()
+		return err
 	}
-	log.Printf("%d lines", len(lines))
+	log.Printf("%d lines", n)
 	return w.Close()
 }
 

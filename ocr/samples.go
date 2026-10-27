@@ -97,24 +97,36 @@ func LoadLines(path string, o CropOptions) ([]ShardLine, error) {
 			out = append(out, l)
 		}
 	}
+	var out []ShardLine
+	err := EachLine(path, o, func(l ShardLine) error {
+		out = append(out, l)
+		return nil
+	})
+	return out, err
+}
+
+// EachLine cuts the lines of a JSONL file of samples one by one, holding a
+// single page in memory: consecutive samples of the same image share it.
+func EachLine(path string, o CropOptions, fn func(ShardLine) error) error {
 	samples, err := ReadSamples(path)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	out := make([]ShardLine, len(samples))
-	pages := map[string]*image.Gray{}
-	for i, s := range samples {
-		page := pages[s.Image]
-		if page == nil {
+	var page *image.Gray
+	var pagePath string
+	for _, s := range samples {
+		if s.Image != pagePath {
 			if page, err = ReadImage(s.Image); err != nil {
-				return nil, err
+				return err
 			}
-			pages[s.Image] = page
+			pagePath = s.Image
 		}
 		c := CropLine(page, s.BoxOf(page), o)
-		out[i] = ShardLine{Text: NormalizeText(s.Text), W: c.W, Rows: len(c.Ink) / c.W, Meta: s.Meta, Ink: c.Ink}
+		if err := fn(ShardLine{Text: NormalizeText(s.Text), W: c.W, Rows: len(c.Ink) / c.W, Meta: s.Meta, Ink: c.Ink}); err != nil {
+			return err
+		}
 	}
-	return out, nil
+	return nil
 }
 
 // PageSample is a labeled page (one JSONL row): its image and the ink box
