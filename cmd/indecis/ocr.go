@@ -510,6 +510,7 @@ func runOCRPage(args []string) error {
 	ro := recognizerFlags(fs)
 	format := fs.String("format", "json", "json (lines with boxes), html (paragraphs) or text (paragraphs)")
 	deskew := fs.Bool("deskew", true, "straighten slanted pages first (boxes then refer to the straightened page)")
+	orient := fs.Bool("orient", true, "turn pages scanned sideways or upside down upright first (boxes then refer to the turned page)")
 	fs.Parse(args)
 	if err := required(fs, "det", "model"); err != nil {
 		return err
@@ -529,11 +530,19 @@ func runOCRPage(args []string) error {
 		if err != nil {
 			return err
 		}
+		var boxes []ocr.Box
+		turns := 0
+		if *orient {
+			page, turns, boxes = ocr.Orient(d, r, page)
+		}
 		angle := 0.0
 		if *deskew {
 			page, angle = ocr.Deskew(page)
 		}
-		boxes, lines := ocr.ReadPage(d, r, page)
+		if boxes == nil || angle != 0 {
+			boxes = d.Detect(page)
+		}
+		lines := r.ReadLines(page, boxes)
 		type line struct {
 			Box        [4]float64 `json:"box"`
 			Text       string     `json:"text"`
@@ -552,7 +561,7 @@ func runOCRPage(args []string) error {
 			b := boxes[i]
 			out[i] = line{[4]float64{b.X0, b.Y0, b.X1, b.Y1}, l.Text, l.Confidence}
 		}
-		enc.Encode(map[string]any{"image": path, "angle": angle, "lines": out})
+		enc.Encode(map[string]any{"image": path, "turns": turns, "angle": angle, "lines": out})
 	}
 	return nil
 }
