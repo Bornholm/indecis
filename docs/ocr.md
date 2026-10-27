@@ -27,30 +27,35 @@ line.Confidence // the lowest probability among the line's steps
 
 Character error rate (CER) on lines cut the same way for both engines, against Indra's recognizer (v1.1.0) read by the same Go code. References and readings are normalized alike (`ocr.NormalizeText`: accents precomposed, "¬" read as a hyphen) and compared with dot leaders ("......") cut to "..." (`ocr.CompareForm`): no reader counts them right.
 
-| Set | Lines | indecis v5 + language model | Indra |
+| Set | Lines | indecis v7 + language model | Indra |
 | --- | --- | --- | --- |
 | HAL born-digital PDFs, French (documents not trained on) | 3,270 | **0.58%** | 0.60% |
-| HAL born-digital PDFs, English | 3,543 | **0.32%** | 0.38% |
-| CORD receipts, photographed (validation split) | 1,413 | **2.21%** | 5.86% |
-| Old French prints, scanned (HTR-United: Argus des brevets 1910, Exposition universelle 1878, NuBIS) | 6,260 | **2.37%** | 3.95% |
-| SROIE receipts, scanned (in capitals) | 2,000 | 3.44% | **3.04%** |
+| HAL born-digital PDFs, English | 3,543 | **0.34%** | 0.38% |
+| CORD receipts, photographed (validation split) | 1,413 | **1.77%** | 5.86% |
+| Old French prints, scanned (HTR-United: Argus des brevets 1910, Exposition universelle 1878, NuBIS) | 6,260 | **2.58%** | 3.95% |
+| HierText, photographed text (validation split) | 3,000 | **9.67%** | 11.95% |
+| SROIE receipts, scanned (in capitals) | 2,000 | 3.04% | 3.04% |
 
-v5 learned from CORD's training receipts and from FONDUE's old printed catalogs (other documents than those measured, but of the same kinds): its CORD and old-print numbers favour it. Scanned receipts in English stay a little behind.
+v7 learned from CORD's training receipts, FONDUE's old printed catalogs and HierText's training photographs (other documents than those measured, but of the same kinds): its CORD, old-print and HierText numbers favour it.
 
-How the recognizer got there (CER, greedy decoding but v4 and v5, which use the language model):
+How the recognizer got there (CER, greedy decoding but from v4 on, which use the language model; v6 and v7 its version 3, in more languages):
 
-| Set | v1 | v2 | v3 | v4 | v5 |
-| --- | --- | --- | --- | --- | --- |
-| HAL PDFs, French | 1.01% | 0.91% | 0.75% | 0.62% | 0.58% |
-| HAL PDFs, English | 0.55% | 0.51% | 0.36% | 0.32% | 0.32% |
-| CORD receipts | | 14.79% | 4.43% | 2.63% | 2.21% |
-| SROIE receipts | 7.11% | 6.50% | 4.44% | 3.94% | 3.44% |
+| Set | v1 | v2 | v3 | v4 | v5 | v6 | v7 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| HAL PDFs, French | 1.01% | 0.91% | 0.75% | 0.62% | 0.58% | 0.56% | 0.58% |
+| HAL PDFs, English | 0.55% | 0.51% | 0.36% | 0.32% | 0.32% | 0.33% | 0.34% |
+| CORD receipts | | 14.79% | 4.43% | 2.63% | 2.21% | 2.36% | 1.77% |
+| Old French prints | | | | | 2.37% | 2.34% | 2.58% |
+| HierText photographs | | | | | 14.05% | 13.70% | 9.67% |
+| SROIE receipts | 7.11% | 6.50% | 4.44% | 3.94% | 3.44% | 3.49% | 3.04% |
 
 - v1: Indra's architecture with a layer norm (1.06 M parameters), 20,000 steps of 64 lines (1 M synthetic lines, 25,000 lines of HAL PDFs), 80 minutes on the 14 cores of a Core Ultra 7 265U.
 - v2: 15,000 more steps with 600,000 new synthetic lines (receipts, typographic quotes, wide spaces, dot-matrix print).
 - v3: 15,000 more steps, 30% of real lines (HAL PDFs, 200 CORD receipts).
 - v4: 15,000 more steps, all 800 CORD training receipts and 494 more English HAL documents.
 - v5: 20,000 more steps, the vocabulary extended from 189 to 305 characters (superscripts and subscripts, bullets and boxes, arrows, Greek, Central European and Turkish letters), synthetic lines with old prints' long s and more typographic quotes, real lines of DocLayNet (176,000) and FONDUE's catalogs (37,000).
+- v6: 20,000 more steps, the vocabulary extended to 680 characters (the Latin letters of 33 more languages, Vietnamese included, the Cyrillic and Greek alphabets, circled numbers, logic signs), 300,000 synthetic lines of Wikipedia in 39 more languages, 150,000 in 27 script and handwriting-style typefaces.
+- v7: 10,000 more steps with 188,000 photographed lines of HierText.
 
 int8 changes no rate by more than 0.02 point. Reading a line 800 pixels wide on one core (P-core), greedy decoding: 6.8 ms in float32, **4.6 ms in int8**; Indra's recognizer (1,698 symbols) takes 8.2 ms in float32 and 5.4 ms in int8 in Go, 5.4 ms in onnxruntime (float32, one thread).
 
