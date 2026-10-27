@@ -15,6 +15,9 @@ Data used to train and measure the line recognizer (see [ocr-plan.md](ocr-plan.m
 | DocLayNet v1.1, first train shard (`docling-project/DocLayNet-v1.1`) | CDLA-Permissive-1.0 | Reports, manuals, patents, laws, tenders: rendered pages with their PDF text cells (`tools/ocrsynth/doclaynet_lines.py`) |
 | Synthetic pages (`ocrsynth -pages`): columns, headings, paragraphs, lists, tables | ours | Line detection: 3,000 pages |
 | CORD v2, train split (`naver-clova-ix/cord-v2`, 800 receipts) | CC BY 4.0 | Photographed receipts: 12,623 lines, 800 pages (`tools/ocrsynth/cord_lines.py`); their texts also feed the language model |
+| Wikipedia in 39 more languages (Latin, Cyrillic and Greek scripts), 1,000 to 20,000 paragraphs each (`tools/ocrsynth/wiki_rows.py`, through the Hugging Face dataset viewer) | CC BY-SA 4.0 | Running text for the 680-character recognizer (v6), rendered; 800 kB of each also feed the language model |
+| Fonts: 27 script and handwriting-style families of Google Fonts (`fonts-script`) | SIL Open Font License 1.1, Apache 2.0 | Lines in cursive typefaces, as letters and invitations set them |
+| HierText train split (Open Images photographs and scans, lines outlined and transcribed) | CC BY-SA 4.0 | Photographed text: the legible printed lines within 3° of level (`tools/ocrsynth/hiertext_lines.py`) |
 
 Fonts only shape the rendered images; the model contains none of them. Variable fonts are instantiated at weights 400 and 700 with `fonttools varLib.instancer` (x/image cannot read variable fonts' metrics).
 
@@ -28,6 +31,7 @@ Fonts only shape the rendered images; the model contains none of them. Variable 
 | CORD v2, test split | 1,503 lines, 100 pages | CC BY 4.0 | Held out to set the language model's weights, never reported |
 | HAL born-digital, 99 English documents of the extra sample | 3,000 lines drawn from 18,161 | CC BY 4.0, CC0, Licence Ouverte 2.0 | Held out to set the language model's weights, never reported |
 | CORD v2, validation split | 1,413 lines, 100 pages | CC BY 4.0 | Photographed receipts (Indonesian), a row's words cut at gaps wider than 1.5 word heights |
+| HierText validation split | 3,000 lines drawn from 40,041 | CC BY-SA 4.0 | Photographed text (signs, packaging, posters, documents), legible printed lines within 3° of level |
 | SROIE 2019, test (`priyank-m/SROIE_2019_text_recognition`) | 2,000 drawn from 18,704 | research only (ICDAR 2019 competition) | Scanned receipts, English; references in capitals: measured with `-fold-case`; local use only |
 
 HAL adds a cover page to every document: `ocrpdf` starts at page 2. Documents whose text layer maps ligatures to wrong characters ("obten;on", "CeHe") are dropped.
@@ -39,6 +43,16 @@ D=~/.cache/indecis/datasets/ocr
 # Text: Wikipedia shards from huggingface.co/datasets/wikimedia/wikipedia
 tools/oracle/.venv/bin/python tools/ocrsynth/wiki_text.py fr0.parquet $D/text/wiki_fr.txt 400000
 tools/oracle/.venv/bin/python tools/ocrsynth/wiki_text.py en0.parquet $D/text/wiki_en.txt 300000
+
+# Text in 39 more languages, and the 680 characters of the recognizer v6
+for l in vi ro lt lv is ha yo ig cs sk pl hu hr sl et tr az sq mt cy eo ga da sv fi de es it pt ca nl ru uk bg sr be mk kk el; do
+  python3 tools/ocrsynth/wiki_rows.py $l $D/text/wiki-multi/wiki_$l.txt 20000 15
+done
+python3 tools/ocrsynth/extend_charset.py runs/ocr-v5/model/vocab.json $D/charset-v6.txt 200 $D/text/wiki-multi/wiki_*.txt
+
+# HierText: annotations from github.com/google-research-datasets/hiertext (gt/), images from
+# s3://open-images-dataset/ocr/{train,validation}.tgz
+python3 tools/ocrsynth/hiertext_lines.py hiertext/train.jsonl.gz hiertext/train $D/hiertext-train
 
 # Synthetic lines
 cd tools/ocrsynth
