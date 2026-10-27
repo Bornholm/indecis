@@ -15,10 +15,10 @@ import (
 // new character and Beta per character (against the model's taste for
 // short texts).
 type LMOptions struct {
-	Alpha float64 // weight of the language model (0.3)
+	Alpha float64 // weight of the language model (0.2)
 	Beta  float64 // bonus per character (1.0)
-	Beam  int     // prefixes kept per step (8)
-	Top   int     // characters tried per step (6)
+	Beam  int     // prefixes kept per step (4)
+	Top   int     // characters tried per step (3)
 	// Gate: a line whose greedy reading is at least this sure is kept as
 	// is (0.9): the search costs time and only helps where the recognizer
 	// hesitates.
@@ -26,7 +26,7 @@ type LMOptions struct {
 }
 
 // DefaultLM returns the default decoding options.
-func DefaultLM() LMOptions { return LMOptions{Alpha: 0.3, Beta: 1.0, Beam: 8, Top: 6, Gate: 0.9} }
+func DefaultLM() LMOptions { return LMOptions{Alpha: 0.2, Beta: 1.0, Beam: 4, Top: 3, Gate: 0.9} }
 
 // WithLanguageModel decodes uncertain lines with a character language
 // model (see LMOptions).
@@ -58,19 +58,27 @@ func beamDecode(logits []float32, L, V int, chars []string, lm *charlm.Model, o 
 	linalg.ZeroUpper()
 	inf := math.Inf(-1)
 	lp := make([]float64, V)
+	ex := make([]float32, V)
 	beams := []*prefix{{pb: 0, pnb: inf}}
-	order := make([]int, V)
+	var cands []int
+	// The beams share contexts: each (context, character) is asked once.
+	cache := map[string]float64{}
+	lmLog := func(ctx []rune, r rune) float64 {
+		n := min(len(ctx), lm.Order-1)
+		k := string(append(append(make([]rune, 0, n+1), ctx[len(ctx)-n:]...), r))
+		if v, ok := cache[k]; ok {
+			return v
+		}
+		v := math.Log(lm.Prob(ctx, r))
+		cache[k] = v
+		return v
+	}
 	for t := range L {
 		row := logits[t*V : (t+1)*V]
-		mx := float64(row[0])
-		for _, v := range row {
-			mx = max(mx, float64(v))
-		}
-		var sum float64
-		for _, v := range row {
-			sum += math.Exp(float64(v) - mx)
-		}
-		lse := mx + math.Log(sum)
+		copy(ex, row)
+		mx := linalg.MaxOf(ex)
+		lse := float64(mx) + math.Log(float64(linalg.ExpShift(ex, mx)))
+		linalg.ZeroUpper()
 		for k, v := range row {
 			lp[k] = float64(v) - lse
 		}
@@ -81,11 +89,7 @@ func beamDecode(logits []float32, L, V int, chars []string, lm *charlm.Model, o 
 			}
 			continue
 		}
-		for k := range order {
-			order[k] = k
-		}
-		sort.Slice(order, func(a, b int) bool { return lp[order[a]] > lp[order[b]] })
-		cands := order[:min(o.Top+1, V)]
+		cands = topK(cands[:0], lp, o.Top+1)
 
 		next := map[string]*prefix{}
 		get := func(from *prefix, add int) *prefix {
@@ -104,7 +108,7 @@ func beamDecode(logits []float32, L, V int, chars []string, lm *charlm.Model, o 
 				p.steps = append(append([]int(nil), from.steps...), t)
 				p.runes = append([]rune(nil), from.runes...)
 				for _, r := range chars[add-1] {
-					p.lm += o.Alpha*math.Log(lm.Prob(p.runes, r)) + o.Beta
+					p.lm += o.Alpha*lmLog(p.runes, r) + o.Beta
 					p.runes = append(p.runes, r)
 				}
 			}
@@ -161,6 +165,24 @@ func beamDecode(logits []float32, L, V int, chars []string, lm *charlm.Model, o 
 		syms[i] = linerec.Symbol{ID: id, Step: best.steps[i], Steps: max(1, end-best.steps[i])}
 	}
 	return syms
+}
+
+// topK appends to dst the indices of the k largest values of x, largest
+// first.
+func topK(dst []int, x []float64, k int) []int {
+	for i, v := range x {
+		if len(dst) < k {
+			dst = append(dst, i)
+		} else if v <= x[dst[k-1]] {
+			continue
+		} else {
+			dst[k-1] = i
+		}
+		for j := len(dst) - 1; j > 0 && x[dst[j]] > x[dst[j-1]]; j-- {
+			dst[j], dst[j-1] = dst[j-1], dst[j]
+		}
+	}
+	return dst
 }
 
 func logAdd(a, b float64) float64 {

@@ -59,6 +59,26 @@ Lines found at IoU 0.5 (F1), and end-to-end CER of the reference lines (a missed
 
 Detector v5: 1,789 pages of HAL PDFs, 3,000 synthetic pages (columns, lists, tables), CORD's 200 training receipts. On French pages it still misses lines Indra finds (recall 0.896 against 0.939), mostly short text in table cells.
 
+### Language model
+
+Uncertain lines (one step below 0.9) can be decoded with a character language model: a CTC prefix beam search whose score adds 0.2·log P of each new character and 1 per character. The model is a 6-gram with Witten-Bell smoothing (`indecis ocr lm`), over Wikipedia and the email corpora, plus the texts of CORD's training receipts, repeated: domain text counts more than volume. It sees quotes, dashes, bullets and digits as one class each, so that it has no say where only the glyph's shape decides: without that, it turned "•" into "*" and curly quotes into straight ones.
+
+```bash
+indecis ocr lm -text 'wiki_fr.txt,wiki_en.txt,receipts.txt' -order 6 -out lm.bin
+indecis ocr page -det det -model rec -lm lm.bin page.png
+```
+
+Recognizer v3, CER without and with the model (weights set on held-out sets: 3,000 lines of other HAL PDFs and CORD's test split):
+
+| Set | Greedy | With the language model | Indra |
+| --- | --- | --- | --- |
+| HAL PDFs, French | 0.75% | 0.65% | 0.60% |
+| HAL PDFs, English | 0.36% | 0.35% | 0.38% |
+| CORD receipts | 4.43% | **3.66%** | 5.86% |
+| SROIE receipts | 4.44% | 3.66% | 3.04% |
+
+It costs about 3 ms per uncertain line of 400 pixels on one core. End to end, its gain shows on receipts (CORD 9.40% to 8.76%); on PDFs, the lines the detector misses dominate.
+
 ## Measuring
 
 ```bash
