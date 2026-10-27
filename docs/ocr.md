@@ -67,12 +67,14 @@ Lines found at IoU 0.5 (F1), and end-to-end CER of the reference lines (a missed
 
 | Pages | indecis F1 | Indra F1 | indecis end to end | Indra end to end |
 | --- | --- | --- | --- | --- |
-| HAL PDFs, French (80 pages) | 0.884 | **0.908** | 2.01% | **1.24%** |
-| HAL PDFs, English (73 pages) | 0.892 | **0.906** | **0.99%** | 1.20% |
-| CORD receipts (100 photos) | **0.914** | 0.804 | **6.51%** | 10.11% |
-| Old French prints (129 scans) | **0.903** | 0.900 | **7.93%** | 8.71% |
+| HAL PDFs, French (80 pages) | 0.854 | **0.908** | 1.78% | **1.24%** |
+| HAL PDFs, English (73 pages) | 0.878 | **0.906** | **1.02%** | 1.20% |
+| CORD receipts (100 photos) | **0.890** | 0.804 | **6.86%** | 10.11% |
+| Old French prints (129 scans) | 0.896 | **0.900** | **8.12%** | 8.71% |
 
-Detector v6, trained in one run (15,000 steps of 12 crops, 3 hours): 2,505 pages of HAL PDFs, 2,077 of DocLayNet, 3,000 synthetic pages (columns, lists, tables), CORD's 800 training receipts. On French PDFs it still misses lines Indra finds, mostly short text in table cells.
+Detector v10 with recognizer v7 and the language model version 3. Detector v6 was trained in one run (15,000 steps of 12 crops, 3 hours): 2,505 pages of HAL PDFs, 2,077 of DocLayNet, 3,000 synthetic pages (columns, lists, tables), CORD's 800 training receipts. v10 went on from it for 8,000 steps on the same pages, with two changes. Crops are damaged as photocopies and old typewritten forms are, four in ten: strokes thinned by blotches, a blur, stains of the paper, specks, contrast down to a third. And the regions of a page whose ink no labeled line covers (pictures, charts, maps: a PDF's text layer holds none of their text) count for nothing in the loss (`PageSample.Ignore`, `tools/ocrsynth/ignore_unlabeled.py`): shown as paper, their text taught the detector to skip text in figures. Its F1 on these sets went down (it finds the figures' text, which their references leave out) and its end-to-end error on French PDFs too (2.07% to 1.78%); on Omni Parse Bench, it took the image pages from 56.8 to 58.6.
+
+Training it on HierText's photographs (v7, v8) helped photographs (F1 0.564 to 0.669 on HierText's validation pages, Indra 0.726) but cost documents, and FONDUE's pages, whose lines are not all labeled, cost old prints: neither is in v10.
 
 ### Language model
 
@@ -93,12 +95,12 @@ Share of the text tests passed, on the 2,777 pages read (160 pages could not be 
 
 | Tests | Tests | indecis | Indra | Tesseract | Surya OCR 2 |
 | --- | --- | --- | --- | --- | --- |
-| Latin script, printed, no math, image pages | 1,322 | 56.8 | 63.5 | 19.4 | 79.0 |
-| Latin script, printed, no math, all pages | 2,732 | 58.9 | 68.1 | 33.4 | 78.7 |
+| Latin script, printed, no math, image pages | 1,322 | 58.6 | 63.5 | 19.4 | 79.0 |
+| Latin script, printed, no math, all pages | 2,732 | 60.4 | 68.1 | 33.4 | 78.7 |
 | Pages turned by a quarter, a half or three quarters | 183 | 76.5 | 79.2 | | |
-| All text tests | 8,007 | 27.2 | 59.2 | 17.8 | 80.5 |
+| All text tests | 8,007 | 27.9 | 59.2 | 17.8 | 80.5 |
 
-With recognizer v7, detector v6 and the language model version 3. indecis passes far more than Tesseract and stays behind Indra. The whole benchmark is out of its reach in places: math (3,271 tests, written as LaTeX), handwriting, scripts other than Latin, Greek and Cyrillic. On Latin printed pages, most failures are text partly found, lines cut short or broken into pieces by the detector on faint photocopies and typewritten forms; a quarter are a sentence one or two characters off.
+With recognizer v7, detector v10 and the language model version 3 (the turned pages measured with detector v6). indecis passes far more than Tesseract and stays behind Indra. The whole benchmark is out of its reach in places: math (3,271 tests, written as LaTeX), handwriting, scripts other than Latin, Greek and Cyrillic. On Latin printed pages, most failures are text partly found, lines cut short or broken into pieces by the detector on faint photocopies and typewritten forms; a quarter are a sentence one or two characters off.
 
 `indecis ocr page` turns a page scanned sideways or upside down upright first (`ocr.Orient`): it reads the page's twelve widest lines as it is and, unless they read surely, turned by each quarter, and keeps the way whose characters the recognizer is surest of. An upright page costs the reading of those lines; a turned one, three more detections.
 
