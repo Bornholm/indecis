@@ -384,3 +384,38 @@ func grow[T any](s []T, n int) []T {
 	}
 	return s[:n]
 }
+
+// MixSource draws each line from one of several sources, at given rates:
+// a small set of real lines can weigh a fixed share of the batches against
+// a large synthetic one.
+type MixSource struct {
+	sources []LineSource
+	cum     []float64
+	rng     *rand.Rand
+}
+
+// NewMixSource mixes sources with weights (normalized).
+func NewMixSource(sources []LineSource, weights []float64, seed int64) *MixSource {
+	m := &MixSource{sources: sources, rng: rand.New(rand.NewSource(seed))}
+	var total float64
+	for _, w := range weights {
+		total += w
+	}
+	acc := 0.0
+	for _, w := range weights {
+		acc += w / total
+		m.cum = append(m.cum, acc)
+	}
+	return m
+}
+
+// Next returns a line of a source drawn at its rate.
+func (m *MixSource) Next() (ShardLine, error) {
+	x := m.rng.Float64()
+	for i, c := range m.cum {
+		if x < c || i == len(m.cum)-1 {
+			return m.sources[i].Next()
+		}
+	}
+	return ShardLine{}, io.EOF
+}

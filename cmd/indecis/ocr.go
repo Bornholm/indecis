@@ -183,6 +183,8 @@ func printRate(name string, e ocr.ErrorRate) {
 func runOCRTrain(args []string) error {
 	fs := flag.NewFlagSet("ocr train", flag.ExitOnError)
 	train := fs.String("train", "", "training shards (comma-separated patterns)")
+	real := fs.String("real", "", "shards of real lines, drawn at -real-weight whatever their size")
+	realWeight := fs.Float64("real-weight", 0.2, "share of the lines drawn from -real")
 	val := fs.String("val", "", "validation lines (shard, or JSONL of samples)")
 	out := fs.String("out", "", "output directory (best model on -val)")
 	init := fs.String("init", "", "start from this recognizer instead of fresh weights")
@@ -200,18 +202,37 @@ func runOCRTrain(args []string) error {
 	if err := required(fs, "train", "out"); err != nil {
 		return err
 	}
-	var paths []string
-	for _, g := range strings.Split(*train, ",") {
-		files, err := filepath.Glob(expandHome(strings.TrimSpace(g)))
+	glob := func(patterns string) ([]string, error) {
+		var paths []string
+		for _, g := range strings.Split(patterns, ",") {
+			files, err := filepath.Glob(expandHome(strings.TrimSpace(g)))
+			if err != nil {
+				return nil, err
+			}
+			paths = append(paths, files...)
+		}
+		sort.Strings(paths)
+		return paths, nil
+	}
+	paths, err := glob(*train)
+	if err != nil {
+		return err
+	}
+	var src ocr.LineSource
+	if src, err = ocr.NewShardSource(paths, *buffer, *seed); err != nil {
+		return err
+	}
+	if *real != "" {
+		realPaths, err := glob(*real)
 		if err != nil {
 			return err
 		}
-		paths = append(paths, files...)
-	}
-	sort.Strings(paths)
-	src, err := ocr.NewShardSource(paths, *buffer, *seed)
-	if err != nil {
-		return err
+		rs, err := ocr.NewShardSource(realPaths, *buffer, *seed+1)
+		if err != nil {
+			return err
+		}
+		src = ocr.NewMixSource([]ocr.LineSource{src, rs}, []float64{1 - *realWeight, *realWeight}, *seed+2)
+		paths = append(paths, realPaths...)
 	}
 
 	var m *linerec.Model
