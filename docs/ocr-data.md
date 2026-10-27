@@ -22,8 +22,8 @@ Fonts only shape the rendered images; the model contains none of them. Variable 
 | Set | Lines | License | Notes |
 | --- | --- | --- | --- |
 | Synthetic, seed 900001 | 2,000 | ours | Same distribution as training: checkpoint selection |
-| HAL born-digital, French | | CC BY 4.0, CC0, Licence Ouverte 2.0 | Documents never used in training; pages rendered at 100 to 300 dpi |
-| HAL born-digital, English | | same | same |
+| HAL born-digital, French | 3,270 lines, 80 pages (38 documents) | CC BY 4.0, CC0, Licence Ouverte 2.0 | Documents never used in training; pages rendered at 100 to 300 dpi |
+| HAL born-digital, English | 3,543 lines, 73 pages (40 documents) | same | same |
 | CORD v2, validation split | 1,413 lines, 100 pages | CC BY 4.0 | Photographed receipts (Indonesian), a row's words cut at gaps wider than 1.5 word heights |
 | SROIE 2019, test (`priyank-m/SROIE_2019_text_recognition`) | 2,000 drawn from 18,704 | research only (ICDAR 2019 competition) | Scanned receipts, English; references in capitals: measured with `-fold-case`; local use only |
 
