@@ -9,15 +9,17 @@
 | `dataset/synth` | examples from templates, labeled by construction |
 | `tokenizer` | Gemma-family BPE tokenizer, identical to Hugging Face's `tokenizers` library |
 | `calibrate` | log-odds, production prior shift, evidence fusion |
-| `cmd/indecis` | command line: `synth`, `train`, `eval`, `predict`, `compact`, `split` |
+| `cmd/indecis` | command line: `synth`, `train`, `eval`, `predict`, `compact`, `split`, `ocr` |
 | `internal/modernbert` | ModernBERT encoder, forward and backward written by hand |
+| `ocr` | text lines read from images: crop, recognizer, CER/WER, shards, training ([ocr.md](ocr.md)) |
+| `internal/linerec` | OCR line recognizer (Indra OCR's architecture), forward, backward and CTC written by hand |
 | `internal/linalg` | matrix products (portable SIMD, AVX2 assembly, scalar; int8 AVX-VNNI), vector operations, parallelism |
 | `internal/optim` | AdamW, and sparse Adam for the embedding table |
 | `internal/safetensors` | safetensors reading (memory-mapped) and writing |
 | `teacher` (separate module) | labeling by LLMs, consensus, `indecis-teach` command |
 | `decision` (separate module) | genai provider, `indecis-serve` server |
 
-`teacher` and `decision` are separate modules so that the library depends on nothing but the Go standard library.
+`teacher`, `decision` and `tools/ocrsynth` (synthetic OCR lines, which needs `golang.org/x/image` to draw fonts) are separate modules so that the library depends on nothing but the Go standard library.
 
 ## Training
 
