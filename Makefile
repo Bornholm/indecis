@@ -10,7 +10,7 @@ SIGLIP2_DIR ?= $(HOME)/.cache/indecis/models/siglip2-base-patch32-256
 BEKKO_DIR ?= $(HOME)/.cache/indecis/models/bekko-embedding-v1-a8m
 ORACLE := tools/oracle/.venv/bin/python
 
-.PHONY: test test-scalar bench cli serve snapshot oracle fixtures clean
+.PHONY: test test-scalar test-wasm bench cli serve snapshot oracle fixtures clean
 
 test:
 	go test ./...
@@ -20,6 +20,11 @@ test:
 # The scalar fallback must stay correct: same suite, without SIMD.
 test-scalar:
 	GOEXPERIMENT= go test ./...
+
+# The OCR and its kernels must keep running in WebAssembly (browser demos):
+# same tests, js/wasm under Node.
+test-wasm:
+	PATH="$$PATH:$$(go env GOROOT)/lib/wasm" GOOS=js GOARCH=wasm GOEXPERIMENT= go test -short ./ocr ./internal/linerec ./internal/linedet ./internal/convnet ./internal/charlm ./internal/linalg
 
 bench:
 	go test -run xxx -bench . ./internal/linalg/ ./internal/modernbert/ ./tokenizer/
