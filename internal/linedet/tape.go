@@ -24,7 +24,9 @@ type Tape struct {
 	used  int
 	cols  [][]float32 // im2col buffers of the dense convolutions
 	ncols int
-	train bool // record the backward steps
+	wt    []float32 // a depthwise kernel transposed, see convnet.Depthwise
+	dcol  []float32 // a dense convolution's col gradient
+	train bool      // record the backward steps
 }
 
 func (t *Tape) reset(train bool) {
@@ -97,7 +99,8 @@ func (t *Tape) dw(x *Tensor, w, b *Param, k, stride int) *Tensor {
 	if b != nil {
 		bias = b.W
 	}
-	op.Forward(y.V, x.V, w.W, bias, x.S)
+	t.wt = grow(t.wt, len(w.W))
+	op.Forward(y.V, x.V, w.W, bias, t.wt, x.S)
 	t.record(func(g *Grads) {
 		var db []float32
 		if b != nil {
@@ -117,11 +120,13 @@ func (t *Tape) conv(x *Tensor, w, b *Param, k, stride, pad int, dx bool) *Tensor
 	col := t.col(out.H * out.W * op.Cin * k * k)
 	op.Forward(y.V, col, x.V, w.W, b.W, x.S)
 	t.record(func(g *Grads) {
-		var d []float32
+		var d, dcol []float32
 		if dx {
 			d = make([]float32, len(x.V))
+			t.dcol = grow(t.dcol, len(col))
+			dcol = t.dcol
 		}
-		op.Backward(d, g.of(w), g.of(b), y.G, col, w.W, x.S)
+		op.Backward(d, g.of(w), g.of(b), y.G, col, dcol, w.W, x.S)
 		if dx {
 			linalg.AddTo(grad(x), d)
 		}

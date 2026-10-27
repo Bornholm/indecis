@@ -74,7 +74,7 @@ func TestConv(t *testing.T) {
 		}
 		g := randn(r, out.Len())
 		dx, dw, db := make([]float32, in.Len()), make([]float32, len(w)), make([]float32, len(b))
-		c.Backward(dx, dw, db, g, col, w, in)
+		c.Backward(dx, dw, db, g, col, make([]float32, len(col)), w, in)
 		loss := func() float64 {
 			c.Forward(y, col, x, w, b, in)
 			return dot(y, g)
@@ -92,7 +92,8 @@ func TestDepthwise(t *testing.T) {
 		out := d.Out(in)
 		x, w, b := randn(r, in.Len()), randn(r, d.C*d.K*d.K), randn(r, d.C)
 		y := make([]float32, out.Len())
-		d.Forward(y, x, w, b, in)
+		wt := make([]float32, len(w))
+		d.Forward(y, x, w, b, wt, in)
 		p := d.K / 2
 		for oy := range out.H {
 			for ox := range out.W {
@@ -116,7 +117,7 @@ func TestDepthwise(t *testing.T) {
 		dx, dw, db := make([]float32, in.Len()), make([]float32, len(w)), make([]float32, len(b))
 		d.Backward(dx, dw, db, g, x, w, in)
 		loss := func() float64 {
-			d.Forward(y, x, w, b, in)
+			d.Forward(y, x, w, b, wt, in)
 			return dot(y, g)
 		}
 		checkGrad(t, "depthwise x", x, dx, loss)

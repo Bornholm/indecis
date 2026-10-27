@@ -72,8 +72,8 @@ func (c Conv) Forward(y, col, x, w, bias []float32, in Shape) {
 }
 
 // Backward accumulates dw and dbias, and writes dx when not nil. col is
-// Forward's.
-func (c Conv) Backward(dx, dw, dBias, dy, col, w []float32, in Shape) {
+// Forward's; dcol is a scratch buffer of the same size, needed with dx.
+func (c Conv) Backward(dx, dw, dBias, dy, col, dcol, w []float32, in Shape) {
 	out := c.Out(in)
 	n, k := out.H*out.W, c.Cin*c.K*c.K
 	linalg.MatMul(dw, dy, col, c.Cout, n, k, true, false, true)
@@ -83,7 +83,6 @@ func (c Conv) Backward(dx, dw, dBias, dy, col, w []float32, in Shape) {
 	if dx == nil {
 		return
 	}
-	dcol := make([]float32, n*k)
 	linalg.MatMul(dcol, dy, w, n, c.Cout, k, false, false, false)
 	clear(dx[:in.Len()])
 	for oy := range out.H {
@@ -120,10 +119,11 @@ func (d Depthwise) Out(in Shape) Shape {
 	return Shape{OutSize(in.H, d.K, d.Stride, p), OutSize(in.W, d.K, d.Stride, p), d.C}
 }
 
-// Forward computes y = depthwise(x) + bias (bias may be nil).
-func (d Depthwise) Forward(y, x, w, bias []float32, in Shape) {
+// Forward computes y = depthwise(x) + bias (bias may be nil). wt is a
+// scratch buffer of len(w) values, for the kernel transposed to [K·K, C].
+func (d Depthwise) Forward(y, x, w, bias, wt []float32, in Shape) {
 	out := d.Out(in)
-	wt := transpose(w, d.C, d.K*d.K)
+	transpose(wt, w, d.C, d.K*d.K)
 	p := d.K / 2
 	for oy := range out.H {
 		for ox := range out.W {
@@ -185,14 +185,13 @@ func (d Depthwise) Backward(dx, dw, dBias, dy, x, w []float32, in Shape) {
 	}
 }
 
-func transpose(w []float32, rows, cols int) []float32 {
-	t := make([]float32, rows*cols)
+// transpose writes w [rows, cols] into t as [cols, rows].
+func transpose(t, w []float32, rows, cols int) {
 	for r := range rows {
 		for c := range cols {
 			t[c*rows+r] = w[r*cols+c]
 		}
 	}
-	return t
 }
 
 // Upsample2 doubles a map's height and width, nearest neighbour.
