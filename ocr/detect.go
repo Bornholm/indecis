@@ -268,7 +268,8 @@ func (s DetectionScore) F1() float64 {
 
 // mergeFragments joins boxes of the same line that the core map left
 // apart (at word gaps): boxes that overlap vertically over most of the
-// smaller height and are less than a height apart.
+// smaller height and are less than half a height apart (table cells are
+// further apart).
 func mergeFragments(b []Box) []Box {
 	for merged := true; merged; {
 		merged = false
@@ -278,7 +279,7 @@ func mergeFragments(b []Box) []Box {
 				h := min(hi, hj)
 				over := min(b[i].Y1, b[j].Y1) - max(b[i].Y0, b[j].Y0)
 				gap := max(b[i].X0, b[j].X0) - min(b[i].X1, b[j].X1)
-				if over > 0.6*h && gap < 0.8*h && max(hi, hj) < 1.6*h {
+				if over > 0.6*h && gap < 0.5*h && max(hi, hj) < 1.6*h {
 					b[i] = Box{min(b[i].X0, b[j].X0), min(b[i].Y0, b[j].Y0), max(b[i].X1, b[j].X1), max(b[i].Y1, b[j].Y1)}
 					b = append(b[:j], b[j+1:]...)
 					merged = true
