@@ -53,7 +53,7 @@ func loadFonts(dirs []string, charset []rune) ([]*fontFile, error) {
 				family = family[:i]
 			}
 			ff := &fontFile{name: name, family: family, f: f, covers: map[rune]bool{}}
-			for _, r := range charset {
+			for _, r := range append([]rune{'ſ'}, charset...) {
 				if i, err := f.GlyphIndex(&buf, r); err == nil && i != 0 {
 					ff.covers[r] = true
 				}

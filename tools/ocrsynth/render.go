@@ -10,6 +10,7 @@ import (
 	"math"
 	"math/rand"
 	"strings"
+	"unicode"
 
 	xdraw "golang.org/x/image/draw"
 	"golang.org/x/image/font"
@@ -97,6 +98,11 @@ func (g *generator) try(r *rand.Rand) (sample, bool) {
 			}
 		}
 		drawn = b.String()
+	}
+	// Old print: the long s inside words, read as s (transcriptions
+	// modernize it).
+	if r.Float64() < 0.04 && f.covers['ſ'] {
+		drawn = longS(drawn)
 	}
 	width := func(s string) float64 {
 		return float64(font.MeasureString(face, s).Ceil()) + tracking*float64(len([]rune(s)))
@@ -406,4 +412,16 @@ func dotMatrix(g *image.Gray, k int, paper uint8) {
 		}
 	}
 	blur(g, 0.6)
+}
+
+// longS writes a lowercase s that does not end a word as ſ, as printers did
+// until the 19th century.
+func longS(s string) string {
+	rs := []rune(s)
+	for i, c := range rs {
+		if c == 's' && i+1 < len(rs) && unicode.IsLetter(rs[i+1]) {
+			rs[i] = 'ſ'
+		}
+	}
+	return string(rs)
 }
