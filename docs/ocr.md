@@ -40,6 +40,8 @@ Indra stays ahead on real documents, and well ahead on scanned receipts, which o
 
 int8 changes no rate by more than 0.02 point.
 
+Reading a line 800 pixels wide on one core (P-core), decoding included: 6.8 ms in float32, **4.6 ms in int8**. Indra's recognizer (1,698 symbols) takes 8.2 ms in float32 and 5.4 ms in int8 in Go, 5.4 ms in onnxruntime (float32, one thread).
+
 ## Measuring
 
 ```bash
