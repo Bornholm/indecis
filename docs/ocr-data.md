@@ -11,7 +11,9 @@ Data used to train and measure the line recognizer (see [ocr-plan.md](ocr-plan.m
 | Fonts: DejaVu, Liberation, Noto (Sans, Serif, Mono, Display), URW base35 | Bitstream Vera / OFL / OFL / AGPL with font exception | Rendering |
 | French and English Wikipedia (20231101, first parquet shard of each) | CC BY-SA 4.0 | Running text rendered into images, never shipped |
 | ASN letters, Enron (French translations and originals), from the email proof of concept | public documents / public corpus | Administrative and business text, rendered |
-| HAL born-digital PDFs, documents not kept for evaluation (`tools/ocrsynth/ocrpdf`) | CC BY 4.0, CC0, Licence Ouverte 2.0 | Real layouts and fonts, text layer as ground truth |
+| HAL born-digital PDFs, documents not kept for evaluation (`tools/ocrsynth/ocrpdf`): 234 then 412 more documents | CC BY 4.0, CC0, Licence Ouverte 2.0 | Real layouts and fonts, text layer as ground truth: 85,000 lines, 1,789 pages |
+| Synthetic pages (`ocrsynth -pages`): columns, headings, paragraphs, lists, tables | ours | Line detection: 3,000 pages |
+| CORD v2, train split (`naver-clova-ix/cord-v2`, 200 receipts of the 800) | CC BY 4.0 | Photographed receipts: 3,181 lines, 200 pages (`tools/ocrsynth/cord_lines.py`) |
 
 Fonts only shape the rendered images; the model contains none of them. Variable fonts are instantiated at weights 400 and 700 with `fonttools varLib.instancer` (x/image cannot read variable fonts' metrics).
 
@@ -22,6 +24,7 @@ Fonts only shape the rendered images; the model contains none of them. Variable 
 | Synthetic, seed 900001 | 2,000 | ours | Same distribution as training: checkpoint selection |
 | HAL born-digital, French | | CC BY 4.0, CC0, Licence Ouverte 2.0 | Documents never used in training; pages rendered at 100 to 300 dpi |
 | HAL born-digital, English | | same | same |
+| CORD v2, validation split | 1,413 lines, 100 pages | CC BY 4.0 | Photographed receipts (Indonesian), a row's words cut at gaps wider than 1.5 word heights |
 | SROIE 2019, test (`priyank-m/SROIE_2019_text_recognition`) | 2,000 drawn from 18,704 | research only (ICDAR 2019 competition) | Scanned receipts, English; references in capitals: measured with `-fold-case`; local use only |
 
 HAL adds a cover page to every document: `ocrpdf` starts at page 2. Documents whose text layer maps ligatures to wrong characters ("obten;on", "CeHe") are dropped.
