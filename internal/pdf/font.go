@@ -122,6 +122,13 @@ var texGlyphs = map[string]string{
 	"arrowsoutheast": "↘", "arrownorthwest": "↖", "arrowsouthwest": "↙", "similarequal": "≃",
 	"lessmuch": "≪", "greatermuch": "≫", "equivasymptotic": "≍", "approxequal": "≈",
 	"reflexsubset": "⊆", "reflexsuperset": "⊇", "element": "∈", "infinity": "∞",
+	// The AMS fonts (msam, msbm), stmaryrd, txfonts.
+	"lessorsimilar": "≲", "greaterorsimilar": "≳", "lessorapproxeql": "⪅", "greaterorapproxeql": "⪆",
+	"planckover2pi": "ℏ", "planckover2pi1": "ℏ", "forces": "⊩", "defines": "≜", "triangleleftequal": "⊴",
+	"trianglerightequal": "⊵", "subsetdblequal": "⫅", "supersetdblequal": "⫆", "dotplus": "∔",
+	"multimap": "⊸", "intercal": "⊺", "between": "≬", "pitchfork": "⋔", "squaresolid": "■",
+	"lozenge": "◊", "lozengesolid": "⧫", "llbracket": "⟦", "rrbracket": "⟧", "colonequal": "≔",
+	"shortrightarrow": "→", "shortleftarrow": "←", "arrowvert": "", "dotacc": "˙",
 }
 
 // texSizes are the suffixes of the sizes of TeX's big operators and
@@ -347,6 +354,24 @@ func (f *File) loadFont(o any) *font {
 		}
 		ft.text[c] = t
 	}
+	if strings.HasPrefix(strings.ToLower(ft.name), "esint") {
+		// esint's fonts hold integral signs only, under the names of
+		// another encoding.
+		for c := range 256 {
+			ft.text[c], ft.names[c] = "∫", "integraldisplay"
+		}
+		ft.toUnicode = nil
+	}
+	if table, ok := mathabxText[mathabxFont(ft.name)]; ok {
+		// Copies of the mathabx fonts name their glyphs and map them to
+		// text after another encoding: the slots say what they are.
+		ft.toUnicode = nil
+		for c := range 256 {
+			// The slots of sizes of big symbols that the table lacks stand
+			// for no text, as pieces of delimiters.
+			ft.text[c], ft.names[c] = table[byte(c)], "mathabx"
+		}
+	}
 	if len(widths) == 0 {
 		for c, n := range names {
 			if w, ok := coreWidth(core, n); ok {
@@ -373,6 +398,17 @@ func (f *File) loadFont(o any) *font {
 		}
 	}
 	return ft
+}
+
+// mathabxFont is the mathabx font (matha, mathb, mathx) a font's name
+// stands for: TeX-matha10, matha7.
+func mathabxFont(name string) string {
+	n := strings.TrimRight(strings.TrimPrefix(strings.ToLower(name), "tex-"), "0123456789")
+	switch n {
+	case "matha", "mathb", "mathx":
+		return n
+	}
+	return ""
 }
 
 // metrics sets the font's ascent and descent: its descriptor's, else the

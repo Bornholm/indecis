@@ -226,3 +226,19 @@ func TestRules(t *testing.T) {
 		}
 	}
 }
+
+func TestMathFonts(t *testing.T) {
+	// A copy of mathabx's matha whose names and ToUnicode map follow
+	// another encoding, and esint's integrals.
+	cmap := stream("", "1 begincodespacerange <00> <FF> endcodespacerange 2 beginbfchar <70> <0070> <10> <201C> endbfchar")
+	gs := glyphs(t, page(deflated("BT /F2 10 Tf 100 700 Td <701071> Tj /F3 10 Tf <5E> Tj ET"),
+		"<< /Type /Font /Subtype /Type1 /BaseFont /ABCDEF+TeX-matha10 /Encoding << /Differences [16 /quotedblleft 112 /p /q] >> /ToUnicode 8 0 R >>",
+		"<< /Type /Font /Subtype /Type1 /BaseFont /GHIJKL+esint10 /Encoding << /Differences [94 /circumflex] >> >>",
+		cmap))
+	if got := text(gs); got != "(=)∫" {
+		t.Fatalf("text %q", got)
+	}
+	if gs[0].Font != "TeX-matha10" || gs[3].Name != "integraldisplay" {
+		t.Errorf("font %q, name %q", gs[0].Font, gs[3].Name)
+	}
+}
