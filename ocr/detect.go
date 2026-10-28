@@ -228,11 +228,12 @@ func ReadPage(d *Detector, r *Recognizer, page *image.Gray) ([]Box, []Line) {
 	return Clean(boxes, r.ReadLines(page, boxes))
 }
 
-// Clean drops the lines read as nothing (blank, or one or two characters
-// read unsurely: the detector's mistakes on photographs' textures, on
-// blurred or stained areas) and puts the others back in reading order,
-// which the dropped ones may have upset.
+// Clean cuts lines at wide gaps (SplitLines), drops the lines read as
+// nothing (blank, or one or two characters read unsurely: the detector's
+// mistakes on photographs' textures, on blurred or stained areas) and puts
+// the others back in reading order, which the dropped ones may have upset.
 func Clean(boxes []Box, lines []Line) ([]Box, []Line) {
+	boxes, lines = SplitLines(boxes, lines)
 	var kb []Box
 	var kl []Line
 	for i, l := range lines {
