@@ -1,19 +1,12 @@
 package ocr
 
-import (
-	"slices"
-	"strings"
-)
+import "strings"
 
-// The gaps, between the centres of neighbouring characters and in line
-// heights, at which a detected line is cut, as Indra OCR's: the detector
-// merges the lines of two columns with a narrow gutter, or two cells.
-const (
-	splitGap    = 3.0 // cut at a wider gap
-	gutterGap   = 1.6 // cut at a smaller gap when other lines' edges line up with it
-	gutterEdges = 5   // how many other lines must end or start there (within half a line height)
-	gutterWords = 1.4 // and the gap must be this many times the line's usual gap between words
-)
+// splitGap is the gap between the centres of neighbouring characters, in
+// line heights, at which a read line is cut, as Indra OCR's: the detector
+// merges two cells or a label and its amount. (Gutters between columns are
+// cut at detection, from the page: splitBoxGutters.)
+const splitGap = 3.0
 
 // SplitLines cuts read lines at wide gaps between their characters. A
 // piece keeps its characters, and its box is cut around them.
@@ -23,19 +16,14 @@ func SplitLines(boxes []Box, lines []Line) ([]Box, []Line) {
 	for i, l := range lines {
 		b := boxes[i]
 		h := max(1, b.Y1-b.Y0)
-		word := wordGap(l.Chars)
 		var cuts []int // indexes of the characters that start a piece
 		prev := -1
 		for k, c := range l.Chars {
 			if strings.TrimSpace(c.Text) == "" {
 				continue
 			}
-			if prev >= 0 {
-				a, x := center(l.Chars[prev]), center(c)
-				gap := x - a
-				if gap > splitGap*h || gap > gutterGap*h && gap > gutterWords*word && onGutter(boxes, i, a+0.35*h, x-0.35*h, h) {
-					cuts = append(cuts, k)
-				}
+			if prev >= 0 && center(c)-center(l.Chars[prev]) > splitGap*h {
+				cuts = append(cuts, k)
 			}
 			prev = k
 		}
@@ -66,36 +54,7 @@ func SplitLines(boxes []Box, lines []Line) ([]Box, []Line) {
 	return outB, outL
 }
 
-// wordGap is the median gap between the characters around a line's
-// spaces (0 with fewer than two spaces): letter-spaced old prints have
-// word gaps as wide as a narrow gutter.
-func wordGap(chars []Char) float64 {
-	var gaps []float64
-	for k := 1; k+1 < len(chars); k++ {
-		if strings.TrimSpace(chars[k].Text) == "" && strings.TrimSpace(chars[k-1].Text) != "" && strings.TrimSpace(chars[k+1].Text) != "" {
-			gaps = append(gaps, center(chars[k+1])-center(chars[k-1]))
-		}
-	}
-	if len(gaps) < 2 {
-		return 0
-	}
-	slices.Sort(gaps)
-	return gaps[len(gaps)/2]
-}
-
 func center(c Char) float64 { return (c.X0 + c.X1) / 2 }
-
-// onGutter reports whether a gap of line i from gl to gr sits on a column
-// gutter: enough other lines end at its left edge or start at its right.
-func onGutter(boxes []Box, i int, gl, gr, h float64) bool {
-	n := 0
-	for j, o := range boxes {
-		if j != i && (abs(o.X1-gl) < 0.5*h || abs(o.X0-gr) < 0.5*h) {
-			n++
-		}
-	}
-	return n >= gutterEdges
-}
 
 func abs(x float64) float64 {
 	if x < 0 {

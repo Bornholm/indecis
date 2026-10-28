@@ -119,6 +119,7 @@ func (d *Detector) Detect(page *image.Gray) []Box {
 		bx.X1 = min(float64(b.Max.X), float64(b.Min.X)+bx.X1*f)
 		bx.Y1 = min(float64(b.Max.Y), float64(b.Min.Y)+bx.Y1*f)
 	}
+	boxes = splitBoxGutters(page, boxes)
 	ordered := make([]Box, len(boxes))
 	for i, j := range ReadingOrder(boxes) {
 		ordered[i] = boxes[j]
