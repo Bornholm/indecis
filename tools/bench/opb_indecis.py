@@ -33,6 +33,7 @@ def main():
     ap.add_argument("--lm", default="")
     ap.add_argument("--extra", default="", help="more flags for indecis ocr page, space-separated")
     ap.add_argument("--dpi", type=int, default=200)
+    ap.add_argument("--pdf", action="store_true", help="give indecis the PDF pages themselves: it reads their text layer when sound")
     ap.add_argument("--batch", type=int, default=40)
     ap.add_argument("--procs", type=int, default=3)
     a = ap.parse_args()
@@ -49,7 +50,9 @@ def main():
         src = os.path.join(ds, r["doc_path"])
         if not os.path.exists(src) or os.path.exists(os.path.join(pred_dir, r["page_id"] + ".json")):
             continue
-        if src.endswith(".pdf"):
+        if src.endswith(".pdf") and a.pdf:
+            todo.append((r["page_id"], src))
+        elif src.endswith(".pdf"):
             png = os.path.join(img_dir, r["page_id"] + ".png")
             if not os.path.exists(png):
                 base = png[:-4]
@@ -65,6 +68,8 @@ def main():
     cmd = [a.indecis, "ocr", "page", "-format", "html", "-det", a.det, "-model", a.model]
     if a.lm:
         cmd += ["-lm", a.lm]
+    if a.pdf:
+        cmd += ["-dpi", str(a.dpi)]
     cmd += a.extra.split()
     ids = {path: pid for pid, path in todo}
 

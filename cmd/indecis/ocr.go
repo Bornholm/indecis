@@ -9,6 +9,7 @@ import (
 	"image"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -518,6 +519,12 @@ func runOCRPage(args []string) error {
 	format := fs.String("format", "json", "json (lines with boxes), html (paragraphs) or text (paragraphs)")
 	deskew := fs.Bool("deskew", true, "straighten slanted pages first (boxes then refer to the straightened page)")
 	orient := fs.Bool("orient", true, "turn pages scanned sideways or upside down upright first (boxes then refer to the turned page)")
+	textLayer := fs.Bool("text-layer", true, "read the text layer of PDF pages that have a sound one instead of recognizing them")
+	dpi := fs.Int("dpi", 200, "resolution of the PDF pages rendered by pdftoppm (pages with no sound text layer, and the ink check)")
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "usage: indecis ocr page -det dir -model dir [options] image|pdf...")
+		fs.PrintDefaults()
+	}
 	fs.Parse(args)
 	if err := required(fs, "det", "model"); err != nil {
 		return err
@@ -532,49 +539,137 @@ func runOCRPage(args []string) error {
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetEscapeHTML(false)
-	for _, path := range fs.Args() {
-		page, err := ocr.ReadImage(path)
-		if err != nil {
-			return err
-		}
-		var boxes []ocr.Box
-		var lines []ocr.Line
-		turns := 0
+	type result struct {
+		boxes        []ocr.Box
+		lines        []ocr.Line
+		turns        int
+		angle        float64
+		source, note string
+	}
+	recognize := func(page *image.Gray) result {
+		var res result
 		if *orient {
-			page, turns, boxes, lines = ocr.Orient(d, r, page)
+			page, res.turns, res.boxes, res.lines = ocr.Orient(d, r, page)
 		}
-		angle := 0.0
 		if *deskew {
-			page, angle = ocr.Deskew(page)
+			page, res.angle = ocr.Deskew(page)
 		}
-		if boxes == nil || angle != 0 {
-			boxes, lines = d.Detect(page), nil
+		if res.boxes == nil || res.angle != 0 {
+			res.boxes, res.lines = d.Detect(page), nil
 		}
-		if lines == nil {
-			lines = r.ReadLines(page, boxes)
+		if res.lines == nil {
+			res.lines = r.ReadLines(page, res.boxes)
 		}
-		boxes, lines = ocr.Clean(boxes, lines)
+		res.boxes, res.lines = ocr.Clean(res.boxes, res.lines)
+		res.source = "ocr"
+		return res
+	}
+	emit := func(path string, pageNum int, res result) {
+		head := map[string]any{"image": path}
+		if pageNum > 0 {
+			head["page"] = pageNum
+		}
+		switch *format {
+		case "html":
+			head["html"] = ocr.PageHTML(ocr.Paragraphs(res.boxes, res.lines))
+			enc.Encode(head)
+			return
+		case "text":
+			head["text"] = strings.Join(ocr.Paragraphs(res.boxes, res.lines), "\n\n")
+			enc.Encode(head)
+			return
+		}
 		type line struct {
 			Box        [4]float64 `json:"box"`
 			Text       string     `json:"text"`
 			Confidence float32    `json:"confidence"`
 		}
-		switch *format {
-		case "html":
-			enc.Encode(map[string]any{"image": path, "html": ocr.PageHTML(ocr.Paragraphs(boxes, lines))})
-			continue
-		case "text":
-			enc.Encode(map[string]any{"image": path, "text": strings.Join(ocr.Paragraphs(boxes, lines), "\n\n")})
-			continue
-		}
-		out := make([]line, len(lines))
-		for i, l := range lines {
-			b := boxes[i]
+		out := make([]line, len(res.lines))
+		for i, l := range res.lines {
+			b := res.boxes[i]
 			out[i] = line{[4]float64{b.X0, b.Y0, b.X1, b.Y1}, l.Text, l.Confidence}
 		}
-		enc.Encode(map[string]any{"image": path, "turns": turns, "angle": angle, "lines": out})
+		head["turns"], head["angle"], head["lines"], head["source"] = res.turns, res.angle, out, res.source
+		if res.note != "" {
+			head["note"] = res.note
+		}
+		enc.Encode(head)
+	}
+	for _, path := range fs.Args() {
+		if !strings.EqualFold(filepath.Ext(path), ".pdf") {
+			page, err := ocr.ReadImage(path)
+			if err != nil {
+				return err
+			}
+			emit(path, 0, recognize(page))
+			continue
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		doc, err := ocr.OpenPDF(data)
+		if err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+		for i := range doc.NumPages() {
+			var layer *ocr.TextLayer
+			if *textLayer {
+				if layer, err = doc.TextLayer(i); err != nil {
+					return fmt.Errorf("%s: %w", path, err)
+				}
+			}
+			page, err := renderPDFPage(path, i, *dpi)
+			if err != nil && (layer == nil || !layer.Trusted) {
+				return fmt.Errorf("%s page %d: no sound text layer, and %w", path, i+1, err)
+			}
+			if layer != nil && layer.Trusted {
+				var res result
+				if page != nil {
+					page = ocr.RotateQuarter(page, layer.Turns)
+					layer.CheckInk(page)
+				}
+				if layer.Trusted {
+					if page != nil {
+						res.boxes, res.lines = ocr.ReadLayerPage(layer, page, d, r)
+					} else {
+						res.boxes, res.lines = layer.Scaled(int(layer.Width*float64(*dpi)/72), int(layer.Height*float64(*dpi)/72))
+						res.boxes, res.lines = ocr.Clean(res.boxes, res.lines)
+					}
+					res.turns, res.source = layer.Turns, "text"
+					emit(path, i+1, res)
+					continue
+				}
+				page = ocr.RotateQuarter(page, -layer.Turns)
+			}
+			res := recognize(page)
+			if layer != nil {
+				res.note = layer.Reason
+			}
+			emit(path, i+1, res)
+		}
 	}
 	return nil
+}
+
+// renderPDFPage renders page i (from 0) of a PDF file in grey with
+// poppler's pdftoppm.
+func renderPDFPage(path string, i, dpi int) (*image.Gray, error) {
+	if _, err := exec.LookPath("pdftoppm"); err != nil {
+		return nil, fmt.Errorf("pdftoppm (poppler) is needed to render it")
+	}
+	dir, err := os.MkdirTemp("", "indecis-page")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(dir)
+	base := filepath.Join(dir, "page")
+	n := strconv.Itoa(i + 1)
+	out, err := exec.Command("pdftoppm", "-r", strconv.Itoa(dpi), "-gray", "-png", "-singlefile", "-f", n, "-l", n, path, base).CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("pdftoppm: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	return ocr.ReadImage(base + ".png")
 }
 
 func runOCRTrainDet(args []string) error {
@@ -636,6 +731,7 @@ func runOCREvalDet(args []string) error {
 	boxesFile := fs.String("boxes", "", "instead of -det, the boxes of another detector: JSONL of {image, boxes}, image as in -pages")
 	longSide := fs.Int("long-side", 0, "with -det: the length pages are read at (default: the detector's, 1024)")
 	threshold := fs.Float64("threshold", 0, "with -det: the line probability threshold (default: the detector's, 0.5)")
+	split := fs.Bool("split", false, "with -det and -model: read the lines found and cut them at wide gaps (ocr.SplitLines) before matching")
 	fs.Parse(args)
 	if err := required(fs, "pages"); err != nil {
 		return err
@@ -692,6 +788,21 @@ func runOCREvalDet(args []string) error {
 		detect = func(g *image.Gray, _ int) []ocr.Box { return d.Detect(g) }
 	default:
 		return fmt.Errorf("-det or -boxes is required")
+	}
+	if *split {
+		if *model == "" {
+			return fmt.Errorf("-split needs -model")
+		}
+		r, err := ocr.Load(*model, ro.options()...)
+		if err != nil {
+			return err
+		}
+		found := detect
+		detect = func(g *image.Gray, i int) []ocr.Box {
+			boxes := found(g, i)
+			boxes, _ = ocr.SplitLines(boxes, r.ReadLines(g, boxes))
+			return boxes
+		}
 	}
 	var s ocr.DetectionScore
 	for i, p := range ps {
