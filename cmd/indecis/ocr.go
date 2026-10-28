@@ -407,6 +407,7 @@ type recognizerOpts struct {
 	gate        *float64
 	beam, top   *int
 	lower       *bool
+	retry       *float64
 }
 
 func recognizerFlags(fs *flag.FlagSet) *recognizerOpts {
@@ -420,6 +421,7 @@ func recognizerFlags(fs *flag.FlagSet) *recognizerOpts {
 		beam:  fs.Int("lm-beam", d.Beam, "prefixes kept per step"),
 		top:   fs.Int("lm-top", d.Top, "characters tried per step"),
 		lower: fs.Bool("lm-lower", d.LowerOnly, "the language model weighs small letters only"),
+		retry: fs.Float64("retry", 0.5, "read again, from boxes a little moved, the lines read less surely than this (0: never)"),
 	}
 }
 
@@ -428,6 +430,9 @@ func (o *recognizerOpts) options() []ocr.Option {
 	var opts []ocr.Option
 	if *o.int8 {
 		opts = append(opts, ocr.WithInt8())
+	}
+	if *o.retry > 0 {
+		opts = append(opts, ocr.WithRetry(float32(*o.retry)))
 	}
 	if *o.lm != "" {
 		lm, err := charlm.Load(expandHome(*o.lm))

@@ -18,6 +18,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -29,10 +30,12 @@ import (
 // Recognizer reads text lines. It is safe for concurrent use.
 type Recognizer struct {
 	m     *linerec.Model
-	chars []string // symbol i+1; 0 is the CTC blank
+	chars []string // symbol i+1's text as read; 0 is the CTC blank
+	vocab []string // the model's characters, as trained
 	crop  CropOptions
 	lm    *charlm.Model // nil: greedy decoding only
 	lmOpt LMOptions
+	retry float32 // lines read less surely are read again (WithRetry)
 
 	states sync.Pool // *linerec.State
 }
@@ -50,11 +53,17 @@ type options struct {
 	int8   bool
 	lm     *charlm.Model
 	lmOpts LMOptions
+	retry  float32
 }
 
 // WithInt8 computes the pointwise convolutions and the head in int8 when
 // the processor has the int8 kernel (AVX-VNNI).
 func WithInt8() Option { return func(o *options) { o.int8 = true } }
+
+// WithRetry reads again the lines read less surely than below (their
+// lowest step probability, Line.Confidence), from boxes a little
+// shifted, grown and shrunk, and keeps the surest reading.
+func WithRetry(below float32) Option { return func(o *options) { o.retry = below } }
 
 // Load reads a recognizer from dir: config.json, model.safetensors and
 // vocab.json.
@@ -91,7 +100,15 @@ func New(m *linerec.Model, v Vocab, opts ...Option) (*Recognizer, error) {
 	} else {
 		m.Prepare()
 	}
-	return &Recognizer{m: m, chars: v.Chars, crop: ModelCrop(m), lm: o.lm, lmOpt: o.lmOpts}, nil
+	// Readings are written as references are normalized (NormalizeText):
+	// a model trained before the micro sign became mu still has it.
+	chars := slices.Clone(v.Chars)
+	for i, c := range chars {
+		if c == "µ" {
+			chars[i] = "μ"
+		}
+	}
+	return &Recognizer{m: m, chars: chars, vocab: v.Chars, crop: ModelCrop(m), lm: o.lm, lmOpt: o.lmOpts, retry: o.retry}, nil
 }
 
 // Model returns the line model. Training it (Train) drops its packed
@@ -99,7 +116,7 @@ func New(m *linerec.Model, v Vocab, opts ...Option) (*Recognizer, error) {
 func (r *Recognizer) Model() *linerec.Model { return r.m }
 
 // Vocab returns the recognizer's vocabulary.
-func (r *Recognizer) Vocab() Vocab { return Vocab{Chars: r.chars} }
+func (r *Recognizer) Vocab() Vocab { return Vocab{Chars: r.vocab} }
 
 // ModelCrop returns the crop a line model reads: the defaults, at the
 // model's line height and window.
@@ -128,7 +145,35 @@ type Line struct {
 
 // ReadLine reads the line in box.
 func (r *Recognizer) ReadLine(page *image.Gray, box Box) Line {
-	return r.ReadCrop(CropLine(page, box, r.crop))
+	line := r.ReadCrop(CropLine(page, box, r.crop))
+	if line.Confidence >= r.retry {
+		return line
+	}
+	// A box a little off the line (a detector's, on a damaged page) cuts
+	// or crowds it: read it again shifted, grown, shrunk, and keep the
+	// surest reading.
+	h := box.Y1 - box.Y0
+	best, bestP := line, meanP(line)
+	for _, d := range [][2]float64{{-0.12, -0.12}, {0.12, 0.12}, {-0.15, 0.15}, {0.1, -0.1}} {
+		b := Box{X0: box.X0, Y0: box.Y0 + d[0]*h, X1: box.X1, Y1: box.Y1 + d[1]*h}
+		l := r.ReadCrop(CropLine(page, b, r.crop))
+		if p := meanP(l); p > bestP {
+			best, bestP = l, p
+		}
+	}
+	return best
+}
+
+// meanP is the mean probability of a line's characters (0 without any).
+func meanP(l Line) float64 {
+	if len(l.Chars) == 0 {
+		return 0
+	}
+	s := 0.0
+	for _, c := range l.Chars {
+		s += float64(c.P)
+	}
+	return s / float64(len(l.Chars))
 }
 
 // ReadLines reads several lines of a page, in parallel.

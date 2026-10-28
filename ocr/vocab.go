@@ -118,6 +118,7 @@ func hasCombining(s string) bool {
 var textReplacer = strings.NewReplacer(
 	" ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", "\t", " ",
 	"ﬁ", "fi", "ﬂ", "fl", "ﬀ", "ff", "ﬃ", "ffi", "ﬄ", "ffl", "­", "", "¬", "-",
+	"µ", "μ", // the micro sign is Greek mu (NFKC)
 )
 
 // ExtendHead maps a recognizer's output head onto a new vocabulary: the
