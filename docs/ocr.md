@@ -70,12 +70,12 @@ Lines found at IoU 0.5 (F1), and end-to-end CER of the reference lines (a missed
 
 | Pages | indecis F1 | Indra F1 | indecis end to end | Indra end to end |
 | --- | --- | --- | --- | --- |
-| HAL PDFs, French (80 pages) | 0.854 | **0.908** | 1.78% | **1.24%** |
-| HAL PDFs, English (73 pages) | 0.878 | **0.906** | **1.02%** | 1.20% |
-| CORD receipts (100 photos) | **0.890** | 0.804 | **6.86%** | 10.11% |
-| Old French prints (129 scans) | 0.896 | **0.900** | **8.12%** | 8.71% |
+| HAL PDFs, French (80 pages) | 0.850 | **0.908** | 1.81% | **1.24%** |
+| HAL PDFs, English (73 pages) | 0.873 | **0.906** | **1.01%** | 1.20% |
+| CORD receipts (100 photos) | **0.845** | 0.804 | **5.87%** | 10.11% |
+| Old French prints (129 scans) | **0.904** | 0.900 | **7.56%** | 8.71% |
 
-Detector v10 with recognizer v7 and the language model version 3. Detector v6 was trained in one run (15,000 steps of 12 crops, 3 hours): 2,505 pages of HAL PDFs, 2,077 of DocLayNet, 3,000 synthetic pages (columns, lists, tables), CORD's 800 training receipts. v10 went on from it for 8,000 steps on the same pages, with two changes. Crops are damaged as photocopies and old typewritten forms are, four in ten: strokes thinned by blotches, a blur, stains of the paper, specks, contrast down to a third. And the regions of a page whose ink no labeled line covers (pictures, charts, maps: a PDF's text layer holds none of their text) count for nothing in the loss (`PageSample.Ignore`, `tools/ocrsynth/ignore_unlabeled.py`): shown as paper, their text taught the detector to skip text in figures. Its F1 on these sets went down (it finds the figures' text, which their references leave out) and its end-to-end error on French PDFs too (2.07% to 1.78%); on Omni Parse Bench, it took the image pages from 56.8 to 58.6.
+Detector v11 with recognizer v8 and the language model version 4. Detector v6 was trained in one run (15,000 steps of 12 crops, 3 hours): 2,505 pages of HAL PDFs, 2,077 of DocLayNet, 3,000 synthetic pages (columns, lists, tables), CORD's 800 training receipts. v10 went on from it for 8,000 steps on the same pages, with two changes. Crops are damaged as photocopies and old typewritten forms are, four in ten: strokes thinned by blotches, a blur, stains of the paper, specks, contrast down to a third. And the regions of a page whose ink no labeled line covers (pictures, charts, maps: a PDF's text layer holds none of their text) count for nothing in the loss (`PageSample.Ignore`, `tools/ocrsynth/ignore_unlabeled.py`): shown as paper, their text taught the detector to skip text in figures. Its F1 on these sets went down (it finds the figures' text, which their references leave out) and its end-to-end error on French PDFs too (2.07% to 1.78%); on Omni Parse Bench, it took the image pages from 56.8 to 58.6. v11 went on from v10 for 6,000 steps with 2,000 more synthetic pages damaged as photocopies (`ocrsynth -pages -copy`): 58.6 to 60.8 with recognizer v8 (60.1 with v10).
 
 Training it on HierText's photographs (v7, v8) helped photographs (F1 0.564 to 0.669 on HierText's validation pages, Indra 0.726) but cost documents, and FONDUE's pages, whose lines are not all labeled, cost old prints: neither is in v10.
 
@@ -100,13 +100,13 @@ Share of the text tests passed, on the 2,777 pages read (160 pages could not be 
 
 | Tests | Tests | indecis | Indra | Tesseract | Surya OCR 2 |
 | --- | --- | --- | --- | --- | --- |
-| Latin script, printed, no math, image pages | 1,322 | 60.1 | 63.5 | 19.4 | 79.0 |
-| — of which the text is in the Latin, Greek or Cyrillic script | 1,304 | **66.3** | 64.8 | 22.8 | 79.5 |
-| Latin script, printed, no math, all pages | 2,732 | 61.0 | 68.1 | 33.4 | 78.7 |
+| Latin script, printed, no math, image pages | 1,322 | 60.8 | 63.5 | 19.4 | 79.0 |
+| — of which the text is in the Latin, Greek or Cyrillic script | 1,304 | **66.9** | 64.8 | 22.8 | 79.5 |
+| Latin script, printed, no math, all pages | 2,732 | 61.9 | 68.1 | 33.4 | 78.7 |
 | Pages turned by a quarter, a half or three quarters | 183 | 76.5 | 79.2 | | |
-| All text tests | 8,007 | 28.2 | 59.2 | 17.8 | 80.5 |
+| All text tests | 8,007 | 28.5 | 59.2 | 17.8 | 80.5 |
 
-With recognizer v8, detector v10 and the language model version 4 (the turned pages measured with recognizer v7 and detector v6). The benchmark tags a page by its main script: 73 of the "Latin" image pages' tests are Chinese, Kannada, Malayalam, Gurmukhi, Korean or Georgian text, which Indra reads with recognizers of those scripts and indecis cannot. On the tests in the scripts it reads, indecis passes more than Indra (PaddleOCR-VL 66.4); on all pages, PDFs included, Indra's published row reads their text layer. indecis passes far more than Tesseract and stays behind Indra. The whole benchmark is out of its reach in places: math (3,271 tests, written as LaTeX), handwriting, scripts other than Latin, Greek and Cyrillic. On Latin printed pages, most failures are text partly found, lines cut short or broken into pieces by the detector on faint photocopies and typewritten forms; a quarter are a sentence one or two characters off.
+With recognizer v8, detector v11 and the language model version 4 (the turned pages measured with recognizer v7 and detector v6). The benchmark tags a page by its main script: 73 of the "Latin" image pages' tests are Chinese, Kannada, Malayalam, Gurmukhi, Korean or Georgian text, which Indra reads with recognizers of those scripts and indecis cannot. On the tests in the scripts it reads, indecis passes more than Indra (PaddleOCR-VL 66.4); on all pages, PDFs included, Indra's published row reads their text layer. indecis passes far more than Tesseract and stays behind Indra. The whole benchmark is out of its reach in places: math (3,271 tests, written as LaTeX), handwriting, scripts other than Latin, Greek and Cyrillic. On Latin printed pages, most failures are text partly found, lines cut short or broken into pieces by the detector on faint photocopies and typewritten forms; a quarter are a sentence one or two characters off.
 
 `indecis ocr page` turns a page scanned sideways or upside down upright first (`ocr.Orient`): it reads the page's twelve widest lines as it is and, unless they read surely, turned by each quarter, and keeps the way whose characters the recognizer is surest of. An upright page costs the reading of those lines; a turned one, three more detections.
 
