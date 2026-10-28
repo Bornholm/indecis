@@ -3,7 +3,7 @@ package modernbert
 import (
 	"math"
 
-	"github.com/bornholm/indecis/internal/linalg"
+	"github.com/bornholm/indecis/linalg"
 )
 
 // Granularity of the parallel loops, in rows.

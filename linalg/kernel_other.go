@@ -37,3 +37,6 @@ func quantRow(dst []int8, x, mean []float32, flip bool) (float32, int32) {
 func quantCols(dst []int8, x, inv []float32) { panic("linalg: no AVX2 quantization") }
 
 func interleave4(dst, src []int8, n, stride int) { panic("linalg: no AVX2 quantization") }
+
+// ZeroUpper does nothing outside amd64 (see the amd64 version).
+func ZeroUpper() {}

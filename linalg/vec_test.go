@@ -50,6 +50,30 @@ func TestVectorOps(t *testing.T) {
 			}
 		}
 
+		HardSwish(o, x)
+		for i := range o {
+			xv := float64(x[i])
+			g := xv * min(max(xv+3, 0), 6) / 6
+			if math.Abs(float64(o[i])-g) > 1e-6*(1+math.Abs(g)) {
+				t.Fatalf("n=%d HardSwish[%d] %v, want %v", n, i, o[i], g)
+			}
+		}
+
+		MulTo(o, x, b)
+		for i := range o {
+			if o[i] != x[i]*b[i] {
+				t.Fatalf("n=%d MulTo[%d] %v, want %v", n, i, o[i], x[i]*b[i])
+			}
+		}
+
+		fma := append([]float32(nil), b...)
+		MulAddTo(fma, x, b)
+		for i := range fma {
+			if g := float64(b[i]) + float64(x[i])*float64(b[i]); math.Abs(float64(fma[i])-g) > 1e-6*(1+math.Abs(g)) {
+				t.Fatalf("n=%d MulAddTo[%d] %v, want %v", n, i, fma[i], g)
+			}
+		}
+
 		d := make([]float32, n)
 		SubTo(d, x, b)
 		mx := append([]float32(nil), b...)
@@ -138,6 +162,23 @@ func TestVectorOps(t *testing.T) {
 			if math.Abs(float64(o[i])-w) > 1e-5*(1+math.Abs(w)) {
 				t.Fatalf("n=%d Dequantize[%d] %v, want %v", n, i, o[i], w)
 			}
+		}
+	}
+}
+
+// ZeroUpper must link and run on every build, between vector code and
+// scalar float code, without changing either one's results.
+func TestZeroUpper(t *testing.T) {
+	x := []float32{-4, -1, 0, 0.5, 2, 5, 7, 9, 11}
+	o := make([]float32, len(x))
+	HardSwish(o, x)
+	ZeroUpper()
+	for i, v := range x {
+		if want := hardSwishScalar(v); o[i] != want {
+			t.Fatalf("HardSwish[%d] %v, want %v", i, o[i], want)
+		}
+		if got, want := float64(exp32(v)), math.Exp(float64(v)); math.Abs(got-want) > 1e-6*want {
+			t.Fatalf("exp32(%v) %v, want %v", v, got, want)
 		}
 	}
 }

@@ -10,7 +10,7 @@ import (
 
 	"github.com/bornholm/indecis/dataset"
 	"github.com/bornholm/indecis/internal/modernbert"
-	"github.com/bornholm/indecis/internal/optim"
+	"github.com/bornholm/indecis/optim"
 	"github.com/bornholm/indecis/tokenizer"
 )
 

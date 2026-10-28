@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/bornholm/indecis"
-	"github.com/bornholm/indecis/internal/safetensors"
+	"github.com/bornholm/indecis/safetensors"
 )
 
 // A trained image model is a directory holding vision.json (the encoder it

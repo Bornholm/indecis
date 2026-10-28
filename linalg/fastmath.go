@@ -49,3 +49,9 @@ func exp32(x float32) float32 {
 	y := p*r*r + r + 1
 	return y * math.Float32frombits(uint32(int32(n)+127)<<23)
 }
+
+// hardSwishScalar is x·clamp(x+3, 0, 6)/6, rounded as the SIMD version:
+// the product by 1/6, not a division.
+func hardSwishScalar(x float32) float32 {
+	return x * min(max(x+3, 0), 6) * (1.0 / 6)
+}

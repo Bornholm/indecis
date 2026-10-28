@@ -17,7 +17,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/bornholm/indecis/internal/safetensors"
+	"github.com/bornholm/indecis/safetensors"
 )
 
 // Config holds the fields of config.json that determine the computation.

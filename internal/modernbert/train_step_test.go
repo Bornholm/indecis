@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/bornholm/indecis/internal/optim"
+	"github.com/bornholm/indecis/optim"
 )
 
 type trainStepFixture struct {

@@ -11,11 +11,13 @@
 | `calibrate` | log-odds, production prior shift, evidence fusion |
 | `cmd/indecis` | command line: `synth`, `train`, `eval`, `predict`, `compact`, `split` |
 | `internal/modernbert` | ModernBERT encoder, forward and backward written by hand |
-| `internal/linalg` | matrix products (portable SIMD, AVX2 assembly, scalar; int8 AVX-VNNI), vector operations, parallelism |
-| `internal/optim` | AdamW, and sparse Adam for the embedding table |
-| `internal/safetensors` | safetensors reading (memory-mapped) and writing |
+| `linalg` | matrix products (portable SIMD, AVX2 assembly, scalar; int8 AVX-VNNI), vector operations, parallelism |
+| `optim` | AdamW, and sparse Adam for the embedding table |
+| `safetensors` | safetensors reading (memory-mapped) and writing |
 | `teacher` (separate module) | labeling by LLMs, consensus, `indecis-teach` command |
 | `decision` (separate module) | genai provider, `indecis-serve` server |
+
+`linalg`, `optim` and `safetensors` are public so that modules that bring their own networks build on the same kernels; their API may still change before v1.
 
 `teacher` and `decision` are separate modules so that the library depends on nothing but the Go standard library.
 

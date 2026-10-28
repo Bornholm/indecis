@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/bornholm/indecis/internal/safetensors"
+	"github.com/bornholm/indecis/safetensors"
 )
 
 // A checkpoint missing a tensor gives an error, not a panic: the text

@@ -3,7 +3,7 @@ package modernbert
 import (
 	"sort"
 
-	"github.com/bornholm/indecis/internal/linalg"
+	"github.com/bornholm/indecis/linalg"
 )
 
 // SparseGrad is the gradient of an embedding table: only the rows for

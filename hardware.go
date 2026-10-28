@@ -3,7 +3,7 @@ package indecis
 import (
 	"runtime"
 
-	"github.com/bornholm/indecis/internal/linalg"
+	"github.com/bornholm/indecis/linalg"
 )
 
 // Hardware describes what speeds up computation on the current machine.

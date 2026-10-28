@@ -126,3 +126,21 @@ func Rope(x, cos, sin []float32) {
 		x[i+half] = b*cos[i] + a*sin[i]
 	}
 }
+
+func MulAddTo(o, a, b []float32) {
+	for i := range o {
+		o[i] += a[i] * b[i]
+	}
+}
+
+func HardSwish(o, a []float32) {
+	for i, x := range a[:len(o)] {
+		o[i] = hardSwishScalar(x)
+	}
+}
+
+func MulTo(o, a, b []float32) {
+	for i := range o {
+		o[i] = a[i] * b[i]
+	}
+}

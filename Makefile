@@ -22,7 +22,7 @@ test-scalar:
 	GOEXPERIMENT= go test ./...
 
 bench:
-	go test -run xxx -bench . ./internal/linalg/ ./internal/modernbert/ ./tokenizer/
+	go test -run xxx -bench . ./linalg/ ./internal/modernbert/ ./tokenizer/
 
 # indecis command (synth, train, eval, predict, compact, split, check).
 cli:

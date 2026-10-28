@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/bornholm/indecis/internal/linalg"
+	"github.com/bornholm/indecis/linalg"
 )
 
 // Text is the text tower: token and position embeddings, transformer
