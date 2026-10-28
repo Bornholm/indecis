@@ -51,7 +51,7 @@ func runOCRRead(args []string) error {
 	fs := flag.NewFlagSet("ocr read", flag.ExitOnError)
 	model := fs.String("model", "", "recognizer (config.json, model.safetensors, vocab.json)")
 	boxFlag := fs.String("box", "", "line box x0,y0,x1,y1 in pixels (default: the image is one line)")
-	ro := recognizerFlags(fs)
+	ro := recognizerFlags(fs, 0.5)
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: indecis ocr read -model dir [-box x0,y0,x1,y1] image...")
 		fs.PrintDefaults()
@@ -97,7 +97,7 @@ func runOCREval(args []string) error {
 	by := fs.String("by", "", "also measure by value of this meta field")
 	errorsOut := fs.String("errors", "", "write the misread lines here (JSONL)")
 	fold := fs.Bool("fold-case", false, "compare in upper case (references transcribed in capitals, as SROIE's)")
-	ro := recognizerFlags(fs)
+	ro := recognizerFlags(fs, 0)
 	fs.Parse(args)
 	if err := required(fs, "model", "data"); err != nil {
 		return err
@@ -410,7 +410,9 @@ type recognizerOpts struct {
 	retry       *float64
 }
 
-func recognizerFlags(fs *flag.FlagSet) *recognizerOpts {
+// recognizerFlags declares them; retry is -retry's default (reading lines
+// again changes measures: the eval commands leave it off).
+func recognizerFlags(fs *flag.FlagSet, retry float64) *recognizerOpts {
 	d := ocr.DefaultLM()
 	return &recognizerOpts{
 		int8:  fs.Bool("int8", true, "int8 computation if the processor allows it"),
@@ -421,7 +423,7 @@ func recognizerFlags(fs *flag.FlagSet) *recognizerOpts {
 		beam:  fs.Int("lm-beam", d.Beam, "prefixes kept per step"),
 		top:   fs.Int("lm-top", d.Top, "characters tried per step"),
 		lower: fs.Bool("lm-lower", d.LowerOnly, "the language model weighs small letters only"),
-		retry: fs.Float64("retry", 0.5, "read again, from boxes a little moved, the lines read less surely than this (0: never)"),
+		retry: fs.Float64("retry", retry, "read again, from boxes a little moved, the lines read less surely than this (0: never)"),
 	}
 }
 
@@ -512,7 +514,7 @@ func runOCRPage(args []string) error {
 	fs := flag.NewFlagSet("ocr page", flag.ExitOnError)
 	det := fs.String("det", "", "line detector")
 	model := fs.String("model", "", "recognizer")
-	ro := recognizerFlags(fs)
+	ro := recognizerFlags(fs, 0.5)
 	format := fs.String("format", "json", "json (lines with boxes), html (paragraphs) or text (paragraphs)")
 	deskew := fs.Bool("deskew", true, "straighten slanted pages first (boxes then refer to the straightened page)")
 	orient := fs.Bool("orient", true, "turn pages scanned sideways or upside down upright first (boxes then refer to the turned page)")
@@ -630,7 +632,7 @@ func runOCREvalDet(args []string) error {
 	model := fs.String("model", "", "recognizer: also measure the end-to-end CER of the reference lines")
 	pages := fs.String("pages", "", "labeled pages (JSONL)")
 	iou := fs.Float64("iou", 0.5, "minimum IoU of a match")
-	ro := recognizerFlags(fs)
+	ro := recognizerFlags(fs, 0)
 	boxesFile := fs.String("boxes", "", "instead of -det, the boxes of another detector: JSONL of {image, boxes}, image as in -pages")
 	longSide := fs.Int("long-side", 0, "with -det: the length pages are read at (default: the detector's, 1024)")
 	threshold := fs.Float64("threshold", 0, "with -det: the line probability threshold (default: the detector's, 0.5)")

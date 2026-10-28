@@ -21,6 +21,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/bornholm/indecis/internal/charlm"
 	"github.com/bornholm/indecis/internal/linalg"
@@ -164,6 +165,68 @@ func (r *Recognizer) ReadLine(page *image.Gray, box Box) Line {
 	return best
 }
 
+// keepCodes puts back, into a reading decoded with the language model, the
+// greedy reading of its codes: words of capitals and digits (references,
+// identifiers, part numbers), which the model, trained on running text,
+// would turn into words ("ZQX17" into "ZOX17"). Only when both readings
+// have as many words, to pair them.
+func keepCodes(greedy, decoded []linerec.Symbol, chars []string) []linerec.Symbol {
+	words := func(syms []linerec.Symbol) [][]linerec.Symbol {
+		var out [][]linerec.Symbol
+		start := 0
+		for i, sy := range syms {
+			if chars[sy.ID-1] == " " {
+				out = append(out, syms[start:i])
+				start = i + 1
+			}
+		}
+		return append(out, syms[start:])
+	}
+	gw, dw := words(greedy), words(decoded)
+	if len(gw) != len(dw) {
+		return decoded
+	}
+	isCode := func(w []linerec.Symbol) bool {
+		digit, upper := false, false
+		for _, sy := range w {
+			for _, c := range chars[sy.ID-1] {
+				switch {
+				case unicode.IsDigit(c):
+					digit = true
+				case unicode.IsUpper(c):
+					upper = true
+				case unicode.IsLower(c):
+					return false
+				}
+			}
+		}
+		return digit && upper
+	}
+	changed := false
+	for i := range gw {
+		if isCode(gw[i]) {
+			dw[i], changed = gw[i], true
+		}
+	}
+	if !changed {
+		return decoded
+	}
+	var spaces []linerec.Symbol // the spaces between the words, as decoded
+	for _, sy := range decoded {
+		if chars[sy.ID-1] == " " {
+			spaces = append(spaces, sy)
+		}
+	}
+	var out []linerec.Symbol
+	for i, w := range dw {
+		if i > 0 {
+			out = append(out, spaces[i-1])
+		}
+		out = append(out, w...)
+	}
+	return out
+}
+
 // meanP is the mean probability of a line's characters (0 without any).
 func meanP(l Line) float64 {
 	if len(l.Chars) == 0 {
@@ -198,6 +261,7 @@ func (r *Recognizer) ReadCrop(c Crop) Line {
 	V := r.m.Cfg.Vocab
 	syms, conf := linerec.Greedy(s.Logits, s.L, V)
 	if r.lm != nil && conf < r.lmOpt.Gate {
+		greedy := syms
 		syms = beamDecode(s.Logits, s.L, V, r.chars, r.lm, r.lmOpt)
 		// A symbol's probability: its highest over its steps.
 		for i := range syms {
@@ -207,6 +271,7 @@ func (r *Recognizer) ReadCrop(c Crop) Line {
 				sy.P = max(sy.P, softmaxAt(row, sy.ID))
 			}
 		}
+		syms = keepCodes(greedy, syms, r.chars)
 	}
 	line := Line{Confidence: conf, Chars: make([]Char, len(syms))}
 	var sb strings.Builder

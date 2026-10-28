@@ -88,3 +88,33 @@ func TestBeamDecode(t *testing.T) {
 		t.Fatalf("with the model: %q", got)
 	}
 }
+
+func TestKeepCodes(t *testing.T) {
+	chars := []string{" ", "Z", "Q", "O", "X", "1", "7", "a", "b"}
+	id := map[rune]int{}
+	for i, c := range chars {
+		id[[]rune(c)[0]] = i + 1
+	}
+	syms := func(s string) []linerec.Symbol {
+		var out []linerec.Symbol
+		for i, c := range s {
+			out = append(out, linerec.Symbol{ID: id[c], Step: i})
+		}
+		return out
+	}
+	text := func(ss []linerec.Symbol) string {
+		var b strings.Builder
+		for _, sy := range ss {
+			b.WriteString(chars[sy.ID-1])
+		}
+		return b.String()
+	}
+	// The code keeps its greedy reading, the word the decoded one.
+	if got := text(keepCodes(syms("ab ZQX17"), syms("ba ZOX17"), chars)); got != "ba ZQX17" {
+		t.Fatalf("%q", got)
+	}
+	// Words that do not pair: the decoded reading as it is.
+	if got := text(keepCodes(syms("ab ZQX17"), syms("abZOX17"), chars)); got != "abZOX17" {
+		t.Fatalf("%q", got)
+	}
+}
