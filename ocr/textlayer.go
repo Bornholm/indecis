@@ -52,6 +52,19 @@ type TextLayer struct {
 	Chars         int    // characters drawn, spaces excluded
 	Trusted       bool   // the layer passed the checks: it is the page's text
 	Reason        string // why it did not
+	// OCRLayer: the text is drawn invisibly over a scan, by the OCR that
+	// made the file. Its lines are there, not trusted: TrustOCR uses them.
+	OCRLayer bool
+	bad      string // the layer's font map is broken
+}
+
+// TrustOCR uses an OCR layer as the page's text when it passes the other
+// checks: an OCR engine's reading of the scan, which may be better or
+// worse than indecis's own.
+func (t *TextLayer) TrustOCR() {
+	if t.OCRLayer && t.bad == "" && len(t.Lines) > 0 {
+		t.Trusted, t.Reason = true, ""
+	}
 }
 
 // TextLayer reads the text layer of page i (from 0) and checks it.
@@ -105,11 +118,12 @@ func layerLines(glyphs []pdf.Glyph, w, h float64) *TextLayer {
 	case t.Chars == 0:
 		t.Reason = "no text layer"
 		return t
-	case float64(invisible) > maxInvisible*float64(t.Chars):
-		t.Reason = fmt.Sprintf("invisible text %.0f%% (an OCR layer)", 100*float64(invisible)/float64(t.Chars))
-		return t
 	case float64(bad) > maxBadChars*float64(t.Chars) || float64(unmapped) > maxUnmapped*float64(t.Chars):
 		t.Reason = fmt.Sprintf("broken font map (%d characters with no text, %d unknown glyphs)", bad, unmapped)
+		t.bad = t.Reason
+	case float64(invisible) > maxInvisible*float64(t.Chars):
+		t.Reason = fmt.Sprintf("invisible text %.0f%% (an OCR layer)", 100*float64(invisible)/float64(t.Chars))
+		t.OCRLayer = true
 	default:
 		t.Trusted = true
 	}
@@ -125,7 +139,7 @@ func layerLines(glyphs []pdf.Glyph, w, h float64) *TextLayer {
 	var lines []*layerLine
 	var cur *layerLine
 	for _, g := range glyphs {
-		if g.Invisible || !g.Space && (!g.Known || badText(g.Text) || privateUse(g.Text)) {
+		if g.Invisible && !t.OCRLayer || !g.Space && (!g.Known || badText(g.Text) || privateUse(g.Text)) {
 			// Glyphs with no text are dropped: a math delimiter's pieces.
 			continue
 		}

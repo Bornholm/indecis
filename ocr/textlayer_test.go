@@ -112,3 +112,18 @@ func TestLayerGutter(t *testing.T) {
 		t.Fatalf("lines %q", got)
 	}
 }
+
+func TestLayerTrustOCR(t *testing.T) {
+	gs := word("scan", 100, 100)
+	for i := range gs {
+		gs[i].Invisible = true
+	}
+	l := layerLines(gs, 600, 800)
+	if l.Trusted || !l.OCRLayer || len(l.Lines) != 1 {
+		t.Fatalf("trusted %v, OCR layer %v, %d lines", l.Trusted, l.OCRLayer, len(l.Lines))
+	}
+	l.TrustOCR()
+	if !l.Trusted || l.Lines[0].Text != "scan" {
+		t.Fatalf("trusted %v, lines %+v", l.Trusted, l.Lines)
+	}
+}
