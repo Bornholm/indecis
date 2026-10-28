@@ -90,6 +90,16 @@ The layer is used when it is the page's text, as Indra checks it: not when more 
 
 A table is read row by row, each cell whole: when the XY-cut finds a region of short cells facing each other row by row, a row of lines joins the row above when it continues it (Indra's rule: a gap under half the table's median gap between rows and under 0.6 line height, fewer lines than the row above), and lines stacked in a row make one cell, read top to bottom before the next.
 
+### Formulas
+
+With `-math` (`ocr.PDF.Math`), the formulas of a text layer come out as LaTeX between dollars, as Omni Parse Bench and Indra's `--math` write them: `$\frac{\sigma_{\max}(A)}{\sigma_{\min}(A)}$`. A born-digital page draws each symbol of a formula where it goes, with math fonts, and its fraction bars and the bars of its roots as rules; `internal/pdf` gives each glyph its font, glyph name and origin, and the rules a page draws (filled rectangles, straight strokes, and the one-pixel images some files stretch into rules). `ocr/math.go` then reads the layout back, with no model:
+
+- a formula is a run of glyphs, in the order the page draws them, that holds glyphs of math fonts (TeX's cmmi, cmsy and cmex, the AMS's msam and msbm, Euler, rsfs, mathabx, esint, txfonts, pxfonts, Latin Modern Math, Cambria Math, STIX) and goes on with glyphs that can be math: digits, operators, letters set small, function names, a letter set close (`\mathrm{d}x`), a short word after an operator; a glyph of full size off the formula's baseline joins it only across a rule (a numerator, a denominator) or within a tall delimiter (a matrix);
+- its parts are put together from the inside out: fractions and roots around their rules, the shortest rule first; accents over their base; limits under and over big operators, function names and relations (`\xrightarrow`, `\overset`); then from left to right, scripts raised or lowered from the baseline, scripts of scripts, primes, long arrows and symbols drawn over each other (`\not\in`, `\cong`), rows within a tall delimiter as a matrix;
+- a line that is formulas with a few words between them becomes one formula (`\text{ for all }`), and lines that are each a formula, one under the other, one `aligned` block.
+
+Fonts whose names and ToUnicode maps follow another encoding are read by slot: mathabx's (from its `mathabx.dcl`), esint's integrals. On Omni Parse Bench's 2,830 math tests of arXiv pages, the formulas pass 84.9% (Indra with `--math` 62.0%, indecis without formulas 14.4%); the 438 of old scanned books are images, out of reach. Failures left: matrices and cases whose rows hold text, `\left( … \right)` around tall fractions drawn in pieces, notation the tests write otherwise (`...` for `\ldots`, `\bar` for `\overline`), letters set in a text font (mathptmx's Times italic).
+
 ### Language model
 
 Uncertain lines (one step below 0.9) can be decoded with a character language model: a CTC prefix beam search whose score adds 0.2·log P of each new character and 1 per character. The model is a 6-gram with Witten-Bell smoothing (`indecis ocr lm`), over Wikipedia and the email corpora, plus the texts of CORD's training receipts, repeated: domain text counts more than volume. It sees quotes, dashes, bullets and boxes, and digits (superscripts and subscripts included) as one class each, so that it has no say where only the glyph's shape decides: without that, it turned "•" into "*" and curly quotes into straight ones.
@@ -113,12 +123,13 @@ Share of the text tests passed, on the 2,777 pages read (160 pages could not be 
 | --- | --- | --- | --- | --- | --- |
 | Latin script, printed, no math, image pages | 1,322 | 60.8 | 63.5 | 19.4 | 79.0 |
 | — of which the text is in the Latin, Greek or Cyrillic script | 1,304 | **66.9** | 64.8 | 22.8 | 79.5 |
-| Latin script, printed, no math, all pages | 2,732 | 68.1 | 68.1 | 33.4 | 78.7 |
+| Latin script, printed, no math, all pages | 2,745 | 67.8 | 67.9 | 33.0 | 78.6 |
 | — of which the text is in the Latin, Greek or Cyrillic script | 3,183 | **74.2** | 71.0 | 37.4 | 77.5 |
 | Pages turned by a quarter, a half or three quarters | 183 | 76.5 | 79.2 | | |
-| All text tests | 8,007 | 39.3 | 59.2 | 17.8 | 80.5 |
+| Math, PDF pages (`-math`) | 3,269 | **75.5** | 56.5 | 1.6 | |
+| All text tests | 8,004 | **64.1** | 59.1 | 17.6 | 80.5 |
 
-With recognizer v8, detector v11 and the language model version 4 (the turned pages measured with recognizer v7 and detector v6). The benchmark tags a page by its main script: 73 of the "Latin" image pages' tests are Chinese, Kannada, Malayalam, Gurmukhi, Korean or Georgian text, which Indra reads with recognizers of those scripts and indecis cannot. On the tests in the scripts it reads, indecis passes more than Indra (PaddleOCR-VL 66.4), on image pages as on all pages. indecis passes far more than Tesseract and stays behind Indra. The whole benchmark is out of its reach in places: math (3,271 tests, written as LaTeX), handwriting, scripts other than Latin, Greek and Cyrillic. On Latin printed pages, most failures are text partly found, lines cut short or broken into pieces by the detector on faint photocopies and typewritten forms; a quarter are a sentence one or two characters off.
+With recognizer v8, detector v11 and the language model version 4 (the turned pages measured with recognizer v7 and detector v6), formulas written as LaTeX (`-math`, see below). Reading the text layers' formulas took all text tests from 39.3 to 64.1, ahead of Indra (59.1) and PaddleOCR-VL (60.7); it changed no other test. The Latin printed slice holds 13 more tests than before, on pages whose text layer is now trusted. The benchmark tags a page by its main script: 73 of the "Latin" image pages' tests are Chinese, Kannada, Malayalam, Gurmukhi, Korean or Georgian text, which Indra reads with recognizers of those scripts and indecis cannot. On the tests in the scripts it reads, indecis passes more than Indra (PaddleOCR-VL 66.4), on image pages as on all pages. indecis passes far more than Tesseract and stays behind Indra. The whole benchmark is out of its reach in places: math on scanned pages, handwriting, scripts other than Latin, Greek and Cyrillic. On Latin printed pages, most failures are text partly found, lines cut short or broken into pieces by the detector on faint photocopies and typewritten forms; a quarter are a sentence one or two characters off.
 
 `indecis ocr page` turns a page scanned sideways or upside down upright first (`ocr.Orient`): it reads the page's twelve widest lines as it is and, unless they read surely, turned by each quarter, and keeps the way whose characters the recognizer is surest of. An upright page costs the reading of those lines; a turned one, three more detections.
 
