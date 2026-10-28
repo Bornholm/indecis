@@ -79,6 +79,9 @@ func predict(f *File, p Dict, data []byte) ([]byte, error) {
 	if v, ok := f.Resolve(p["Columns"]).(int64); ok && v > 0 {
 		cols = v
 	}
+	if colors > 32 || bpc > 16 || cols > 1<<20 {
+		return data, nil // not a predictor any image or xref stream uses
+	}
 	bpp := int(max(1, (colors*bpc+7)/8))
 	row := int((colors*bpc*cols + 7) / 8)
 	if pred == 2 { // TIFF, 8 bits per component only

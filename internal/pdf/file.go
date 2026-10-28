@@ -148,6 +148,9 @@ func (f *File) readSection(off int64) (Dict, error) {
 	ws := [3]int{}
 	for i := range 3 {
 		v, _ := w[i].(int64)
+		if v < 0 || v > 8 {
+			return nil, errors.New("pdf: bad xref stream widths")
+		}
 		ws[i] = int(v)
 	}
 	index := f.array(s.Dict["Index"])
@@ -156,6 +159,9 @@ func (f *File) readSection(off int64) (Dict, error) {
 		index = Array{int64(0), size}
 	}
 	row := ws[0] + ws[1] + ws[2]
+	if row == 0 {
+		return nil, errors.New("pdf: bad xref stream widths")
+	}
 	p := 0
 	field := func(n int, def int64) int64 {
 		if n == 0 {

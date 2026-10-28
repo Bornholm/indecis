@@ -186,3 +186,22 @@ func TestFilters(t *testing.T) {
 		t.Errorf("lzw %q", got)
 	}
 }
+
+// FuzzOpen checks that no file, however broken, makes the reader panic.
+func FuzzOpen(f *testing.F) {
+	f.Add(page(deflated("BT /F1 10 Tf 1 0 0 1 100 700 Tm (Hello) Tj [(W) 120 (orld)] TJ ET")))
+	f.Add(page(stream("", "BT /F2 12 Tf 0 0 Td <001000110012> Tj ET"),
+		"<< /Type /Font /Subtype /Type0 /BaseFont /X /Encoding /Identity-H /ToUnicode 8 0 R /DescendantFonts [7 0 R] >>",
+		"<< /Type /Font /Subtype /CIDFontType2 /BaseFont /X /DW 500 /W [16 [600 700]] >>",
+		stream("", "1 begincodespacerange <0000> <FFFF> endcodespacerange 1 beginbfrange <0010> <0012> <0061> endbfrange")))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		file, err := Open(data)
+		if err != nil {
+			return
+		}
+		for _, p := range file.Pages() {
+			p.Size()
+			p.Glyphs()
+		}
+	})
+}
