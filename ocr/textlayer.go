@@ -149,7 +149,7 @@ func layerLines(glyphs []pdf.Glyph, w, h float64) *TextLayer {
 		cur.glyphs = []layerGlyph{lg}
 		lines = append(lines, cur)
 	}
-	lines = mergeLines(lines)
+	lines = splitGutters(mergeLines(lines))
 	for _, l := range lines {
 		text := l.text()
 		if strings.TrimSpace(text) == "" {
@@ -307,6 +307,94 @@ func mergeLines(lines []*layerLine) []*layerLine {
 		}
 	}
 	return out
+}
+
+// splitGutters cuts lines across a narrow column gutter: at a gap of at
+// least gutterEm and twice the line's gap between words, when at least
+// gutterLines lines near it are blank there too.
+func splitGutters(lines []*layerLine) []*layerLine {
+	const (
+		gutterEm    = 0.8
+		gutterLines = 3
+	)
+	var out []*layerLine
+	for i, l := range lines {
+		ink := l.ink()
+		word := medianWordGap(ink, l.size)
+		start := 0
+		var pieces []*layerLine
+		for k := 1; k < len(ink); k++ {
+			a, b := ink[k-1], ink[k]
+			gap := b.u0 - a.u1
+			if gap < gutterEm*l.size || gap < 2*word {
+				continue
+			}
+			c, w := (a.u1+b.u0)/2, gap/4
+			n := 0
+			for j, o := range lines {
+				if j == i || o.angle != l.angle || abs(o.v0-l.v0) > 12*l.size || o.u1 < c-2*l.size-gap || o.u0 > c+2*l.size+gap {
+					continue
+				}
+				if !o.inkWithin(c-w, c+w) {
+					n++
+				}
+			}
+			if n >= gutterLines {
+				pieces = append(pieces, l.piece(ink[start:k]))
+				start = k
+			}
+		}
+		if start == 0 {
+			out = append(out, l)
+			continue
+		}
+		out = append(out, append(pieces, l.piece(ink[start:]))...)
+	}
+	return out
+}
+
+// ink is the line's glyphs other than spaces, with the spaces that follow
+// each kept in its piece by piece.
+func (l *layerLine) ink() []layerGlyph {
+	var gs []layerGlyph
+	for _, g := range l.glyphs {
+		if !g.space {
+			gs = append(gs, g)
+		}
+	}
+	return gs
+}
+
+func medianWordGap(ink []layerGlyph, size float64) float64 {
+	var gaps []float64
+	for k := 1; k < len(ink); k++ {
+		if gap := ink[k].u0 - ink[k-1].u1; gap > spaceGap*size {
+			gaps = append(gaps, gap)
+		}
+	}
+	if len(gaps) == 0 {
+		return 0
+	}
+	sort.Float64s(gaps)
+	return gaps[len(gaps)/2]
+}
+
+func (l *layerLine) inkWithin(a, b float64) bool {
+	for _, g := range l.glyphs {
+		if !g.space && g.u1 > a && g.u0 < b {
+			return true
+		}
+	}
+	return false
+}
+
+func (l *layerLine) piece(gs []layerGlyph) *layerLine {
+	p := &layerLine{angle: l.angle, u0: gs[0].u0, v0: l.v0, u1: gs[0].u1, v1: l.v1, size: l.size}
+	for _, g := range gs {
+		p.glyphs = append(p.glyphs, g)
+		p.u0, p.u1 = min(p.u0, g.u0), max(p.u1, g.u1)
+	}
+	return p
 }
 
 func (l *layerLine) box() Box {

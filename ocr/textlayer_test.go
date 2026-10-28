@@ -95,3 +95,20 @@ func TestLayerTurned(t *testing.T) {
 		t.Errorf("turned line box %+v is not wide", b)
 	}
 }
+
+func TestLayerGutter(t *testing.T) {
+	// Two columns 8 points apart (0.8 em): lines are joined across the
+	// gutter, then cut again where every line is blank.
+	var gs []pdf.Glyph
+	for i := range 5 {
+		y := 100 + 12*float64(i)
+		gs = append(gs, word("gauche", 100, y)...)
+		gs = append(gs, word("un", 133, y)...)
+		gs = append(gs, word("droite", 153, y)...)
+		gs = append(gs, word("deux", 186, y)...)
+	}
+	got := layerTexts(t, gs)
+	if len(got) != 10 || got[0] != "gauche un" || got[5] != "droite deux" {
+		t.Fatalf("lines %q", got)
+	}
+}
