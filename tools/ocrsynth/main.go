@@ -41,6 +41,7 @@ func main() {
 	workers := flag.Int("workers", runtime.NumCPU(), "parallel workers")
 	preview := flag.Int("preview", 0, "also write the first lines' patches and crops as PNG")
 	charset := flag.String("charset", "", "file holding the vocabulary's characters (default: ocr.DefaultCharset)")
+	flag.Float64Var(&photocopy, "copy", 0, "share of lines damaged as photocopies (faded, broken strokes, stains, specks)")
 	pages := flag.Int("pages", 0, "generate this many pages (out/pages.jsonl, out/pages/*.png) for detection, instead of lines")
 	flag.Parse()
 	if *fontDirs == "" || *texts == "" || *out == "" {

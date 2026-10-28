@@ -281,6 +281,10 @@ func degrade(g *image.Gray, r *rand.Rand, paper, ink uint8, meta map[string]stri
 	if r.Float64() < 0.1 { // strokes thickened or thinned
 		morph(g, r.Intn(2) == 0)
 	}
+	if r.Float64() < photocopy {
+		copyDamage(g, r, paper)
+		meta["copy"] = "1"
+	}
 	if r.Float64() < 0.3 { // low resolution
 		s := 0.35 + 0.5*r.Float64()
 		w, h := max(1, int(float64(W)*s)), max(1, int(float64(H)*s))
@@ -325,6 +329,65 @@ func degrade(g *image.Gray, r *rand.Rand, paper, ink uint8, meta map[string]stri
 }
 
 func clamp8(v float64) uint8 { return uint8(min(max(v+0.5, 0), 255)) }
+
+// photocopy is the share of lines damaged as photocopies and old
+// typewritten forms are (-copy).
+var photocopy = 0.0
+
+// copyDamage spoils a line as copies of copies do: the ink faded and
+// broken by blotches, stains of the paper, specks.
+func copyDamage(g *image.Gray, r *rand.Rand, paper uint8) {
+	W, H := g.Rect.Dx(), g.Rect.Dy()
+	p := float64(paper)
+	fade := 0.3 + 0.5*r.Float64() // share of the ink kept at the most faded
+	field := smoothField(r, W, H, 3+r.Intn(5))
+	stains := smoothField(r, W, H, 20+r.Intn(40))
+	stainAmp := 50 * r.Float64()
+	for y := range H {
+		for x := range W {
+			i := y*g.Stride + x
+			v := float64(g.Pix[i])
+			k := 1 - (1-fade)*field[y*W+x] // ink kept here
+			v = p - (p-v)*k - stainAmp*stains[y*W+x]
+			g.Pix[i] = clamp8(v)
+		}
+	}
+	for range int(float64(W*H) * 0.002 * r.Float64()) {
+		x, y, sz := r.Intn(W), r.Intn(H), 1+r.Intn(2)
+		v := uint8(r.Intn(120))
+		for dy := range sz {
+			for dx := range sz {
+				if x+dx < W && y+dy < H {
+					g.Pix[(y+dy)*g.Stride+x+dx] = min(g.Pix[(y+dy)*g.Stride+x+dx], v)
+				}
+			}
+		}
+	}
+}
+
+// smoothField is a random field [h, w] in [0, 1], smooth over cell pixels.
+func smoothField(r *rand.Rand, w, h, cell int) []float64 {
+	gw, gh := w/cell+2, h/cell+2
+	grid := make([]float64, gw*gh)
+	for i := range grid {
+		grid[i] = r.Float64()
+	}
+	f := make([]float64, w*h)
+	for y := range h {
+		gy := float64(y) / float64(cell)
+		y0 := int(gy)
+		fy := gy - float64(y0)
+		for x := range w {
+			gx := float64(x) / float64(cell)
+			x0 := int(gx)
+			fx := gx - float64(x0)
+			a := grid[y0*gw+x0]*(1-fx) + grid[y0*gw+x0+1]*fx
+			b := grid[(y0+1)*gw+x0]*(1-fx) + grid[(y0+1)*gw+x0+1]*fx
+			f[y*w+x] = a*(1-fy) + b*fy
+		}
+	}
+	return f
+}
 
 // morph applies a 3×3 minimum (darkest) or maximum filter.
 func morph(g *image.Gray, darkest bool) {
