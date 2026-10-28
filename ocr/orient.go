@@ -15,8 +15,11 @@ func Orient(d *Detector, r *Recognizer, page *image.Gray) (*image.Gray, int, []B
 	best, bestTurns, bestScore := page, 0, -1.0
 	var bestBoxes []Box
 	var bestLines []Line
-	uprightSure := false
+	uprightSure, sideways := false, true
 	for turns := range 4 {
+		if turns%2 == 1 && !sideways {
+			continue
+		}
 		g := page
 		if turns > 0 {
 			g = RotateQuarter(page, turns)
@@ -24,7 +27,7 @@ func Orient(d *Detector, r *Recognizer, page *image.Gray) (*image.Gray, int, []B
 		boxes := d.Detect(g)
 		score, sure, lines := readScore(r, g, boxes)
 		if turns == 0 {
-			uprightSure = sure
+			uprightSure, sideways = sure, mayBeSideways(boxes)
 			best, bestScore, bestBoxes, bestLines = g, score, boxes, lines
 			if sure {
 				break
@@ -39,6 +42,19 @@ func Orient(d *Detector, r *Recognizer, page *image.Gray) (*image.Gray, int, []B
 		}
 	}
 	return best, bestTurns, bestBoxes, bestLines
+}
+
+// mayBeSideways reports whether the lines found on a page may be a page
+// lying on its side: unless most of them (at least 8) are much wider than
+// tall, as level lines are, it is turned a quarter both ways too.
+func mayBeSideways(boxes []Box) bool {
+	wide := 0
+	for _, b := range boxes {
+		if b.X1-b.X0 > 3*(b.Y1-b.Y0) {
+			wide++
+		}
+	}
+	return wide < 8 || 10*wide < 6*len(boxes)
 }
 
 // orientLines is how many of a page's lines Orient reads at most (all of
