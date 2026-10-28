@@ -15,6 +15,17 @@ type Glyph struct {
 	Known          bool    // the font maps the glyph to text
 	Invisible      bool    // drawn in render mode 3 or 7 (an OCR layer over a scan)
 	Space          bool    // a space: a word break, drawn or not
+	Font           string  // the font's name (CMMI10, Times-Roman), subset tag left out
+	Name           string  // the glyph's name, in a simple font (parenleftbig)
+	OX, OY         float64 // the glyph's origin on its baseline, on the page as shown
+	Advance        float64 // how far along the baseline the glyph moves, in points
+}
+
+// A Rule is a filled rectangle or a stroked straight line, as the page
+// draws a fraction bar, the bar of a root or a table's border: its box on
+// the page as shown.
+type Rule struct {
+	X0, Y0, X1, Y1 float64
 }
 
 type matrix [6]float64
@@ -41,6 +52,7 @@ type gstate struct {
 	charSp, wordSp, scale float64
 	leading, rise         float64
 	render                int
+	lineW                 float64
 }
 
 type interp struct {
@@ -53,6 +65,9 @@ type interp struct {
 	marks   []mark
 	depth   int
 	ops     int
+	rules   []Rule
+	subs    [][][2]float64 // the current path's subpaths, points on the page as shown
+	curved  bool           // the current path has curves
 }
 
 type mark struct {
@@ -70,11 +85,23 @@ const (
 // draws them. Characters from form XObjects are included; marked content
 // with an /ActualText replaces the glyphs it covers.
 func (p *Page) Glyphs() []Glyph {
-	in := &interp{p: p, fonts: map[any]*font{}}
-	in.gs = gstate{ctm: identity, scale: 1}
-	in.run(p.contents(), p.resources)
-	return in.glyphs
+	g, _ := p.Text()
+	return g
 }
+
+// Text returns the page's glyphs, as Glyphs, and the rules it draws: thin
+// filled rectangles and straight stroked lines, at most maxRuleWidth thick.
+func (p *Page) Text() ([]Glyph, []Rule) {
+	in := &interp{p: p, fonts: map[any]*font{}}
+	in.gs = gstate{ctm: identity, scale: 1, lineW: 1}
+	in.run(p.contents(), p.resources)
+	return in.glyphs, in.rules
+}
+
+// maxRuleWidth is the thickest rule kept, in points.
+const maxRuleWidth = 3
+
+const maxRules = 20000
 
 func (in *interp) run(data []byte, res Dict) {
 	f := in.p.f
@@ -110,6 +137,27 @@ func (in *interp) run(data []byte, res Dict) {
 			if m, ok := nums6(args); ok {
 				in.gs.ctm = m.mul(in.gs.ctm)
 			}
+		case "w":
+			in.gs.lineW = num(args, 0)
+		case "m":
+			in.subs = append(in.subs, [][2]float64{in.point(num(args, 0), num(args, 1))})
+		case "l":
+			if n := len(in.subs); n > 0 {
+				in.subs[n-1] = append(in.subs[n-1], in.point(num(args, 0), num(args, 1)))
+			}
+		case "c", "v", "y":
+			in.curved = true
+		case "re":
+			x, y, w, h := num(args, 0), num(args, 1), num(args, 2), num(args, 3)
+			in.subs = append(in.subs, [][2]float64{in.point(x, y), in.point(x+w, y), in.point(x+w, y+h), in.point(x, y+h), in.point(x, y)})
+		case "f", "F", "f*", "B", "B*", "b", "b*":
+			in.fillRules()
+			in.subs, in.curved = in.subs[:0], false
+		case "S", "s":
+			in.strokeRules()
+			in.subs, in.curved = in.subs[:0], false
+		case "n":
+			in.subs, in.curved = in.subs[:0], false
 		case "BT":
 			in.tm, in.tlm = identity, identity
 		case "ET":
@@ -191,6 +239,8 @@ func (in *interp) run(data []byte, res Dict) {
 				name, _ := args[0].(Name)
 				if s, ok := f.Resolve(f.dict(res["XObject"])[name]).(*Stream); ok && f.name(s.Dict["Subtype"]) == "Form" {
 					in.form(s, res)
+				} else if ok && f.name(s.Dict["Subtype"]) == "Image" {
+					in.imageRule()
 				}
 			}
 		case "BMC":
@@ -220,6 +270,7 @@ func (in *interp) run(data []byte, res Dict) {
 			}
 		case "BI":
 			// An inline image: its data runs from ID to EI.
+			in.imageRule()
 			i := bytes.Index(data[l.pos:], []byte("ID"))
 			if i < 0 {
 				return
@@ -243,6 +294,79 @@ func (in *interp) run(data []byte, res Dict) {
 		args = args[:0]
 	}
 }
+
+// point maps a point of user space to the page as shown.
+func (in *interp) point(x, y float64) [2]float64 {
+	vx, vy := in.p.toView(in.gs.ctm.apply(x, y))
+	return [2]float64{vx, vy}
+}
+
+// fillRules keeps the thin rectangles of a filled path: subpaths whose
+// points are all corners of their box.
+func (in *interp) fillRules() {
+	if in.curved {
+		return
+	}
+	for _, sp := range in.subs {
+		if len(sp) < 4 || len(sp) > 5 {
+			continue
+		}
+		x0, y0, x1, y1 := sp[0][0], sp[0][1], sp[0][0], sp[0][1]
+		for _, q := range sp {
+			x0, y0, x1, y1 = min(x0, q[0]), min(y0, q[1]), max(x1, q[0]), max(y1, q[1])
+		}
+		corner := true
+		for _, q := range sp {
+			if !(near(q[0], x0) || near(q[0], x1)) || !(near(q[1], y0) || near(q[1], y1)) {
+				corner = false
+			}
+		}
+		if corner {
+			in.addRule(Rule{x0, y0, x1, y1})
+		}
+	}
+}
+
+// strokeRules keeps the straight level or upright segments of a stroked
+// path, as wide as the line.
+func (in *interp) strokeRules() {
+	if in.curved {
+		return
+	}
+	m := in.gs.ctm
+	half := in.gs.lineW * math.Sqrt(math.Abs(m[0]*m[3]-m[1]*m[2])) / 2
+	for _, sp := range in.subs {
+		for k := 1; k < len(sp); k++ {
+			a, b := sp[k-1], sp[k]
+			switch {
+			case near(a[1], b[1]):
+				in.addRule(Rule{min(a[0], b[0]), a[1] - half, max(a[0], b[0]), a[1] + half})
+			case near(a[0], b[0]):
+				in.addRule(Rule{a[0] - half, min(a[1], b[1]), a[0] + half, max(a[1], b[1])})
+			}
+		}
+	}
+}
+
+// imageRule keeps an image drawn as a thin bar: some files draw rules as
+// an image of one pixel, stretched.
+func (in *interp) imageRule() {
+	var xs, ys [4]float64
+	for i, c := range [4][2]float64{{0, 0}, {1, 0}, {0, 1}, {1, 1}} {
+		p := in.point(c[0], c[1])
+		xs[i], ys[i] = p[0], p[1]
+	}
+	in.addRule(Rule{min(xs[0], xs[1], xs[2], xs[3]), min(ys[0], ys[1], ys[2], ys[3]), max(xs[0], xs[1], xs[2], xs[3]), max(ys[0], ys[1], ys[2], ys[3])})
+}
+
+func (in *interp) addRule(r Rule) {
+	w, h := r.X1-r.X0, r.Y1-r.Y0
+	if min(w, h) <= maxRuleWidth && max(w, h) >= 2*min(w, h) && len(in.rules) < maxRules {
+		in.rules = append(in.rules, r)
+	}
+}
+
+func near(a, b float64) bool { return math.Abs(a-b) < 0.01 }
 
 func (in *interp) form(s *Stream, res Dict) {
 	f := in.p.f
@@ -333,6 +457,8 @@ func (in *interp) show(s String) {
 			Y0: min(ys[0], ys[1], ys[2], ys[3]), Y1: max(ys[0], ys[1], ys[2], ys[3]),
 			Dx: dx, Dy: dy, Size: math.Hypot(ux-ox, uy-oy),
 			Space: strings.TrimSpace(text) == "" && text != "",
+			Font:  ft.name, Name: g.name, OX: ox, OY: oy,
+			Advance: (w*gs.size + gs.charSp) * gs.scale * math.Hypot(ex-ox, ey-oy) / max(gs.size*gs.scale, 1e-9),
 		}
 		if g.space && text == "" {
 			gl.Space, gl.Known, gl.Text = true, true, " "

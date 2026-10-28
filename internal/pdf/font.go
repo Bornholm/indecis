@@ -25,6 +25,7 @@ type font struct {
 	descent   float64
 	scale     float64 // glyph units to ems (0.001, or a Type3 font matrix)
 	gidText   map[int]string
+	name      string // the base font's name, its subset tag left out
 }
 
 type coreFont struct {
@@ -194,6 +195,7 @@ func (f *File) loadFont(o any) *font {
 		}
 	}
 	base := string(f.name(d["BaseFont"]))
+	ft.name = subsetName.ReplaceAllString(base, "")
 	desc := f.dict(d["FontDescriptor"])
 	if ft.typ == "Type0" {
 		ft.twoByte = true
@@ -396,6 +398,7 @@ type glyphCode struct {
 	width float64 // ems
 	space bool    // a one-byte code 32, which word spacing widens
 	known bool    // the font says which text the code stands for
+	name  string  // simple fonts: the glyph's name
 }
 
 func (ft *font) decode(s []byte) []glyphCode {
@@ -448,6 +451,9 @@ func (ft *font) decode(s []byte) []glyphCode {
 			// A named glyph with no text (a piece of a big delimiter) is
 			// known to stand for nothing; a code with no name is not text.
 			g.known = ft.names[code] != ""
+		}
+		if !ft.twoByte && code < 256 {
+			g.name = ft.names[code]
 		}
 		w, ok := ft.widths[cid]
 		if !ok {

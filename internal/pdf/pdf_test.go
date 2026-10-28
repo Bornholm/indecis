@@ -205,3 +205,24 @@ func FuzzOpen(f *testing.F) {
 		}
 	})
 }
+
+func TestRules(t *testing.T) {
+	data := page(deflated("0.4 w 100 700 m 200 700 l S 300 600 50 0.5 re f " +
+		"q 80 0 0 0.6 100 500 cm BI /W 1 /H 1 /IM true /BPC 1 ID \x00 EI Q " +
+		"0 0 300 300 re f 10 10 m 20 20 30 30 40 10 c S"))
+	f, err := Open(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, rules := f.Pages()[0].Text()
+	want := []Rule{{100, 99.8, 200, 100.2}, {300, 199.5, 350, 200}, {100, 299.4, 180, 300}}
+	if len(rules) != len(want) {
+		t.Fatalf("rules %v, want %v", rules, want)
+	}
+	for i, r := range rules {
+		w := want[i]
+		if abs(int(100*(r.X0-w.X0))) > 1 || abs(int(100*(r.Y0-w.Y0))) > 1 || abs(int(100*(r.X1-w.X1))) > 1 || abs(int(100*(r.Y1-w.Y1))) > 1 {
+			t.Errorf("rule %d %v, want %v", i, r, w)
+		}
+	}
+}
