@@ -165,3 +165,20 @@ func TestVectorOps(t *testing.T) {
 		}
 	}
 }
+
+// ZeroUpper must link and run on every build, between vector code and
+// scalar float code, without changing either one's results.
+func TestZeroUpper(t *testing.T) {
+	x := []float32{-4, -1, 0, 0.5, 2, 5, 7, 9, 11}
+	o := make([]float32, len(x))
+	HardSwish(o, x)
+	ZeroUpper()
+	for i, v := range x {
+		if want := hardSwishScalar(v); o[i] != want {
+			t.Fatalf("HardSwish[%d] %v, want %v", i, o[i], want)
+		}
+		if got, want := float64(exp32(v)), math.Exp(float64(v)); math.Abs(got-want) > 1e-6*want {
+			t.Fatalf("exp32(%v) %v, want %v", v, got, want)
+		}
+	}
+}

@@ -195,12 +195,18 @@ func interleave4(dst, src []int8, n, stride int) {
 
 func zeroUpper()
 
+// ymm reports whether the CPU and the OS support AVX, whatever
+// INDECIS_NOASM says: Go's portable SIMD code runs either way.
+var ymm = cpuAVX2()
+
 // ZeroUpper clears the upper halves of the AVX registers (VZEROUPPER).
 // Go's portable SIMD code leaves them dirty, and every scalar float
 // instruction (SSE, as Go compiles math.Exp) then pays a transition
 // penalty: call it before a scalar-heavy loop that follows vector code.
+// It clears the registers of the current OS thread only: a goroutine
+// moved to another thread in between finds them as that thread left them.
 func ZeroUpper() {
-	if avx2 {
+	if ymm {
 		zeroUpper()
 	}
 }
