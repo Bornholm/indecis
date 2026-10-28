@@ -521,10 +521,12 @@ func (t *TextLayer) CheckInk(page *image.Gray) {
 	if !t.Trusted || len(t.Boxes) == 0 {
 		return
 	}
-	boxes, _ := t.Scaled(page.Rect.Dx(), page.Rect.Dy())
+	boxes, lines := t.Scaled(page.Rect.Dx(), page.Rect.Dy())
 	empty := 0
-	for _, b := range boxes {
-		if !hasInk(page, b) {
+	for i, b := range boxes {
+		// A line of accents or pieces of symbols (a wide hat over a
+		// formula) is where the font's metrics say, not where its ink is.
+		if alnum(lines[i].Text) && !hasInk(page, b) {
 			empty++
 		}
 	}
@@ -532,6 +534,15 @@ func (t *TextLayer) CheckInk(page *image.Gray) {
 		t.Trusted = false
 		t.Reason = fmt.Sprintf("%d of %d lines have no ink", empty, len(boxes))
 	}
+}
+
+func alnum(s string) bool {
+	for _, r := range s {
+		if unicode.In(r, unicode.Lu, unicode.Ll, unicode.Lt, unicode.Lo, unicode.Nd) {
+			return true
+		}
+	}
+	return false
 }
 
 func hasInk(page *image.Gray, b Box) bool {
