@@ -17,7 +17,7 @@
 | `teacher` (separate module) | labeling by LLMs, consensus, `indecis-teach` command |
 | `decision` (separate module) | genai provider, `indecis-serve` server |
 
-`linalg`, `optim` and `safetensors` are public so that modules that bring their own networks, such as [indecis-ocr](https://github.com/bornholm/indecis-ocr), build on the same kernels; their API may still change before v1.
+`linalg`, `optim` and `safetensors` are public so that modules that bring their own networks build on the same kernels; their API may still change before v1.
 
 `teacher` and `decision` are separate modules so that the library depends on nothing but the Go standard library.
 
