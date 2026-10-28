@@ -536,18 +536,22 @@ func runOCRPage(args []string) error {
 			return err
 		}
 		var boxes []ocr.Box
+		var lines []ocr.Line
 		turns := 0
 		if *orient {
-			page, turns, boxes = ocr.Orient(d, r, page)
+			page, turns, boxes, lines = ocr.Orient(d, r, page)
 		}
 		angle := 0.0
 		if *deskew {
 			page, angle = ocr.Deskew(page)
 		}
 		if boxes == nil || angle != 0 {
-			boxes = d.Detect(page)
+			boxes, lines = d.Detect(page), nil
 		}
-		boxes, lines := ocr.Clean(boxes, r.ReadLines(page, boxes))
+		if lines == nil {
+			lines = r.ReadLines(page, boxes)
+		}
+		boxes, lines = ocr.Clean(boxes, lines)
 		type line struct {
 			Box        [4]float64 `json:"box"`
 			Text       string     `json:"text"`

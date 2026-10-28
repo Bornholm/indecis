@@ -97,6 +97,16 @@ func (d *Detector) Detect(page *image.Gray) []Box {
 				boxes = d.detect(in)
 			}
 		}
+	} else if b := page.Bounds(); max(b.Dx(), b.Dy()) >= 2*d.LongSide {
+		// Few lines on a large page (a plan, a poster): its text may be
+		// too small to see at this size. Read it larger, and keep the
+		// reading that finds more.
+		long := min(adaptiveMaxSide, max(b.Dx(), b.Dy())) / linedet.Multiple * linedet.Multiple
+		if big := prepare(page, long); long > d.LongSide {
+			if more := d.detect(big); len(more) > len(boxes) {
+				in, boxes = big, more
+			}
+		}
 	}
 	// Output pixels are 2 input pixels; input pixels are 1/scale page
 	// pixels.
