@@ -19,7 +19,7 @@ func word(text string, x, y float64) []pdf.Glyph {
 
 func layerTexts(t *testing.T, gs []pdf.Glyph) []string {
 	t.Helper()
-	l := layerLines(gs, 600, 800)
+	l := layerLines(gs, nil, 600, 800, false)
 	var out []string
 	for _, line := range l.Lines {
 		out = append(out, line.Text)
@@ -66,12 +66,12 @@ func TestLayerChecks(t *testing.T) {
 	for i := range gs {
 		gs[i].Invisible = true
 	}
-	if l := layerLines(gs, 600, 800); l.Trusted {
+	if l := layerLines(gs, nil, 600, 800, false); l.Trusted {
 		t.Errorf("an invisible layer is trusted")
 	}
 	gs = word("cassé", 100, 100)
 	gs[2].Known = false
-	if l := layerLines(gs, 600, 800); l.Trusted {
+	if l := layerLines(gs, nil, 600, 800, false); l.Trusted {
 		t.Errorf("a layer with unknown glyphs is trusted")
 	}
 }
@@ -83,7 +83,7 @@ func TestLayerTurned(t *testing.T) {
 		y := 500 - 5*float64(i)
 		gs = append(gs, pdf.Glyph{Text: string(r), X0: 100, X1: 110, Y0: y - 5, Y1: y, Dy: -1, Size: 10, Known: true})
 	}
-	l := layerLines(gs, 600, 800)
+	l := layerLines(gs, nil, 600, 800, false)
 	if l.Turns != 1 || l.Width != 800 || l.Height != 600 {
 		t.Fatalf("turns %d, size %vx%v", l.Turns, l.Width, l.Height)
 	}
@@ -118,7 +118,7 @@ func TestLayerTrustOCR(t *testing.T) {
 	for i := range gs {
 		gs[i].Invisible = true
 	}
-	l := layerLines(gs, 600, 800)
+	l := layerLines(gs, nil, 600, 800, false)
 	if l.Trusted || !l.OCRLayer || len(l.Lines) != 1 {
 		t.Fatalf("trusted %v, OCR layer %v, %d lines", l.Trusted, l.OCRLayer, len(l.Lines))
 	}

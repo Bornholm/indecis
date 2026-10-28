@@ -520,6 +520,7 @@ func runOCRPage(args []string) error {
 	deskew := fs.Bool("deskew", true, "straighten slanted pages first (boxes then refer to the straightened page)")
 	orient := fs.Bool("orient", true, "turn pages scanned sideways or upside down upright first (boxes then refer to the turned page)")
 	textLayer := fs.Bool("text-layer", true, "read the text layer of PDF pages that have a sound one instead of recognizing them")
+	mathLayer := fs.Bool("math", false, "with -text-layer: write the formulas of text layers as LaTeX ($x^{2}$)")
 	ocrLayer := fs.Bool("ocr-layer", false, "with -text-layer: also use the invisible text layer an OCR engine put over a scanned page, rather than reading the page")
 	dpi := fs.Int("dpi", 200, "resolution of the PDF pages rendered by pdftoppm (pages with no sound text layer, and the ink check)")
 	fs.Usage = func() {
@@ -613,6 +614,7 @@ func runOCRPage(args []string) error {
 		if err != nil {
 			return fmt.Errorf("%s: %w", path, err)
 		}
+		doc.Math = *mathLayer
 		for i := range doc.NumPages() {
 			var layer *ocr.TextLayer
 			if *textLayer {

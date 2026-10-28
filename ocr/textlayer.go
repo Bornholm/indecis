@@ -17,6 +17,9 @@ import (
 // sound text layer (a scan) takes an image of it.
 type PDF struct {
 	pages []*pdf.Page
+	// Math writes the formulas of the text layers as LaTeX between
+	// dollars ($\frac{1}{2}$), where they are set with math fonts.
+	Math bool
 }
 
 // OpenPDF reads the structure of a PDF file.
@@ -74,7 +77,11 @@ func (p *PDF) TextLayer(i int) (*TextLayer, error) {
 	}
 	pg := p.pages[i]
 	w, h := pg.Size()
-	return layerLines(pg.Glyphs(), w, h), nil
+	glyphs, rules := pg.Text()
+	if !p.Math {
+		rules = nil
+	}
+	return layerLines(glyphs, rules, w, h, p.Math), nil
 }
 
 // layerGlyph is a glyph in the frame of its line: u along the baseline, v
@@ -94,7 +101,7 @@ type layerLine struct {
 	size   float64
 }
 
-func layerLines(glyphs []pdf.Glyph, w, h float64) *TextLayer {
+func layerLines(glyphs []pdf.Glyph, rules []pdf.Rule, w, h float64, formulas bool) *TextLayer {
 	t := &TextLayer{Width: w, Height: h}
 	invisible, bad, unmapped := 0, 0, 0
 	quarters := [4]int{}
@@ -136,6 +143,9 @@ func layerLines(glyphs []pdf.Glyph, w, h float64) *TextLayer {
 	if t.Turns%2 == 1 {
 		t.Width, t.Height = h, w
 	}
+	if formulas && t.Turns == 0 {
+		glyphs = mathGlyphs(glyphs, rules)
+	}
 	var lines []*layerLine
 	var cur *layerLine
 	for _, g := range glyphs {
@@ -169,8 +179,14 @@ func layerLines(glyphs []pdf.Glyph, w, h float64) *TextLayer {
 		if strings.TrimSpace(text) == "" {
 			continue
 		}
+		if formulas {
+			text = joinFormulaWords(text)
+		}
 		t.Boxes = append(t.Boxes, l.box())
 		t.Lines = append(t.Lines, Line{Text: text, Confidence: 1})
+	}
+	if formulas {
+		t.Boxes, t.Lines = joinFormulaRows(t.Boxes, t.Lines)
 	}
 	return t
 }
@@ -460,7 +476,7 @@ func (l *layerLine) text() string {
 	for i, t := range toks {
 		if i > 0 {
 			p := toks[i-1]
-			if t.spaced || t.g.u0-p.u1 > spaceGap*min(p.size, t.size) {
+			if t.spaced || t.g.u0-p.u1 > spaceGap*min(p.size, t.size) || strings.HasSuffix(p.text, "$") && strings.HasPrefix(t.text, "$") {
 				sb.WriteByte(' ')
 			}
 		}
