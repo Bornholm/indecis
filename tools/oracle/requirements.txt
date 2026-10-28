@@ -8,6 +8,3 @@ tokenizers
 safetensors
 numpy
 pillow
-onnx
-onnxruntime
-opencv-python-headless

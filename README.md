@@ -31,7 +31,7 @@ Measured on a laptop (Core Ultra 7 265U) with the bekko-embedding-v1-a8m backbon
 - [Open categories](docs/open-categories.md): classify among a list that changes with every request.
 - [Serving a model](docs/serving.md): HTTP server compatible with TypeSafe and OpenRouter, provider for genai.
 - [Deciding on images](docs/images.md): SigLIP, options described in text, zero-shot.
-- [Reading text lines (OCR)](docs/ocr.md): a 1 M-parameter line recognizer trained in Go, synthetic lines, born-digital PDFs.
+- [Reading pages (OCR)](https://github.com/bornholm/indecis-ocr): a line detector and a recognizer trained in Go on these kernels, in a module of its own.
 - [Inference speed and memory](docs/inference.md): int8, SIMD, shrinking a model, long texts.
 - [Architecture](docs/architecture.md): packages, parity with PyTorch, tests.
 

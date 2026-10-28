@@ -9,10 +9,8 @@
 | `dataset/synth` | examples from templates, labeled by construction |
 | `tokenizer` | Gemma-family BPE tokenizer, identical to Hugging Face's `tokenizers` library |
 | `calibrate` | log-odds, production prior shift, evidence fusion |
-| `cmd/indecis` | command line: `synth`, `train`, `eval`, `predict`, `compact`, `split`, `ocr` |
+| `cmd/indecis` | command line: `synth`, `train`, `eval`, `predict`, `compact`, `split` |
 | `internal/modernbert` | ModernBERT encoder, forward and backward written by hand |
-| `ocr` | text lines read from images: crop, recognizer, CER/WER, shards, training ([ocr.md](ocr.md)) |
-| `internal/linerec` | OCR line recognizer (Indra OCR's architecture), forward, backward and CTC written by hand |
 | `linalg` | matrix products (portable SIMD, AVX2 assembly, scalar; int8 AVX-VNNI), vector operations, parallelism |
 | `optim` | AdamW, and sparse Adam for the embedding table |
 | `safetensors` | safetensors reading (memory-mapped) and writing |
@@ -21,7 +19,7 @@
 
 `linalg`, `optim` and `safetensors` are public so that modules that bring their own networks, such as [indecis-ocr](https://github.com/bornholm/indecis-ocr), build on the same kernels; their API may still change before v1.
 
-`teacher`, `decision` and `tools/ocrsynth` (synthetic OCR lines, which needs `golang.org/x/image` to draw fonts) are separate modules so that the library depends on nothing but the Go standard library.
+`teacher` and `decision` are separate modules so that the library depends on nothing but the Go standard library.
 
 ## Training
 

@@ -10,7 +10,7 @@ SIGLIP2_DIR ?= $(HOME)/.cache/indecis/models/siglip2-base-patch32-256
 BEKKO_DIR ?= $(HOME)/.cache/indecis/models/bekko-embedding-v1-a8m
 ORACLE := tools/oracle/.venv/bin/python
 
-.PHONY: test test-scalar test-wasm bench cli serve snapshot oracle fixtures clean
+.PHONY: test test-scalar bench cli serve snapshot oracle fixtures clean
 
 test:
 	go test ./...
@@ -20,11 +20,6 @@ test:
 # The scalar fallback must stay correct: same suite, without SIMD.
 test-scalar:
 	GOEXPERIMENT= go test ./...
-
-# The OCR and its kernels must keep running in WebAssembly (browser demos):
-# same tests, js/wasm under Node.
-test-wasm:
-	PATH="$$PATH:$$(go env GOROOT)/lib/wasm" GOOS=js GOARCH=wasm GOEXPERIMENT= go test -short ./ocr ./internal/linerec ./internal/linedet ./internal/convnet ./internal/charlm
 
 bench:
 	go test -run xxx -bench . ./linalg/ ./internal/modernbert/ ./tokenizer/
@@ -58,8 +53,6 @@ fixtures:
 	$(ORACLE) tools/oracle/tokenizer_fixtures.py --model testdata/siglip2-tiny --random 1000 --out testdata/siglip2-tiny/tokenizer_cases.jsonl
 	$(ORACLE) tools/oracle/offset_fixtures.py --model $(BEKKO_DIR) --cases testdata/bekko/tokenizer_cases.jsonl --out testdata/bekko/offset_cases.jsonl
 	$(ORACLE) tools/oracle/offset_fixtures.py --model testdata/siglip2-tiny --cases testdata/siglip2-tiny/tokenizer_cases.jsonl --out testdata/siglip2-tiny/offset_cases.jsonl
-	cd tools/oracle && ../../$(ORACLE) ocr_fixtures.py --out ../../testdata/ocr-tiny
-	$(ORACLE) tools/oracle/ocr_page_fixtures.py --out testdata/ocr-page
 
 clean:
 	rm -rf bin dist
