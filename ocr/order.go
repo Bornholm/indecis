@@ -47,6 +47,10 @@ func xyCut(boxes []Box, idx []int, h float64, out *[]int) {
 		}
 	}
 	if len(xs) > 0 && tableRows(boxes, idx, xs[0], h) {
+		if cellsOnly(boxes, idx, h) {
+			*out = append(*out, tableOrder(boxes, idx, h)...)
+			return
+		}
 		xs = nil
 	}
 	switch {
@@ -143,6 +147,100 @@ func tableRows(boxes []Box, idx []int, x, h float64) bool {
 		return 10*n >= 7*len(s)
 	}
 	return (short(l) || short(r)) && facing(l, r) && facing(r, l)
+}
+
+// cellsOnly reports whether the boxes are a table's cells alone: nine in
+// ten under 8 line heights wide (no line of text running beside it).
+func cellsOnly(boxes []Box, idx []int, h float64) bool {
+	n := 0
+	for _, j := range idx {
+		if boxes[j].X1-boxes[j].X0 < 8*h {
+			n++
+		}
+	}
+	return 10*n >= 9*len(idx)
+}
+
+// tableOrder reads a table row by row, each cell whole: the lines of a
+// cell wrapped on several lines come before the next cell. As Indra OCR
+// does, a row of lines joins the row above when it is a continuation: its
+// gap is under half the table's median gap between rows and under 0.6 line
+// height, and it has fewer lines than the row above (it fills only the
+// wrapped cells). In a row, lines stacked one over another make one cell.
+func tableOrder(boxes []Box, idx []int, h float64) []int {
+	sorted := append([]int(nil), idx...)
+	sort.SliceStable(sorted, func(a, b int) bool {
+		return boxes[sorted[a]].Y0+boxes[sorted[a]].Y1 < boxes[sorted[b]].Y0+boxes[sorted[b]].Y1
+	})
+	// Rows: lines whose centres are within half a line height of the row's.
+	var rows [][]int
+	var centre []float64
+	for _, j := range sorted {
+		c := (boxes[j].Y0 + boxes[j].Y1) / 2
+		if n := len(rows); n > 0 && abs(c-centre[n-1]) < 0.5*h {
+			rows[n-1] = append(rows[n-1], j)
+			centre[n-1] += (c - centre[n-1]) / float64(len(rows[n-1]))
+			continue
+		}
+		rows, centre = append(rows, []int{j}), append(centre, c)
+	}
+	top := func(r []int) float64 {
+		y := boxes[r[0]].Y0
+		for _, j := range r {
+			y = min(y, boxes[j].Y0)
+		}
+		return y
+	}
+	bottom := func(r []int) float64 {
+		y := boxes[r[0]].Y1
+		for _, j := range r {
+			y = max(y, boxes[j].Y1)
+		}
+		return y
+	}
+	if len(rows) >= 3 {
+		gaps := make([]float64, len(rows)-1)
+		for i := range gaps {
+			gaps[i] = top(rows[i+1]) - bottom(rows[i])
+		}
+		med := append([]float64(nil), gaps...)
+		sort.Float64s(med)
+		m := med[len(med)/2]
+		merged := [][]int{rows[0]}
+		prev := rows[0]
+		for i, r := range rows[1:] {
+			if g := gaps[i]; g < 0.5*m && g < 0.6*h && len(r) < len(prev) {
+				merged[len(merged)-1] = append(merged[len(merged)-1], r...)
+			} else {
+				merged = append(merged, r)
+			}
+			prev = r
+		}
+		rows = merged
+	}
+	var out []int
+	for _, r := range rows {
+		// Cells: lines overlapping horizontally, left to right; in a cell,
+		// top to bottom.
+		sort.SliceStable(r, func(a, b int) bool { return boxes[r[a]].X0 < boxes[r[b]].X0 })
+		var cells [][]int
+		end := 0.0
+		for _, j := range r {
+			b := boxes[j]
+			if n := len(cells); n > 0 && b.X0 < end {
+				cells[n-1] = append(cells[n-1], j)
+				end = max(end, b.X1)
+				continue
+			}
+			cells = append(cells, []int{j})
+			end = b.X1
+		}
+		for _, c := range cells {
+			sort.SliceStable(c, func(a, b int) bool { return boxes[c[a]].Y0 < boxes[c[b]].Y0 })
+			out = append(out, c...)
+		}
+	}
+	return out
 }
 
 // cuts returns the middle of the widest blank band of the projection of

@@ -69,6 +69,25 @@ func TestReadingOrderTable(t *testing.T) {
 	}
 }
 
+func TestReadingOrderWrappedCells(t *testing.T) {
+	line := func(x0, y float64, w float64) Box { return Box{X0: x0, Y0: y, X1: x0 + w, Y1: y + 10} }
+	// A header whose cells wrap on two lines (11 apart, rows 20 apart),
+	// then two rows: each header cell is read whole, then row by row.
+	boxes := []Box{
+		line(0, 0, 50), line(100, 0, 30), line(200, 0, 30), // Compound, Mtb, Mtb
+		line(100, 11, 40), line(200, 11, 50), // (moxR), (RpoB)
+		line(0, 31, 40), line(100, 31, 30), line(200, 31, 30),
+		line(0, 51, 40), line(100, 51, 30), line(200, 51, 30),
+	}
+	want := []int{0, 1, 3, 2, 4, 5, 6, 7, 8, 9, 10}
+	got := ReadingOrder(boxes)
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("order %v, want %v", got, want)
+		}
+	}
+}
+
 func TestClean(t *testing.T) {
 	line := func(x0, y float64, w float64) Box { return Box{X0: x0, Y0: y, X1: x0 + w, Y1: y + 10} }
 	// A receipt's rows, and specks of texture read as nothing between the
