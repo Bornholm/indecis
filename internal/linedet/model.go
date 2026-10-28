@@ -17,8 +17,8 @@ import (
 	"path/filepath"
 
 	"github.com/bornholm/indecis/internal/convnet"
-	"github.com/bornholm/indecis/internal/optim"
-	"github.com/bornholm/indecis/internal/safetensors"
+	"github.com/bornholm/indecis/optim"
+	"github.com/bornholm/indecis/safetensors"
 )
 
 // Stage is one resolution of the backbone.

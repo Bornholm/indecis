@@ -3,7 +3,7 @@ package linerec
 import (
 	"math"
 
-	"github.com/bornholm/indecis/internal/linalg"
+	"github.com/bornholm/indecis/linalg"
 )
 
 // CTC computes the connectionist temporal classification loss of a line,

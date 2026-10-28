@@ -24,8 +24,8 @@ import (
 	"unicode"
 
 	"github.com/bornholm/indecis/internal/charlm"
-	"github.com/bornholm/indecis/internal/linalg"
 	"github.com/bornholm/indecis/internal/linerec"
+	"github.com/bornholm/indecis/linalg"
 )
 
 // Recognizer reads text lines. It is safe for concurrent use.

@@ -5,7 +5,7 @@ import (
 	"math"
 	"math/rand"
 
-	"github.com/bornholm/indecis/internal/safetensors"
+	"github.com/bornholm/indecis/safetensors"
 )
 
 // New creates a model with fresh weights, initialized as PyTorch

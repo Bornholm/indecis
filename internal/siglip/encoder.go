@@ -6,7 +6,7 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/bornholm/indecis/internal/linalg"
+	"github.com/bornholm/indecis/linalg"
 )
 
 // linear is y = x·Wᵀ + b, with W stored [out, in] as in PyTorch and

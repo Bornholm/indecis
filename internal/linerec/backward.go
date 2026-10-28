@@ -3,8 +3,8 @@ package linerec
 import (
 	"math"
 
-	"github.com/bornholm/indecis/internal/linalg"
-	"github.com/bornholm/indecis/internal/optim"
+	"github.com/bornholm/indecis/linalg"
+	"github.com/bornholm/indecis/optim"
 )
 
 // Grads holds a gradient buffer for each trainable parameter, in the order

@@ -13,10 +13,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bornholm/indecis/internal/linalg"
 	"github.com/bornholm/indecis/internal/linerec"
-	"github.com/bornholm/indecis/internal/optim"
-	"github.com/bornholm/indecis/internal/safetensors"
+	"github.com/bornholm/indecis/linalg"
+	"github.com/bornholm/indecis/optim"
+	"github.com/bornholm/indecis/safetensors"
 )
 
 // LineSource yields training lines, endlessly or until io.EOF.

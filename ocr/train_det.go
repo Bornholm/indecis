@@ -10,9 +10,9 @@ import (
 	"sort"
 	"time"
 
-	"github.com/bornholm/indecis/internal/linalg"
 	"github.com/bornholm/indecis/internal/linedet"
-	"github.com/bornholm/indecis/internal/optim"
+	"github.com/bornholm/indecis/linalg"
+	"github.com/bornholm/indecis/optim"
 )
 
 // DetTrainOptions sets a detector training run.

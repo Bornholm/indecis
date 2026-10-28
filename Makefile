@@ -27,7 +27,7 @@ test-wasm:
 	PATH="$$PATH:$$(go env GOROOT)/lib/wasm" GOOS=js GOARCH=wasm GOEXPERIMENT= go test -short ./ocr ./internal/linerec ./internal/linedet ./internal/convnet ./internal/charlm
 
 bench:
-	go test -run xxx -bench . ./internal/linalg/ ./internal/modernbert/ ./tokenizer/
+	go test -run xxx -bench . ./linalg/ ./internal/modernbert/ ./tokenizer/
 
 # indecis command (synth, train, eval, predict, compact, split, check).
 cli:

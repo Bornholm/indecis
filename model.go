@@ -15,9 +15,9 @@ import (
 	"strings"
 
 	"github.com/bornholm/indecis/dataset"
-	"github.com/bornholm/indecis/internal/linalg"
 	"github.com/bornholm/indecis/internal/modernbert"
-	"github.com/bornholm/indecis/internal/safetensors"
+	"github.com/bornholm/indecis/linalg"
+	"github.com/bornholm/indecis/safetensors"
 	"github.com/bornholm/indecis/tokenizer"
 )
 

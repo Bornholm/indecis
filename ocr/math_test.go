@@ -68,7 +68,7 @@ func TestMathFractionRootAccent(t *testing.T) {
 	gs := []pdf.Glyph{
 		mg("y", "CMMI10", 0, 100, 10, 5),
 		mg("=", "CMR10", 8, 100, 10, 7.8),
-		mg("a", "CMMI10", 20, 93, 10, 5.3), // over the rule
+		mg("a", "CMMI10", 20, 93, 10, 5.3),  // over the rule
 		mg("b", "CMMI10", 20, 108, 10, 4.3), // under it
 		mg("+", "CMR10", 30, 100, 10, 7.8),
 		mg("√", "CMSY10", 40, 92, 10, 8.3), // hangs from the rule

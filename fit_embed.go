@@ -9,7 +9,7 @@ import (
 
 	"github.com/bornholm/indecis/dataset"
 	"github.com/bornholm/indecis/internal/modernbert"
-	"github.com/bornholm/indecis/internal/optim"
+	"github.com/bornholm/indecis/optim"
 )
 
 // Choice by embeddings, for options given at inference time.

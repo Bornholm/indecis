@@ -6,7 +6,7 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/bornholm/indecis/internal/safetensors"
+	"github.com/bornholm/indecis/safetensors"
 )
 
 // tinyModel builds a random model small enough for exhaustive finite

@@ -3,7 +3,7 @@ package linerec
 import (
 	"math"
 
-	"github.com/bornholm/indecis/internal/linalg"
+	"github.com/bornholm/indecis/linalg"
 )
 
 // State holds a line's activations: what the backward pass reads, and the

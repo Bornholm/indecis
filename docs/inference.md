@@ -56,7 +56,7 @@ For a known domain, prune on the training data. For a model that will see unfore
 ## What makes inference fast
 
 - **A dedicated inference path**: nothing is kept for backpropagation, buffers are reused, and the weights are prepared once for the matrix products.
-- **int8**: weights quantized per channel, activations per token, exact integer sums. The micro-kernel uses the AVX-VNNI `VPDPBUSD` instruction, in its VEX form that the Go assembler does not know: `internal/linalg/gen_vnni.py` writes it byte by byte.
+- **int8**: weights quantized per channel, activations per token, exact integer sums. The micro-kernel uses the AVX-VNNI `VPDPBUSD` instruction, in its VEX form that the Go assembler does not know: `linalg/gen_vnni.py` writes it byte by byte.
 - **Go 1.27 portable SIMD** for everything around the products: quantization, rescaling, GELU, normalization, softmax. Each operation has a scalar fallback with the same contract, and none is written in assembly.
 - **A memory-mapped embedding table**: only the pages of the tokens actually met are read.
 - **Few passes around the products**, in AVX2 assembly where portable SIMD lacks registers: the activations are quantized in one pass (maximum, then rounding narrowed 32 values at a time), the gated GELU keeps its 17 constants in memory operands rather than spilling them, and the last rows of a product, when the text length is not a multiple of 6, are rescaled in the kernel too.

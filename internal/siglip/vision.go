@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/bornholm/indecis/internal/linalg"
+	"github.com/bornholm/indecis/linalg"
 )
 
 // Vision is the image tower: patch embedding, transformer layers, a final

@@ -6,7 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/bornholm/indecis/internal/linalg"
+	"github.com/bornholm/indecis/linalg"
 )
 
 // EmbeddingTable supplies rows of the embedding table on demand. The table

@@ -19,8 +19,8 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/bornholm/indecis/internal/linalg"
-	"github.com/bornholm/indecis/internal/safetensors"
+	"github.com/bornholm/indecis/linalg"
+	"github.com/bornholm/indecis/safetensors"
 )
 
 // Config holds the dimensions of the two towers. Zero fields of

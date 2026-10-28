@@ -16,11 +16,11 @@ import (
 	"strings"
 
 	"github.com/bornholm/indecis/internal/charlm"
-	"github.com/bornholm/indecis/internal/linalg"
 	"github.com/bornholm/indecis/internal/linedet"
 	"github.com/bornholm/indecis/internal/linerec"
-	"github.com/bornholm/indecis/internal/safetensors"
+	"github.com/bornholm/indecis/linalg"
 	"github.com/bornholm/indecis/ocr"
+	"github.com/bornholm/indecis/safetensors"
 )
 
 func runOCR(args []string) error {

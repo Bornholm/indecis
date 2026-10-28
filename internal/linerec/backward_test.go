@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/bornholm/indecis/internal/optim"
-	"github.com/bornholm/indecis/internal/safetensors"
+	"github.com/bornholm/indecis/optim"
+	"github.com/bornholm/indecis/safetensors"
 )
 
 // lossGrads runs the fixture lines through m and returns the summed CTC

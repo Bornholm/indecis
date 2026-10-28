@@ -20,8 +20,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/bornholm/indecis/internal/linalg"
-	"github.com/bornholm/indecis/internal/safetensors"
+	"github.com/bornholm/indecis/linalg"
+	"github.com/bornholm/indecis/safetensors"
 )
 
 // Config holds the dimensions of a recognizer (config.json).

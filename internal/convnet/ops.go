@@ -10,7 +10,7 @@ package convnet
 import (
 	"math"
 
-	"github.com/bornholm/indecis/internal/linalg"
+	"github.com/bornholm/indecis/linalg"
 )
 
 // Shape is the size of a feature map.

@@ -1,6 +1,6 @@
 package linerec
 
-import "github.com/bornholm/indecis/internal/linalg"
+import "github.com/bornholm/indecis/linalg"
 
 // Symbol is a symbol read by greedy CTC decoding.
 type Symbol struct {

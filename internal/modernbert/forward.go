@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/bornholm/indecis/internal/linalg"
+	"github.com/bornholm/indecis/linalg"
 )
 
 // Batch is a batch of sequences right-padded to T tokens.

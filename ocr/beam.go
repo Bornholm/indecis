@@ -7,8 +7,8 @@ import (
 	"unicode"
 
 	"github.com/bornholm/indecis/internal/charlm"
-	"github.com/bornholm/indecis/internal/linalg"
 	"github.com/bornholm/indecis/internal/linerec"
+	"github.com/bornholm/indecis/linalg"
 )
 
 // LMOptions sets the decoding of uncertain lines with a character language

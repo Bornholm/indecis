@@ -2,7 +2,7 @@ package linedet
 
 import (
 	"github.com/bornholm/indecis/internal/convnet"
-	"github.com/bornholm/indecis/internal/linalg"
+	"github.com/bornholm/indecis/linalg"
 )
 
 // The detector is a graph of some forty operations. Rather than a forward

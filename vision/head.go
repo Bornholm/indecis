@@ -6,8 +6,8 @@ import (
 	"math/rand"
 
 	"github.com/bornholm/indecis"
-	"github.com/bornholm/indecis/internal/linalg"
-	"github.com/bornholm/indecis/internal/optim"
+	"github.com/bornholm/indecis/linalg"
+	"github.com/bornholm/indecis/optim"
 )
 
 // Head answers learned questions (an indecis.Schema) from the patch

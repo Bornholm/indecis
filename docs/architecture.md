@@ -13,11 +13,13 @@
 | `internal/modernbert` | ModernBERT encoder, forward and backward written by hand |
 | `ocr` | text lines read from images: crop, recognizer, CER/WER, shards, training ([ocr.md](ocr.md)) |
 | `internal/linerec` | OCR line recognizer (Indra OCR's architecture), forward, backward and CTC written by hand |
-| `internal/linalg` | matrix products (portable SIMD, AVX2 assembly, scalar; int8 AVX-VNNI), vector operations, parallelism |
-| `internal/optim` | AdamW, and sparse Adam for the embedding table |
-| `internal/safetensors` | safetensors reading (memory-mapped) and writing |
+| `linalg` | matrix products (portable SIMD, AVX2 assembly, scalar; int8 AVX-VNNI), vector operations, parallelism |
+| `optim` | AdamW, and sparse Adam for the embedding table |
+| `safetensors` | safetensors reading (memory-mapped) and writing |
 | `teacher` (separate module) | labeling by LLMs, consensus, `indecis-teach` command |
 | `decision` (separate module) | genai provider, `indecis-serve` server |
+
+`linalg`, `optim` and `safetensors` are public so that modules that bring their own networks, such as [indecis-ocr](https://github.com/bornholm/indecis-ocr), build on the same kernels; their API may still change before v1.
 
 `teacher`, `decision` and `tools/ocrsynth` (synthetic OCR lines, which needs `golang.org/x/image` to draw fonts) are separate modules so that the library depends on nothing but the Go standard library.
 
