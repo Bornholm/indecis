@@ -653,7 +653,7 @@ func runOCRPage(args []string) error {
 }
 
 // renderPDFPage renders page i (from 0) of a PDF file in grey with
-// poppler's pdftoppm.
+// poppler's pdftoppm, its crop box as the text layer.
 func renderPDFPage(path string, i, dpi int) (*image.Gray, error) {
 	if _, err := exec.LookPath("pdftoppm"); err != nil {
 		return nil, fmt.Errorf("pdftoppm (poppler) is needed to render it")
@@ -665,7 +665,7 @@ func renderPDFPage(path string, i, dpi int) (*image.Gray, error) {
 	defer os.RemoveAll(dir)
 	base := filepath.Join(dir, "page")
 	n := strconv.Itoa(i + 1)
-	out, err := exec.Command("pdftoppm", "-r", strconv.Itoa(dpi), "-gray", "-png", "-singlefile", "-f", n, "-l", n, path, base).CombinedOutput()
+	out, err := exec.Command("pdftoppm", "-cropbox", "-r", strconv.Itoa(dpi), "-gray", "-png", "-singlefile", "-f", n, "-l", n, path, base).CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("pdftoppm: %v: %s", err, strings.TrimSpace(string(out)))
 	}
