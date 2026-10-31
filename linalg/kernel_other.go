@@ -1,4 +1,4 @@
-//go:build !amd64
+//go:build !amd64 && !arm64
 
 package linalg
 
@@ -19,7 +19,7 @@ func microKernel8(kq int, ap []uint8, lda int, bp []int8, tile *[mr8 * nr8]int32
 }
 
 // CPU reports what the processor supports: the assembly kernels exist on
-// amd64 only.
+// amd64 and arm64 only.
 func CPU() (avx2FMA, avxVNNI bool) { return false, false }
 
 func microKernel8Deq(kq int, ap []uint8, lda int, bp []int8, c []float32, ldc int, sb, zc, sa []float32, accumulate bool) bool {
