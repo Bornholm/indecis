@@ -76,6 +76,34 @@ jobs:
       - name: Race detector
         run: go test -race ./...
 
+  # The NEON kernels, under qemu: -cpu max has dotprod, so the int8 tests
+  # must not skip.
+  arm64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.27"
+          cache: false
+      - name: Install qemu
+        run: sudo apt-get update && sudo apt-get install -y qemu-user
+      - name: Generated assembly
+        run: python3 linalg/gen_neon.py | diff - linalg/kernel_arm64.s
+      - name: Cross builds
+        run: |
+          for os in linux android darwin windows; do
+            GOOS=$os GOARCH=arm64 go test -c -o /dev/null ./linalg
+          done
+      - name: Test
+        working-directory: linalg
+        run: |
+          GOARCH=arm64 go test -c -o "$RUNNER_TEMP/linalg.test" .
+          qemu=$(command -v qemu-aarch64-static || command -v qemu-aarch64)
+          $qemu -cpu max "$RUNNER_TEMP/linalg.test" -test.v > "$RUNNER_TEMP/out.txt" || { cat "$RUNNER_TEMP/out.txt"; exit 1; }
+          if grep -- '--- SKIP' "$RUNNER_TEMP/out.txt"; then exit 1; fi
+          INDECIS_NOASM=1 $qemu -cpu max "$RUNNER_TEMP/linalg.test"
+
   format:
     runs-on: ubuntu-latest
     steps:
