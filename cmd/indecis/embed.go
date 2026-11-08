@@ -66,7 +66,6 @@ func runEmbed(args []string) error {
 		w = f
 	}
 	bw := bufio.NewWriterSize(w, 1<<20)
-	defer bw.Flush()
 	enc := json.NewEncoder(bw)
 
 	ctx := context.Background()
@@ -90,7 +89,9 @@ func runEmbed(args []string) error {
 				var b [4]byte
 				for _, x := range v {
 					binary.LittleEndian.PutUint32(b[:], math.Float32bits(x))
-					bw.Write(b[:])
+					if _, err := bw.Write(b[:]); err != nil {
+						return err
+					}
 				}
 				continue
 			}
@@ -132,5 +133,10 @@ func runEmbed(args []string) error {
 	if err := sc.Err(); err != nil {
 		return err
 	}
-	return flush()
+	if err := flush(); err != nil {
+		return err
+	}
+	// A write error held by the buffer (full disk, closed pipe) must fail
+	// the command: an f32 file has no length to tell it was cut short.
+	return bw.Flush()
 }
