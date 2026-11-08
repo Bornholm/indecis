@@ -12,11 +12,11 @@ Any sentence-transformers directory with a ModernBERT encoder, mean or CLS pooli
 | [bekko-embedding-v1-a25m](https://huggingface.co/hotchpotch/bekko-embedding-v1-a25m) | ~25M | 384 | MIT | 13 layers |
 | [granite-embedding-311m-multilingual-r2](https://huggingface.co/ibm-granite/granite-embedding-311m-multilingual-r2) | 110M | 768 (Matryoshka down to 128) | Apache 2.0 | 22 layers, CLS pooling, 32k positions |
 
-The pooling comes from `1_Pooling/config.json`, the query and document prompts from `config_sentence_transformers.json` (none of these three models uses prompts). Models built differently (Qwen3-Embedding, byte-level tokenizers, SiLU activations) are refused at load time; [indecis-search](../../indecis-search) explains why they were not ported.
+The pooling comes from `1_Pooling/config.json`, the query and document prompts from `config_sentence_transformers.json` (none of these three models uses prompts). Models built differently (Qwen3-Embedding, byte-level tokenizers, SiLU activations) are refused at load time.
 
 ## Quality
 
-Dense retrieval over the whole corpus (exact cosine), nDCG@10, measured with the bench of [indecis-search](../../indecis-search) (`tools/embed_eval.py`), at most 512 tokens per text. *scifact-fr* asks the SciFact questions in French over the English corpus; *squad-fr* finds the French Wikipedia passage of each question (761 passages, 3,835 questions). *Hybrid* fuses the ranking with BM25 (reciprocal rank fusion, equal weights), as Amoxtli does.
+Dense retrieval over the whole corpus (exact cosine), nDCG@10, at most 512 tokens per text. *scifact-fr* asks the SciFact questions in French over the English corpus; *squad-fr* finds the French Wikipedia passage of each question (761 passages, 3,835 questions). *Hybrid* fuses the ranking with BM25 (reciprocal rank fusion, equal weights), as Amoxtli does.
 
 | Model (indecis, int8) | scifact | scifact-fr | nfcorpus | squad-fr | hybrid scifact | hybrid nfcorpus | hybrid squad-fr |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -48,7 +48,7 @@ A few hundred real (query, relevant document) pairs from the domain are worth mo
 
 The fine-tuned a25m beats every model tried, Qwen3-Embedding-0.6B included, on scifact and on French questions over the same corpus, although training used English claims only, and does not lose elsewhere. Training and test claims come from the same collection: this is the gain of in-domain data, not general progress.
 
-Without labeled queries, an LLM can write them from the corpus itself. `tools/gen_queries.py`, in [indecis-search](../../indecis-search), asks through the Pi CLI, for three queries per passage (a question, keywords, a claim, in the passage's language) and adds one BM25 negative per query. With `cadoles/opencode-deepseek-v4.1-flash`, 10 passages per call, about 2 s per passage:
+Without labeled queries, an LLM can write them from the corpus itself: three queries per passage (a question, keywords, a claim, in the passage's language), plus one BM25 negative per query. With `cadoles/opencode-deepseek-v4.1-flash`, 10 passages per call, about 2 s per passage:
 
 | bekko a8m trained on | scifact | scifact-fr | nfcorpus | squad-fr |
 | --- | --- | --- | --- | --- |
