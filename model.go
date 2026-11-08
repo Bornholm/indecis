@@ -498,8 +498,9 @@ func (m *Model) Save(dir string) error {
 	for _, p := range m.enc.Params() {
 		t := safetensors.Tensor{Shape: p.Shape, Data: p.W}
 		// An untrained backbone keeps its bf16 weights: written as such,
-		// exactly, they take half the space.
-		if bf16Exact(p.W) {
+		// exactly, they take half the space. The embedding table is left to
+		// its own branch below.
+		if p.Name != m.enc.Emb.Name && bf16Exact(p.W) {
 			t.DType = "BF16"
 		}
 		tensors[p.Name] = t
