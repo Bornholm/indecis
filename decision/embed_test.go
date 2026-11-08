@@ -103,7 +103,7 @@ func TestEmbeddingsFormats(t *testing.T) {
 }
 
 func TestEmbedInputsRejectsMissingInput(t *testing.T) {
-	for _, raw := range []string{``, `null`, ` null `, `[]`} {
+	for _, raw := range []string{``, `null`, ` null `, `[]`, `["a", null]`} {
 		if _, err := embedInputs(json.RawMessage(raw)); err == nil {
 			t.Errorf("input %q accepted", raw)
 		}

@@ -149,9 +149,17 @@ func embedInputs(raw json.RawMessage) ([]string, error) {
 	if err := json.Unmarshal(raw, &one); err == nil {
 		return []string{one}, nil
 	}
-	var many []string
-	if err := json.Unmarshal(raw, &many); err != nil {
+	// Pointers, so that a null element is told from an empty string.
+	var elems []*string
+	if err := json.Unmarshal(raw, &elems); err != nil {
 		return nil, fmt.Errorf("input: a string or an array of strings (token arrays are not supported)")
+	}
+	many := make([]string, len(elems))
+	for i, e := range elems {
+		if e == nil {
+			return nil, fmt.Errorf("input[%d] is null", i)
+		}
+		many[i] = *e
 	}
 	switch {
 	case len(many) == 0:
@@ -185,7 +193,11 @@ func (s *Server) openAIModels(w http.ResponseWriter, r *http.Request) {
 	list := []model{}
 	for _, n := range s.names() {
 		c := s.Models[n]
-		if m, v, err := c.load(c.defaultDir); err != nil || m == nil || v != nil {
+		m, v, err := c.load(c.defaultDir)
+		if err != nil && s.Logger != nil {
+			s.Logger.Warn("model left out of /v1/models: it does not load", "model", n, "error", err)
+		}
+		if err != nil || m == nil || v != nil {
 			continue
 		}
 		list = append(list, model{ID: n, Object: "model", OwnedBy: "indecis"})
