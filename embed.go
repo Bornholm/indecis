@@ -233,7 +233,7 @@ func (m *Model) SearchBatches(pairs []SearchPair, size int, seed int64) []Choice
 			for _, q := range kept[i] {
 				has = has || qid(q) == qid(p)
 			}
-			if !has {
+			if !has && len(kept[i]) < size {
 				kept[i], placed = append(kept[i], p), true
 			}
 		}

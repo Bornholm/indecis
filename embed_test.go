@@ -131,6 +131,9 @@ func TestSearchBatchesKeepsEveryPair(t *testing.T) {
 		for seed := int64(0); seed < 20; seed++ {
 			got := map[string]bool{}
 			for _, b := range m.SearchBatches(pairs, size, seed) {
+				if len(b.Texts) > size {
+					t.Fatalf("size %d, seed %d: a batch of %d queries", size, seed, len(b.Texts))
+				}
 				for i, q := range b.Texts {
 					got[q+" -> "+b.Candidates[i].Name] = true
 				}
