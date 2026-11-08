@@ -1,6 +1,7 @@
 package decision
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
@@ -96,7 +97,9 @@ func (s *Server) embed(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var vecs [][]float32
+	role := "document"
 	if req.InputType == "query" {
+		role = "query"
 		vecs, err = m.EmbedQueries(r.Context(), texts...)
 	} else {
 		vecs, err = m.EmbedDocuments(r.Context(), texts...)
@@ -105,12 +108,18 @@ func (s *Server) embed(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// The tokens read: the prompt the model puts first included, truncation
+	// applied.
 	tokens := 0
+	prompt := m.Info().Prompts[role]
 	data := make([]embedDatum, len(vecs))
 	for i, v := range vecs {
-		if n, err := m.Tokens(indecis.Input{Text: texts[i]}); err == nil {
-			tokens += n
+		n, err := m.Tokens(indecis.Input{Text: prompt + texts[i]})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
 		}
+		tokens += n
 		v = indecis.Truncate(v, req.Dimensions)
 		data[i] = embedDatum{Object: "embedding", Index: i, Embedding: v}
 		if req.EncodingFormat == "base64" {
@@ -131,6 +140,11 @@ func (s *Server) embed(w http.ResponseWriter, r *http.Request) {
 // embedInputs decodes "input": a string or an array of strings. Token
 // arrays (OpenAI also accepts them) would be ids of another tokenizer.
 func embedInputs(raw json.RawMessage) ([]string, error) {
+	// A JSON null decodes into a string without error: it would be embedded
+	// as an empty text.
+	if t := bytes.TrimSpace(raw); len(t) == 0 || bytes.Equal(t, []byte("null")) {
+		return nil, fmt.Errorf("input is missing")
+	}
 	var one string
 	if err := json.Unmarshal(raw, &one); err == nil {
 		return []string{one}, nil
@@ -167,8 +181,13 @@ func (s *Server) openAIModels(w http.ResponseWriter, r *http.Request) {
 		Object  string `json:"object"`
 		OwnedBy string `json:"owned_by"`
 	}
+	// Only the text models: /v1/embeddings refuses the others.
 	list := []model{}
 	for _, n := range s.names() {
+		c := s.Models[n]
+		if m, v, err := c.load(c.defaultDir); err != nil || m == nil || v != nil {
+			continue
+		}
 		list = append(list, model{ID: n, Object: "model", OwnedBy: "indecis"})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": list})

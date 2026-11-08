@@ -101,3 +101,14 @@ func TestEmbeddingsFormats(t *testing.T) {
 		t.Fatalf("models %v", list)
 	}
 }
+
+func TestEmbedInputsRejectsMissingInput(t *testing.T) {
+	for _, raw := range []string{``, `null`, ` null `, `[]`} {
+		if _, err := embedInputs(json.RawMessage(raw)); err == nil {
+			t.Errorf("input %q accepted", raw)
+		}
+	}
+	if got, err := embedInputs(json.RawMessage(`""`)); err != nil || len(got) != 1 {
+		t.Errorf(`input "": %v, %v`, got, err)
+	}
+}
