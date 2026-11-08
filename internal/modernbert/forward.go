@@ -218,6 +218,22 @@ func (m *Model) attentionForward(l int, b Batch, qkv []float32, ls *layerState) 
 	})
 }
 
+// Pool turns the hidden states of each sequence into one vector, [B, H],
+// according to Cfg.Pooling.
+func (m *Model) Pool(hidden []float32, b Batch) []float32 {
+	h := m.Cfg.Hidden
+	if !m.Cfg.CLS() {
+		return MeanPool(hidden, b, h)
+	}
+	out := make([]float32, b.B()*h)
+	for bi, n := range b.Lens {
+		if n > 0 {
+			copy(out[bi*h:(bi+1)*h], hidden[bi*b.T*h:(bi*b.T+1)*h])
+		}
+	}
+	return out
+}
+
 // MeanPool averages the hidden states of each sequence over its actual
 // tokens, special tokens included, like sentence-transformers pooling.
 func MeanPool(hidden []float32, b Batch, h int) []float32 {

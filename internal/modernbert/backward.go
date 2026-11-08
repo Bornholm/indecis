@@ -202,6 +202,22 @@ func (m *Model) attentionBackward(l int, s *State, dCtx, dqkv []float32) {
 	})
 }
 
+// PoolBackward is the backward pass of Pool: the gradient of each pooled
+// vector goes to the first token (cls) or is spread over all of them.
+func (m *Model) PoolBackward(dPooled []float32, b Batch) []float32 {
+	h := m.Cfg.Hidden
+	if !m.Cfg.CLS() {
+		return MeanPoolBackward(dPooled, b, h)
+	}
+	d := make([]float32, b.B()*b.T*h)
+	for bi, n := range b.Lens {
+		if n > 0 {
+			copy(d[bi*b.T*h:(bi*b.T+1)*h], dPooled[bi*h:(bi+1)*h])
+		}
+	}
+	return d
+}
+
 // MeanPoolBackward spreads the gradient of each pooled vector over the
 // real tokens of its sequence.
 func MeanPoolBackward(dPooled []float32, b Batch, h int) []float32 {

@@ -263,7 +263,7 @@ func (m *Model) trainStep(batch []*encoded, grads *modernbert.Grads, opts TrainO
 	if err != nil {
 		panic(err) // the ids come from the model's tokenizer
 	}
-	pooled := modernbert.MeanPool(s.Hidden, b, H)
+	pooled := m.enc.Pool(s.Hidden, b)
 
 	// Inverted dropout on the pooled vector.
 	mask := make([]float32, len(pooled))
@@ -310,7 +310,7 @@ func (m *Model) trainStep(batch []*encoded, grads *modernbert.Grads, opts TrainO
 	for i := range dx {
 		dx[i] *= mask[i]
 	}
-	dHidden := modernbert.MeanPoolBackward(dx, b, H)
+	dHidden := m.enc.PoolBackward(dx, b)
 	if m.hasSpans() {
 		loss += m.spanLossGrad(batch, s.Hidden, dHidden, b.T, dropout, rng, tc)
 	}

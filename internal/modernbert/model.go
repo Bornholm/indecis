@@ -11,10 +11,12 @@ package modernbert
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/bornholm/indecis/safetensors"
@@ -36,11 +38,19 @@ type Config struct {
 	LocalTheta     float64 `json:"local_rope_theta"`
 	PadID          int32   `json:"pad_token_id"`
 
-	Activation    string `json:"hidden_activation"`
+	Activation string `json:"hidden_activation"`
+	// Pooling is how a sequence becomes one vector: "mean" (default) or
+	// "cls" (the state of the first token). Load takes it from the
+	// sentence-transformers pooling module when the backbone has one.
+	Pooling       string `json:"classifier_pooling,omitempty"`
 	AttentionBias bool   `json:"attention_bias"`
 	MLPBias       bool   `json:"mlp_bias"`
 	NormBias      bool   `json:"norm_bias"`
 }
+
+// CLS reports whether a sequence is represented by its first token rather
+// than by the mean of its tokens.
+func (c Config) CLS() bool { return c.Pooling == "cls" }
 
 // HeadDim is the dimension of an attention head.
 func (c Config) HeadDim() int { return c.Hidden / c.Heads }
@@ -63,6 +73,8 @@ func (c Config) validate() error {
 		return fmt.Errorf("modernbert: activation %q not supported", c.Activation)
 	case c.AttentionBias || c.MLPBias || c.NormBias:
 		return fmt.Errorf("modernbert: biases are not supported")
+	case c.Pooling != "" && c.Pooling != "mean" && c.Pooling != "cls":
+		return fmt.Errorf("modernbert: pooling %q not supported", c.Pooling)
 	}
 	return nil
 }
@@ -118,6 +130,9 @@ func Load(dir string) (*Model, error) {
 	if err := json.Unmarshal(b, &cfg); err != nil {
 		return nil, fmt.Errorf("modernbert: config.json: %w", err)
 	}
+	if err := readPooling(dir, &cfg); err != nil {
+		return nil, err
+	}
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
@@ -126,6 +141,39 @@ func Load(dir string) (*Model, error) {
 		return nil, err
 	}
 	return FromTensors(cfg, tensors)
+}
+
+// readPooling takes the pooling from the sentence-transformers module
+// (1_Pooling/config.json), which is what the embedding means; the
+// classifier_pooling of config.json only describes transformers'
+// classification head. Without the module, config.json decides.
+func readPooling(dir string, cfg *Config) error {
+	b, err := os.ReadFile(filepath.Join(dir, "1_Pooling", "config.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var p map[string]any
+	if err := json.Unmarshal(b, &p); err != nil {
+		return fmt.Errorf("modernbert: 1_Pooling/config.json: %w", err)
+	}
+	var modes []string
+	for k, v := range p {
+		if on, _ := v.(bool); on && strings.HasPrefix(k, "pooling_mode_") {
+			modes = append(modes, strings.TrimPrefix(k, "pooling_mode_"))
+		}
+	}
+	switch {
+	case len(modes) == 1 && modes[0] == "mean_tokens":
+		cfg.Pooling = "mean"
+	case len(modes) == 1 && modes[0] == "cls_token":
+		cfg.Pooling = "cls"
+	default:
+		return fmt.Errorf("modernbert: pooling %v not supported (mean or cls)", modes)
+	}
+	return nil
 }
 
 // FromTensors assembles a model from tensors named as in transformers
