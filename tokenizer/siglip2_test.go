@@ -68,9 +68,18 @@ func TestPipelineNearMisses(t *testing.T) {
 		{"inverted split", func(j map[string]any) { j["pre_tokenizer"].(map[string]any)["invert"] = true }},
 		{"other split behavior", func(j map[string]any) { j["pre_tokenizer"].(map[string]any)["behavior"] = "Isolated" }},
 		{"no normalizer", func(j map[string]any) { j["normalizer"] = nil }},
-		{"template with <bos>", func(j map[string]any) {
+		{"template with an unknown token", func(j map[string]any) {
 			pp := j["post_processor"].(map[string]any)
-			pp["single"] = append([]any{map[string]any{"SpecialToken": map[string]any{"id": "<bos>", "type_id": 0}}}, pp["single"].([]any)...)
+			pp["single"] = append([]any{map[string]any{"SpecialToken": map[string]any{"id": "<nope>", "type_id": 0}}}, pp["single"].([]any)...)
+		}},
+		{"template without its sequence", func(j map[string]any) {
+			pp := j["post_processor"].(map[string]any)
+			pp["single"] = []any{map[string]any{"SpecialToken": map[string]any{"id": "<eos>", "type_id": 0}}}
+		}},
+		{"pair template with B before A", func(j map[string]any) {
+			pp := j["post_processor"].(map[string]any)
+			p := pp["pair"].([]any)
+			p[0], p[2] = p[2], p[0]
 		}},
 		{"no post-processor", func(j map[string]any) { j["post_processor"] = nil }},
 	} {
@@ -88,6 +97,70 @@ func TestPipelineNearMisses(t *testing.T) {
 			t.Errorf("%s: accepted", c.name)
 		}
 	}
+}
+
+// The templates are read from the post-processor: <bos> A (granite-embedding
+// R2) instead of A <eos> (SigLIP 2), and they survive tokenizer.bin.
+func TestTemplateFromPostProcessor(t *testing.T) {
+	b, err := os.ReadFile("../testdata/siglip2-tiny/tokenizer.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var j map[string]any
+	if err := json.Unmarshal(b, &j); err != nil {
+		t.Fatal(err)
+	}
+	bos := map[string]any{"SpecialToken": map[string]any{"id": "<bos>", "type_id": 0}}
+	seq := func(id string) any { return map[string]any{"Sequence": map[string]any{"id": id, "type_id": 0}} }
+	pp := j["post_processor"].(map[string]any)
+	pp["single"] = []any{bos, seq("A")}
+	pp["pair"] = []any{bos, seq("A"), bos, seq("B")}
+	out, _ := json.Marshal(j)
+	path := filepath.Join(t.TempDir(), "tokenizer.json")
+	if err := os.WriteFile(path, out, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ref, err := Load("../testdata/siglip2-tiny/tokenizer.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := func(name string, tok *Tokenizer) {
+		text := ref.appendText(nil, "Hello world")
+		if got, want := tok.Encode("Hello world"), append([]int32{tok.BosID()}, text...); !slices.Equal(got, want) {
+			t.Errorf("%s: Encode = %v, want %v", name, got, want)
+		}
+		if got := tok.EncodeMax("Hello world", 2); len(got) != 2 || got[0] != tok.BosID() || got[1] != text[0] {
+			t.Errorf("%s: EncodeMax(2) = %v", name, got)
+		}
+		if got := tok.EncodeMax("Hello world", 0); !slices.Equal(got, []int32{tok.BosID()}) {
+			t.Errorf("%s: EncodeMax(0) = %v", name, got)
+		}
+		pair := tok.EncodePair("a", "b", 0)
+		want := append(append(append([]int32{tok.BosID()}, ref.appendText(nil, "a")...), tok.BosID()), ref.appendText(nil, "b")...)
+		if !slices.Equal(pair, want) {
+			t.Errorf("%s: EncodePair = %v, want %v", name, pair, want)
+		}
+		ids, offs := tok.EncodeOffsets("Hello world")
+		if len(ids) != len(offs) || ids[0] != tok.BosID() || offs[0] != (Offset{}) || offs[len(offs)-1].End != len("Hello world") {
+			t.Errorf("%s: EncodeOffsets = %v %v", name, ids, offs)
+		}
+	}
+	tok, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check("json", tok)
+	if err := WriteBinary(path); err != nil {
+		t.Fatal(err)
+	}
+	tok, err = Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tok.mapping == nil {
+		t.Fatal("tokenizer.bin not used")
+	}
+	check("bin", tok)
 }
 
 // Offsets of the raw pipeline, on the small tokenizer.

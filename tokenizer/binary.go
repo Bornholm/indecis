@@ -54,15 +54,19 @@ func BinaryPath(jsonPath string) string {
 
 // binMeta holds the small part of a Tokenizer.
 type binMeta struct {
-	Size  int              `json:"size"`
-	Raw   bool             `json:"raw,omitempty"`
-	Unk   int32            `json:"unk"`
-	Bos   int32            `json:"bos"`
-	Eos   int32            `json:"eos"`
-	Pad   int32            `json:"pad"`
-	Bytes [256]int32       `json:"bytes"`
-	Names map[int32]string `json:"names,omitempty"`
-	Added []binAdded       `json:"added,omitempty"`
+	Size int   `json:"size"`
+	Raw  bool  `json:"raw,omitempty"`
+	Unk  int32 `json:"unk"`
+	Bos  int32 `json:"bos"`
+	Eos  int32 `json:"eos"`
+	Pad  int32 `json:"pad"`
+	// Single and Pair are the templates; absent from files written before
+	// they were recorded (legacyTemplates).
+	Single []int32          `json:"single,omitempty"`
+	Pair   []int32          `json:"pair,omitempty"`
+	Bytes  [256]int32       `json:"bytes"`
+	Names  map[int32]string `json:"names,omitempty"`
+	Added  []binAdded       `json:"added,omitempty"`
 }
 
 type binAdded struct {
@@ -109,7 +113,7 @@ func WriteBinary(jsonPath string) error {
 }
 
 func (t *Tokenizer) writeBinary(w io.Writer, source [sha256.Size]byte) error {
-	meta := binMeta{Size: t.size, Raw: t.raw, Unk: t.unk, Bos: t.bos, Eos: t.eos, Pad: t.pad, Bytes: t.bytes}
+	meta := binMeta{Size: t.size, Raw: t.raw, Unk: t.unk, Bos: t.bos, Eos: t.eos, Pad: t.pad, Bytes: t.bytes, Single: t.single, Pair: t.pair}
 	if len(t.names) > 0 {
 		meta.Names = t.names
 	}
@@ -228,6 +232,8 @@ func loadBinary(path string, source [sha256.Size]byte) (t *Tokenizer, err error)
 		bos:    meta.Bos,
 		eos:    meta.Eos,
 		pad:    meta.Pad,
+		single: meta.Single,
+		pair:   meta.Pair,
 		bytes:  meta.Bytes,
 		names:  meta.Names,
 		added:  make(map[byte][]addedToken),
@@ -251,6 +257,12 @@ func loadBinary(path string, source [sha256.Size]byte) (t *Tokenizer, err error)
 		}
 	}
 	t.vocab.mask = uint64(slots - 1)
+	if t.single == nil {
+		t.legacyTemplates()
+	}
+	if !validTemplate(t.single, meta.Size, 1) || !validTemplate(t.pair, meta.Size, 2) {
+		return nil, fmt.Errorf("tokenizer: %s: inconsistent templates", path)
+	}
 	if t.names == nil {
 		t.names = make(map[int32]string)
 	}
@@ -264,4 +276,22 @@ func loadBinary(path string, source [sha256.Size]byte) (t *Tokenizer, err error)
 		t.added[first] = append(t.added[first], addedToken{content: a.Content, id: a.ID, lstrip: a.LStrip, rstrip: a.RStrip})
 	}
 	return t, nil
+}
+
+// validTemplate checks a template read from a file: ids in the
+// vocabulary, each of its seqs sequences exactly once.
+func validTemplate(tmpl []int32, size, seqs int) bool {
+	seen := 0
+	for _, x := range tmpl {
+		switch {
+		case x >= int32(size):
+			return false
+		case x < 0:
+			if x != seqA-int32(seen) || seen >= seqs {
+				return false
+			}
+			seen++
+		}
+	}
+	return seen == seqs
 }
