@@ -50,7 +50,9 @@ func runCompact(args []string) error {
 		return err
 	}
 	ctx := context.Background()
-	m, err := indecis.Load(*modelDir)
+	// A backbone (sentence-transformers directory) is accepted too: saved
+	// by indecis, its table is then memory-mapped instead of decoded.
+	m, err := indecis.Open(*modelDir)
 	if err != nil {
 		return err
 	}
