@@ -246,6 +246,14 @@ func (m *Model) SearchBatches(pairs []SearchPair, size int, seed int64) []Choice
 				}
 			}
 		}
+		// Else it forms a group with a pair of another query, used twice: a
+		// pair seen twice is harmless, a pair dropped is a lost example. Only
+		// a set where every pair has the same query cannot place it.
+		for i := 0; i < len(pairs) && !placed; i++ {
+			if q := pairs[i]; qid(q) != qid(p) {
+				kept, placed = append(kept, []SearchPair{q, p}), true
+			}
+		}
 	}
 
 	out := make([]ChoiceBatch, 0, len(kept))

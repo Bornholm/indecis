@@ -117,6 +117,33 @@ func TestSearchBatches(t *testing.T) {
 	}
 }
 
+// TestSearchBatchesKeepsEveryPair: with two pairs of one query and one of
+// another, the second pair of the first query fits in no group of the greedy
+// pass, nor in the group already holding its query.
+func TestSearchBatchesKeepsEveryPair(t *testing.T) {
+	m := &Model{}
+	pairs := []SearchPair{
+		{QueryID: "a", Query: "A", DocumentID: "1", Document: "doc 1"},
+		{QueryID: "a", Query: "A", DocumentID: "2", Document: "doc 2"},
+		{QueryID: "b", Query: "B", DocumentID: "3", Document: "doc 3"},
+	}
+	for _, size := range []int{2, 3, 4} {
+		for seed := int64(0); seed < 20; seed++ {
+			got := map[string]bool{}
+			for _, b := range m.SearchBatches(pairs, size, seed) {
+				for i, q := range b.Texts {
+					got[q+" -> "+b.Candidates[i].Name] = true
+				}
+			}
+			for _, want := range []string{"A -> doc 1", "A -> doc 2", "B -> doc 3"} {
+				if !got[want] {
+					t.Fatalf("size %d, seed %d: pair %q lost, got %v", size, seed, want, got)
+				}
+			}
+		}
+	}
+}
+
 func checkSearchBatches(t *testing.T, batches []ChoiceBatch) {
 	t.Helper()
 	used := 0
