@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/bornholm/indecis"
@@ -39,11 +40,19 @@ func runTrain(args []string) error {
 			return err
 		}
 		searchLR := 2e-5 // the backbone embeddings are already good: we fine-tune them
+		var ignored []string
 		fs.Visit(func(f *flag.Flag) {
-			if f.Name == "lr" {
+			switch f.Name {
+			case "lr":
 				searchLR = *lr
+			case "backbone", "train", "out", "search", "max-len", "threads", "batch", "epochs", "seed", "int8-embeddings":
+			default:
+				ignored = append(ignored, "-"+f.Name)
 			}
 		})
+		if len(ignored) > 0 {
+			return fmt.Errorf("train -search does not use %s", strings.Join(ignored, ", "))
+		}
 		return trainSearch(*backbone, *trainGlobs, *out, *maxLen, *threads, *batch, *epochs, searchLR, *seed, *int8Emb)
 	}
 	if err := required(fs, "backbone", "schema", "train", "out"); err != nil {
