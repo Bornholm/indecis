@@ -21,6 +21,8 @@ curl -s localhost:8080/api/alpha/decisions -d '{
 | `POST /api/alpha/decisions` | OpenRouter API (`/api/alpha/decision` also accepted) |
 | `POST /v1/systemone` | TypeSafe API |
 | `GET /api/alpha/models` | served models and their learned questions |
+| `POST /v1/embeddings` | OpenAI embeddings API, text models (see [embeddings.md](embeddings.md)) |
+| `GET /v1/models` | served models, in OpenAI's format |
 | `GET /healthz` | liveness check |
 
 A question named like a learned question goes through the model's head, which is calibrated. Any other question is asked in open mode: its criteria are compared with the state (see [open-categories.md](open-categories.md)). A criterion can carry examples: `{"description": "…", "examples": ["…"]}`. The TypeSafe API already accepts an object as a description; the `examples` field is an indecis convention, which another provider reads as a plain description.
