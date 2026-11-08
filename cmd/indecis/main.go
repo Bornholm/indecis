@@ -2,8 +2,10 @@
 //
 //	indecis synth    -templates dir -n 10000 -out data.jsonl
 //	indecis train    -backbone dir -schema schema.json -train 'data/*.jsonl' -out model
+//	indecis train    -search -backbone dir -train pairs.jsonl -out model
 //	indecis eval     -model model -data test.jsonl
 //	indecis predict  -model model < texts.jsonl
+//	indecis embed    -model model [-query] [-dim 256] < texts.jsonl > vectors.jsonl
 //	indecis compact  -model model -out model-compact -int8-embeddings
 //	indecis split    -in data.jsonl -fraction 0.2 -by family -kept train.jsonl -held test.jsonl
 //	indecis train-vision -backbone siglip -schema schema.json -train images.jsonl -out model
@@ -34,6 +36,7 @@ var commands = []struct {
 	{"train", "trains a model (fixed schema, or embeddings with -open)", runTrain},
 	{"eval", "measures a model on labeled examples", runEval},
 	{"predict", "answers questions for texts (JSONL or lines)", runPredict},
+	{"embed", "writes the embedding of each text (search queries with -query)", runEmbed},
 	{"compact", "reduces the size of a model (vocabulary, int8 table)", runCompact},
 	{"split", "sets aside a part of a set of examples (by family or by example)", runSplit},
 	{"train-vision", "trains a head that answers questions on images (SigLIP encoder)", runTrainVision},

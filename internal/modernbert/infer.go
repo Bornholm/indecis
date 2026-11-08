@@ -234,8 +234,8 @@ var attnScratches = sync.Pool{New: func() any { return new(linalg.AttnScratch) }
 
 var workspaces sync.Pool
 
-// Encode computes the mean embedding of each sequence in the batch,
-// [B, H].
+// Encode computes the pooled embedding of each sequence in the batch
+// (mean or first token, see Config.Pooling), [B, H].
 //
 // This is the inference path: the same computation as Forward followed by
 // MeanPool, without keeping anything for backpropagation, with weights
@@ -261,11 +261,17 @@ func (m *Model) Encode(b Batch) ([]float32, error) {
 func (m *Model) EncodeSeqs(seqs [][]int32) ([]float32, error) {
 	H := m.Cfg.Hidden
 	out := make([]float32, len(seqs)*H)
+	cls := m.Cfg.CLS()
 	err := m.run(seqs, func(xn []float32, offs []int) {
-		// Average of each sequence's states, special tokens included.
+		// Average of each sequence's states, special tokens included, or
+		// the state of its first token.
 		for i := range seqs {
 			n := offs[i+1] - offs[i]
 			if n == 0 {
+				continue
+			}
+			if cls {
+				copy(out[i*H:(i+1)*H], xn[offs[i]*H:(offs[i]+1)*H])
 				continue
 			}
 			acc := make([]float64, H)

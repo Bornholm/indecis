@@ -13,7 +13,8 @@
 //  3. each piece goes through BPE: merges by increasing rank, the leftmost
 //     one on equal ranks, and byte fallback for characters missing from the
 //     vocabulary;
-//  4. the template adds <bos> and <eos>.
+//  4. the template of the post-processor adds the special tokens
+//     (<bos> and <eos> around the text for bekko).
 //
 // Only this configuration is accepted: a tokenizer.json that differs is
 // rejected at load time instead of being tokenized approximately.
@@ -48,14 +49,16 @@ type Tokenizer struct {
 	unk    int32
 	bos    int32
 	eos    int32
-	// raw is the original Gemma pipeline (SigLIP 2): no leading ▁, no split
-	// before BPE, and templates without <bos>.
-	raw     bool
-	pad     int32
-	added   map[byte][]addedToken // by first byte, longest to shortest
-	cacheMu sync.RWMutex
-	cache   map[string][]int32
-	mapping []byte // tokenizer.bin mapped by loadBinary, nil otherwise
+	// raw is the original Gemma pipeline (SigLIP 2, granite-embedding R2):
+	// no leading ▁, no split before BPE.
+	raw bool
+	// single and pair are the templates (see seqA, seqB).
+	single, pair []int32
+	pad          int32
+	added        map[byte][]addedToken // by first byte, longest to shortest
+	cacheMu      sync.RWMutex
+	cache        map[string][]int32
+	mapping      []byte // tokenizer.bin mapped by loadBinary, nil otherwise
 }
 
 type merge struct {
@@ -243,25 +246,6 @@ type templatePiece struct {
 	} `json:"Sequence"`
 }
 
-// matches checks a template: each element is a special token (named)
-// or a sequence (empty).
-func matches(pieces []templatePiece, want ...string) bool {
-	if len(pieces) != len(want) {
-		return false
-	}
-	for i, w := range want {
-		p := pieces[i]
-		if w == "" {
-			if p.Sequence == nil {
-				return false
-			}
-		} else if p.SpecialToken == nil || p.SpecialToken.ID != w {
-			return false
-		}
-	}
-	return true
-}
-
 func read(r io.Reader) (*Tokenizer, error) {
 	f, byID, pairs, err := decode(r)
 	if err != nil {
@@ -317,6 +301,9 @@ func read(r io.Reader) (*Tokenizer, error) {
 	if t.pad, ok = t.lookup("<pad>"); !ok {
 		t.pad = 0
 	}
+	if err := t.parseTemplates(f.PostProcessor.Single, f.PostProcessor.Pair); err != nil {
+		return nil, err
+	}
 	for i := range t.bytes {
 		id, ok := t.vocab.lookup(fmt.Sprintf("<0x%02X>", i))
 		if !ok {
@@ -359,13 +346,14 @@ func checkSupported(f *fileJSON) error {
 	return err
 }
 
-// pipeline recognizes the two supported pipelines and reports whether it
-// is the raw one:
-//   - Metaspace(▁, always, split), templates <bos> A <eos> and
-//     <bos> A <eos> B <eos> (Gemma 3, bekko);
+// pipeline recognizes the two supported pre-tokenizations and reports
+// whether it is the raw one:
+//   - Metaspace(▁, always, split) (Gemma 3 as bekko ships it);
 //   - raw: Split on " " (a no-op, since the normalizer already replaced
-//     spaces), templates A <eos> and A <eos> B <eos> (the original Gemma
-//     tokenizer, SigLIP 2).
+//     spaces), the original Gemma pipeline (SigLIP 2, granite-embedding
+//     R2).
+//
+// The templates are read separately (parseTemplates).
 func pipeline(f *fileJSON) (raw bool, err error) {
 	p, pp := f.PreTokenizer, f.PostProcessor
 	if pp == nil || pp.Type != "TemplateProcessing" {
@@ -373,18 +361,93 @@ func pipeline(f *fileJSON) (raw bool, err error) {
 	}
 	switch {
 	case p != nil && p.Type == "Metaspace" && p.Replacement == metaspace && p.PrependScheme == "always" && p.Split:
-		if !matches(pp.Single, "<bos>", "", "<eos>") || !matches(pp.Pair, "<bos>", "", "<eos>", "", "<eos>") {
-			return false, fmt.Errorf("tokenizer: expected templates: <bos> A <eos> and <bos> A <eos> B <eos>")
-		}
 		return false, nil
 	case p != nil && p.Type == "Split" && p.Pattern.String == " " && p.Behavior == "MergedWithPrevious" && !p.Invert &&
 		f.Normalizer != nil:
-		if !matches(pp.Single, "", "<eos>") || !matches(pp.Pair, "", "<eos>", "", "<eos>") {
-			return false, fmt.Errorf("tokenizer: expected templates: A <eos> and A <eos> B <eos>")
-		}
 		return true, nil
 	}
 	return false, fmt.Errorf("tokenizer: expected pre-tokenizer: Metaspace(▁, always, split) or Split(\" \", merged with previous)")
+}
+
+// Template slots: seqA and seqB stand for the texts, any other value is the
+// id of a special token.
+const (
+	seqA int32 = -1
+	seqB int32 = -2
+)
+
+// parseTemplates reads the single and pair templates: special tokens
+// around one sequence (A), or around and between two (A then B).
+func (t *Tokenizer) parseTemplates(single, pair []templatePiece) error {
+	conv := func(pieces []templatePiece, seqs ...string) ([]int32, error) {
+		var out []int32
+		next := 0
+		for _, p := range pieces {
+			switch {
+			case p.Sequence != nil:
+				if next >= len(seqs) || p.Sequence.ID != seqs[next] {
+					return nil, fmt.Errorf("tokenizer: template sequences out of order")
+				}
+				out = append(out, seqA-int32(next))
+				next++
+			case p.SpecialToken != nil:
+				id, ok := t.lookup(p.SpecialToken.ID)
+				if !ok {
+					return nil, fmt.Errorf("tokenizer: template token %q missing", p.SpecialToken.ID)
+				}
+				out = append(out, id)
+			default:
+				return nil, fmt.Errorf("tokenizer: empty template piece")
+			}
+		}
+		if next != len(seqs) {
+			return nil, fmt.Errorf("tokenizer: template without its %d sequence(s)", len(seqs))
+		}
+		return out, nil
+	}
+	var err error
+	if t.single, err = conv(single, "A"); err != nil {
+		return err
+	}
+	t.pair, err = conv(pair, "A", "B")
+	return err
+}
+
+// legacyTemplates are the templates of a tokenizer.bin written before
+// they were recorded: they followed from the pipeline.
+func (t *Tokenizer) legacyTemplates() {
+	if t.raw {
+		t.single, t.pair = []int32{seqA, t.eos}, []int32{seqA, t.eos, seqB, t.eos}
+	} else {
+		t.single, t.pair = []int32{t.bos, seqA, t.eos}, []int32{t.bos, seqA, t.eos, seqB, t.eos}
+	}
+}
+
+// fill writes a template with the token sequences a and b.
+func fill(tmpl, a, b []int32) []int32 {
+	ids := make([]int32, 0, len(a)+len(b)+len(tmpl))
+	for _, x := range tmpl {
+		switch x {
+		case seqA:
+			ids = append(ids, a...)
+		case seqB:
+			ids = append(ids, b...)
+		default:
+			ids = append(ids, x)
+		}
+	}
+	return ids
+}
+
+// specials counts the special tokens of a template.
+func specials(tmpl []int32) int {
+	n := 0
+	for _, x := range tmpl {
+		if x >= 0 {
+			n++
+		}
+	}
+	return n
 }
 
 func pairKey(a, b int32) uint64 { return uint64(uint32(a))<<32 | uint64(uint32(b)) }
@@ -422,47 +485,37 @@ func (t *Tokenizer) PadID() int32 { return t.pad }
 func (t *Tokenizer) BosID() int32 { return t.bos }
 func (t *Tokenizer) EosID() int32 { return t.eos }
 
-// Encode tokenizes text and ends the result with <eos>, preceded by <bos>
-// except for the raw pipeline.
+// Encode tokenizes text and frames it with the template of the
+// tokenizer.json: <bos> text <eos> for bekko, text <eos> for SigLIP 2,
+// <bos> text for granite-embedding R2.
 func (t *Tokenizer) Encode(text string) []int32 {
-	var ids []int32
-	if !t.raw {
-		ids = append(ids, t.bos)
-	}
-	ids = t.appendText(ids, text)
-	return append(ids, t.eos)
+	return fill(t.single, t.appendText(nil, text), nil)
 }
 
-// EncodeMax tokenizes like Encode and truncates on the right to not
-// exceed maxLen ids, keeping the final <eos>. maxLen <= 2 gives
-// [<bos>, <eos>].
+// EncodeMax tokenizes like Encode and truncates the text on the right so
+// that the result does not exceed maxLen ids, the template's special
+// tokens included. A maxLen below their number keeps only them.
 func (t *Tokenizer) EncodeMax(text string, maxLen int) []int32 {
-	ids := t.Encode(text)
-	if maxLen < 2 {
-		maxLen = 2
+	a := t.appendText(nil, text)
+	if budget := max(maxLen-specials(t.single), 0); len(a) > budget {
+		a = a[:budget]
 	}
-	if len(ids) <= maxLen {
-		return ids
-	}
-	ids = ids[:maxLen]
-	ids[maxLen-1] = t.eos
-	return ids
+	return fill(t.single, a, nil)
 }
 
-// EncodePair tokenizes a (context, text) pair with the template
-// <bos> context <eos> text <eos>, the one used by the reference library.
+// EncodePair tokenizes a (context, text) pair with the pair template of
+// the tokenizer.json (<bos> context <eos> text <eos> for bekko).
 //
 // Beyond maxLen ids (0: no limit), truncation sacrifices the context
 // before the text: the text is what is being judged, the context is what
 // sheds light on it. The context keeps at least a third of the budget if
 // it is long enough, and it is its beginning that is kept: a system
-// prompt sets the assistant's role up front. The framing is Encode's, with
-// <eos> between the two.
+// prompt sets the assistant's role up front.
 func (t *Tokenizer) EncodePair(context, text string, maxLen int) []int32 {
 	a := t.appendText(nil, context)
 	b := t.appendText(nil, text)
 	if maxLen > 0 {
-		budget := max(maxLen-3, 0)
+		budget := max(maxLen-specials(t.pair), 0)
 		if len(a)+len(b) > budget {
 			keepA := min(len(a), budget/3)
 			keepB := min(len(b), budget-keepA)
@@ -470,14 +523,7 @@ func (t *Tokenizer) EncodePair(context, text string, maxLen int) []int32 {
 			a, b = a[:keepA], b[:keepB]
 		}
 	}
-	ids := make([]int32, 0, len(a)+len(b)+3)
-	if !t.raw {
-		ids = append(ids, t.bos)
-	}
-	ids = append(ids, a...)
-	ids = append(ids, t.eos)
-	ids = append(ids, b...)
-	return append(ids, t.eos)
+	return fill(t.pair, a, b)
 }
 
 // Offset is the byte span of a token in the text: text[Start:End]. The
@@ -489,13 +535,17 @@ type Offset struct{ Start, End int }
 // EncodeOffsets is Encode, also returning the span of each token in text,
 // identical to the offsets of the reference library.
 func (t *Tokenizer) EncodeOffsets(text string) ([]int32, []Offset) {
-	var ids []int32
-	var offs []Offset
-	if !t.raw {
-		ids, offs = append(ids, t.bos), append(offs, Offset{})
+	a, aOffs := t.AppendOffsets(nil, nil, text)
+	ids := make([]int32, 0, len(a)+len(t.single))
+	offs := make([]Offset, 0, cap(ids))
+	for _, x := range t.single {
+		if x == seqA {
+			ids, offs = append(ids, a...), append(offs, aOffs...)
+		} else {
+			ids, offs = append(ids, x), append(offs, Offset{})
+		}
 	}
-	ids, offs = t.AppendOffsets(ids, offs, text)
-	return append(ids, t.eos), append(offs, Offset{})
+	return ids, offs
 }
 
 // AppendOffsets tokenizes text without the template and appends the ids

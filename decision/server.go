@@ -21,6 +21,8 @@ import (
 //	POST /api/alpha/decisions   (OpenRouter; /api/alpha/decision accepted)
 //	POST /v1/systemone          (TypeSafe)
 //	GET  /api/alpha/models      (served models)
+//	POST /v1/embeddings         (OpenAI embeddings, text models)
+//	GET  /v1/models             (OpenAI model list)
 //
 // The request's "model" field picks the model by name; empty or unknown on
 // a single-model server, it is the default model.
@@ -59,6 +61,8 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("POST "+p, s.decide)
 	}
 	mux.HandleFunc("GET /api/alpha/models", s.models)
+	mux.HandleFunc("POST /v1/embeddings", s.embed)
+	mux.HandleFunc("GET /v1/models", s.openAIModels)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok\n")) })
 	return mux
 }

@@ -124,7 +124,7 @@ func (m *Model) choiceStep(b ChoiceBatch, scale float64, symmetric bool, grads *
 		if err != nil {
 			panic(err) // the ids come from the model's tokenizer
 		}
-		pooled := modernbert.MeanPool(s.Hidden, batch, H)
+		pooled := m.enc.Pool(s.Hidden, batch)
 		norms := make([]float32, len(texts))
 		unit := make([]float32, len(pooled))
 		for i := range texts {
@@ -273,8 +273,8 @@ func (m *Model) choiceStep(b ChoiceBatch, scale float64, symmetric bool, grads *
 		}
 		return out
 	}
-	m.enc.Backward(ts, modernbert.MeanPoolBackward(unnorm(da, a, an, nt), tb, H), grads)
-	m.enc.Backward(cs, modernbert.MeanPoolBackward(unnorm(dc, c, cn, nc), cb, H), grads)
+	m.enc.Backward(ts, m.enc.PoolBackward(unnorm(da, a, an, nt), tb), grads)
+	m.enc.Backward(cs, m.enc.PoolBackward(unnorm(dc, c, cn, nc), cb), grads)
 	tokens := 0
 	for _, n := range tb.Lens {
 		tokens += n

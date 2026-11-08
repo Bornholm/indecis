@@ -2,6 +2,7 @@ package indecis
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -60,6 +61,11 @@ type Info struct {
 	// EmbedScale multiplies the cosines in ChooseNearest (0: the default
 	// value).
 	EmbedScale float64 `json:"embed_scale,omitempty"`
+	// Prompts are the texts put before a query or a document by
+	// EmbedQueries and EmbedDocuments, taken from the backbone's
+	// sentence-transformers configuration ("query", "document"); empty
+	// prompts are left out.
+	Prompts map[string]string `json:"prompts,omitempty"`
 }
 
 // Model is a decision model: an encoder and one head per question.
@@ -250,9 +256,13 @@ func New(backboneDir string, schema Schema, seed int64, opts ...Option) (*Model,
 	if err != nil {
 		return nil, err
 	}
+	prompts, err := readPrompts(backboneDir, enc.Cfg)
+	if err != nil {
+		return nil, err
+	}
 	m := &Model{
 		schema: schema, enc: enc, tok: tok, tokenizerPath: tokPath,
-		maxLen: 256, info: Info{Backbone: filepath.Base(backboneDir)},
+		maxLen: 256, info: Info{Backbone: filepath.Base(backboneDir), Prompts: prompts},
 	}
 	for _, o := range opts {
 		o(m)
@@ -486,7 +496,14 @@ func (m *Model) Save(dir string) error {
 	}
 	tensors := map[string]safetensors.Tensor{}
 	for _, p := range m.enc.Params() {
-		tensors[p.Name] = safetensors.Tensor{Shape: p.Shape, Data: p.W}
+		t := safetensors.Tensor{Shape: p.Shape, Data: p.W}
+		// An untrained backbone keeps its bf16 weights: written as such,
+		// exactly, they take half the space. The embedding table is left to
+		// its own branch below.
+		if p.Name != m.enc.Emb.Name && bf16Exact(p.W) {
+			t.DType = "BF16"
+		}
+		tensors[p.Name] = t
 	}
 	H := m.enc.Cfg.Hidden
 	// The embedding table (93% of the weights) is written in bf16, the
@@ -539,7 +556,7 @@ func (m *Model) Save(dir string) error {
 		"intermediate_size": cfg.Intermediate, "vocab_size": cfg.Vocab, "norm_eps": cfg.NormEps,
 		"global_attn_every_n_layers": cfg.GlobalEvery, "local_attention": cfg.LocalAttention,
 		"global_rope_theta": cfg.GlobalTheta, "local_rope_theta": cfg.LocalTheta,
-		"pad_token_id": cfg.PadID, "hidden_activation": cfg.Activation,
+		"pad_token_id": cfg.PadID, "hidden_activation": cfg.Activation, "classifier_pooling": cmp.Or(cfg.Pooling, "mean"),
 		"attention_bias": false, "mlp_bias": false, "norm_bias": false,
 	}, "", "  ")
 	if err != nil {
@@ -563,6 +580,16 @@ func (m *Model) Save(dir string) error {
 		return err
 	}
 	return writeBytes(filepath.Join(dir, fileMeta), meta)
+}
+
+// bf16Exact reports whether every value of w is representable in bf16.
+func bf16Exact(w []float32) bool {
+	for _, v := range w {
+		if safetensors.FromBF16(safetensors.ToBF16(v)) != v {
+			return false
+		}
+	}
+	return len(w) > 0
 }
 
 // writeFile writes path through a temporary file renamed afterward.

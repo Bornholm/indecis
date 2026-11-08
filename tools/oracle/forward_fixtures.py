@@ -36,6 +36,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", required=True)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--very-long", type=int, default=0,
+                    help="also a text of about this many tokens (pooled embedding only)")
     args = ap.parse_args()
     model_dir = os.path.expanduser(args.model)
 
@@ -46,15 +48,24 @@ def main():
 
     cases, hidden = [], []
     texts = TEXTS + [LONG]
+    long_index = len(texts) - 1
+    if args.very_long:
+        # Past several local windows and far into the RoPE positions.
+        texts.append(" ".join([LONG] * (args.very_long // 150 + 1)))
+    # Pooling of the sentence-transformers module, as the Go side reads it.
+    pool_cfg = os.path.join(model_dir, "1_Pooling", "config.json")
+    cls = os.path.exists(pool_cfg) and json.load(open(pool_cfg)).get("pooling_mode_cls_token", False)
     with torch.no_grad():
         for i, t in enumerate(texts):
-            enc = tok(t, return_tensors="pt")
+            enc = tok(t, return_tensors="pt", truncation=False)
             out = model(**enc).last_hidden_state[0]
-            pooled = out.mean(dim=0)
+            pooled = out[0] if cls else out.mean(dim=0)
             ref = st.encode(t, convert_to_tensor=True, normalize_embeddings=False).float()
-            assert torch.allclose(pooled, ref, atol=1e-4), f"pooling mismatch on {t!r}: {(pooled-ref).abs().max()}"
+            # Some models end with a Normalize module: compare directions.
+            unit = torch.nn.functional.normalize
+            assert torch.allclose(unit(pooled, dim=0), unit(ref, dim=0), atol=1e-5), f"pooling mismatch on {t!r}"
             cases.append({"text": t, "ids": enc["input_ids"][0].tolist(), "pooled": [round(x, 7) for x in pooled.tolist()]})
-            if i in (1, len(texts) - 1):
+            if i in (1, long_index):
                 hidden.append({"case": i, "rows": out.shape[0], "offset": sum(h["rows"] for h in hidden) * out.shape[1]})
                 np.asarray(out.numpy(), dtype="<f4").tofile(open(os.path.join(args.out, f"forward_hidden_{i}.f32"), "wb"))
 

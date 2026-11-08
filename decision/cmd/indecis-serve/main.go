@@ -151,7 +151,7 @@ func main() {
 			log.Info("garbage collection", "GOGC", pct, "live MiB", ms.HeapAlloc>>20)
 		}
 	}
-	log.Info("listening", "addr", *addr, "endpoints", "POST /api/alpha/decisions, POST /v1/systemone, GET /api/alpha/models")
+	log.Info("listening", "addr", *addr, "endpoints", "POST /api/alpha/decisions, POST /v1/systemone, GET /api/alpha/models, POST /v1/embeddings, GET /v1/models")
 	if err := http.ListenAndServe(*addr, s.Handler()); err != nil {
 		log.Error("server", "error", err)
 		os.Exit(1)

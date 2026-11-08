@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/bornholm/indecis"
@@ -22,6 +23,7 @@ func runTrain(args []string) error {
 	holdoutBy := fs.String("holdout-by", "example", "set aside by example, or by family (whole families: measures generalization to families never seen)")
 	out := fs.String("out", "", "directory of the trained model")
 	open := fs.Bool("open", false, "train embeddings for options given at inference (ChooseNearest, DecideOpen) rather than fixed heads")
+	search := fs.Bool("search", false, "fine-tune embeddings for search on (query, document) pairs (no schema; see indecis.SearchPair)")
 	pairs := fs.Bool("pairs", false, "read (context, text) pairs")
 	maxLen := fs.Int("max-len", 256, "maximum tokens read per example")
 	def := indecis.DefaultTrainOptions()
@@ -33,6 +35,26 @@ func runTrain(args []string) error {
 	threads := fs.Int("threads", 0, "cores (0: all)")
 	int8Emb := fs.Bool("int8-embeddings", false, "write the embeddings table in int8 (twice as small)")
 	fs.Parse(args)
+	if *search {
+		if err := required(fs, "backbone", "train", "out"); err != nil {
+			return err
+		}
+		searchLR := 2e-5 // the backbone embeddings are already good: we fine-tune them
+		var ignored []string
+		fs.Visit(func(f *flag.Flag) {
+			switch f.Name {
+			case "lr":
+				searchLR = *lr
+			case "backbone", "train", "out", "search", "max-len", "threads", "batch", "epochs", "seed", "int8-embeddings":
+			default:
+				ignored = append(ignored, "-"+f.Name)
+			}
+		})
+		if len(ignored) > 0 {
+			return fmt.Errorf("train -search does not use %s", strings.Join(ignored, ", "))
+		}
+		return trainSearch(*backbone, *trainGlobs, *out, *maxLen, *threads, *batch, *epochs, searchLR, *seed, *int8Emb)
+	}
 	if err := required(fs, "backbone", "schema", "train", "out"); err != nil {
 		return err
 	}
