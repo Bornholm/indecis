@@ -29,6 +29,7 @@ Measured on a laptop (Core Ultra 7 265U) with the bekko-embedding-v1-a8m backbon
 - [Concepts](docs/concepts.md): question types, passages in a text, calibration, (context, text) pairs, fixed answers or open options.
 - [Producing data](docs/data.md): templates, labeling by LLMs, consensus.
 - [Open categories](docs/open-categories.md): classify among a list that changes with every request.
+- [Text embeddings](docs/embeddings.md): embedding models for search, `/v1/embeddings`, fine-tuning on (query, document) pairs.
 - [Serving a model](docs/serving.md): HTTP server compatible with TypeSafe and OpenRouter, provider for genai.
 - [Deciding on images](docs/images.md): SigLIP, options described in text, zero-shot.
 - [Inference speed and memory](docs/inference.md): int8, SIMD, shrinking a model, long texts.
