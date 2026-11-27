@@ -74,7 +74,17 @@ Attention is computed in blocks, with a softmax updated block after block: memor
 | 1,024 | 149 ms | 82 ms | 268 ms |
 | 4,096 | 1.4 s | 0.65 s | 1.9 s |
 
-The global layers (one in three) stay quadratic in compute. Our models were fine-tuned on 256 tokens; beyond that, their quality has not been measured.
+The global layers (one in three) stay quadratic in compute.
+
+Reading further pays off in search, although the models were fine-tuned on 256 tokens. On long French Wikipedia articles (MLDR, 200 test questions against their 200 articles and 800 others, 5,000 words in the median), one embedding per article, int8, nDCG@10 by tokens read:
+
+| Tokens read | 256 | 512 | 1,024 | 2,048 | 4,096 | 8,192 |
+| --- | --- | --- | --- | --- | --- | --- |
+| a8m | 0.742 | 0.741 | 0.743 | 0.758 | 0.809 | **0.839** |
+| a25m | 0.758 | 0.749 | 0.757 | 0.781 | 0.827 | **0.851** |
+| a25m fine-tuned for search | 0.763 | 0.759 | 0.758 | 0.784 | 0.836 | **0.863** |
+
+Quality stays flat up to 1,024 tokens, then rises by about 10 points up to the model's limit of 8,192 tokens. The questions were written from one paragraph of their article: part of the gain may come from reading that paragraph rather than from understanding long texts better, which these numbers do not separate. Encoding the 1,000 articles at 8,192 tokens took about 10 minutes with a8m and 25 with a25m, on all cores, against under half a minute at 256.
 
 ## Server under load
 
