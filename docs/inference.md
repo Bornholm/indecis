@@ -18,6 +18,8 @@ The last column is the compacted model, measured on a performance core (`taskset
 
 On the 636-example hand-reviewed reference, the AUC stays at 0.972, and 0.970 for the compacted model. The AVX2 kernels change no metric of the reference.
 
+Clearing the upper AVX registers (`linalg.ZeroUpper`) before the scalar code that follows portable SIMD then took 11 to 13% off these latencies in int8 (15 to 256 tokens) and 4% in float32, with identical metrics; on a25m in int8, 8 to 11%. These gains were measured on battery, on the same core, before and after: the table keeps the measurements on mains power.
+
 ## Settings
 
 `indecis check` reports what speeds up computation on the current machine: portable SIMD in hardware or emulated, vector width, AVX2 and FMA, AVX-VNNI. It exits with status 1 when SIMD is missing or emulated. From Go: `indecis.DetectHardware()`.

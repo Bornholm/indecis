@@ -78,6 +78,7 @@ func QuantizeRowU8(dst []uint8, x []float32, inv float32) int32 {
 		}
 	}
 	acc.Store(tmp[:])
+	ZeroUpper() // scalar float code follows (see ZeroUpper)
 	var sum int32
 	for _, v := range tmp[:V] {
 		sum += v
@@ -251,6 +252,7 @@ func ExpShift(x []float32, m float32) float32 {
 	}
 	var lanes [16]float32
 	acc.Store(lanes[:])
+	ZeroUpper() // scalar float code follows (see ZeroUpper)
 	var sum float32
 	for _, v := range lanes[:V] {
 		sum += v
@@ -339,6 +341,7 @@ func MaxOf(x []float32) float32 {
 	}
 	var lanes [16]float32
 	acc.Store(lanes[:])
+	ZeroUpper() // scalar float code follows (see ZeroUpper)
 	for _, v := range lanes[:V] {
 		m = max(m, v)
 	}

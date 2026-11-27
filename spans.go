@@ -447,6 +447,7 @@ func (m *Model) infer(ctx context.Context, inputs []Input, batchSize int) ([]inf
 		// The heads read every token: spread over the workers, they would
 		// otherwise take a third of the time of a long text, on one core.
 		linalg.Parallel(len(keep), 256, func(lo, hi int) {
+			linalg.ZeroUpper() // the heads are scalar float64
 			for _, k := range keep[lo:hi] {
 				x := states[k.row*H : (k.row+1)*H]
 				for qi, h := range m.heads {
