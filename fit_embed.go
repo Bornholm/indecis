@@ -48,7 +48,9 @@ const DefaultEmbedScale = 20
 // options, softened by DistillTemp and multiplied by DistillTemp²; and
 // DistillHidden weighs the alignment 1 − cos(model(x), teacher(x)),
 // averaged over the texts and the options of the batch. The teacher
-// encodes each text once, in inference (int8 if it was loaded so).
+// encodes the texts in inference (int8 if it was loaded so) and keeps
+// their embeddings in a cache of 128 MB at most (teacherCacheBytes): a
+// text is encoded again only once the cache has dropped it.
 func (m *Model) FitEmbeddings(ctx context.Context, batches []ChoiceBatch, opts TrainOptions) error {
 	if opts.Epochs <= 0 || len(batches) == 0 {
 		return fmt.Errorf("indecis: Epochs must be positive and at least one batch is required")
