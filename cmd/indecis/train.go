@@ -69,6 +69,16 @@ func runTrain(args []string) error {
 		dist := searchDistill{teacher: *teacher, weight: *distill, temp: *distillTemp, hidden: *distillHidden}
 		return trainSearch(*backbone, *trainGlobs, *out, *maxLen, *threads, *batch, *epochs, searchLR, *seed, *int8Emb, dist)
 	}
+	var distillFlags []string
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "teacher", "distill", "distill-temp", "distill-hidden":
+			distillFlags = append(distillFlags, "-"+f.Name)
+		}
+	})
+	if len(distillFlags) > 0 {
+		return fmt.Errorf("train: %s require -search", strings.Join(distillFlags, ", "))
+	}
 	if err := required(fs, "backbone", "schema", "train", "out"); err != nil {
 		return err
 	}

@@ -235,6 +235,11 @@ func TestFitEmbeddingsTeacher(t *testing.T) {
 	if err := plain.FitEmbeddings(context.Background(), b, opts); err != nil {
 		t.Fatal(err)
 	}
+	orphan := opts
+	orphan.DistillHidden = 1
+	if err := newModel().FitEmbeddings(context.Background(), b, orphan); err == nil {
+		t.Fatal("DistillHidden without a Teacher was accepted")
+	}
 	withIdle := opts
 	withIdle.Teacher = newModel()
 	if err := idle.FitEmbeddings(context.Background(), b, withIdle); err != nil {
