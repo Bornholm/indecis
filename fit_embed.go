@@ -3,6 +3,7 @@ package indecis
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	"math"
 	"math/rand"
 	"time"
@@ -165,7 +166,7 @@ func (tc *embedTeacher) embed(texts []string, seqs [][]int32) ([]float32, error)
 	out := make([]float32, len(texts)*H)
 	var todo []int
 	for i, t := range texts {
-		if u, ok := tc.units.get(t); ok {
+		if u, ok := tc.units.get(textKey(t)); ok {
 			copy(out[i*H:(i+1)*H], u)
 		} else {
 			todo = append(todo, i)
@@ -183,10 +184,22 @@ func (tc *embedTeacher) embed(texts []string, seqs [][]int32) ([]float32, error)
 		for k, i := range todo {
 			u := normalized(pooled[k*H : (k+1)*H])
 			copy(out[i*H:(i+1)*H], u)
-			tc.units.put(texts[i], u)
+			tc.units.put(textKey(texts[i]), u)
 		}
 	}
 	return out, nil
+}
+
+// textKey identifies a text in the teacher's cache by 8 bytes (64-bit
+// FNV-1a) rather than by the text itself: teacherCacheBytes then bounds
+// what the cache holds, whatever the length of the documents. With the
+// cache full (87,000 entries at width 384), a text read finds another's
+// key with a probability of about 5e-15, and the collision would only
+// change the teacher's embedding of that text.
+func textKey(t string) string {
+	h := fnv.New64a()
+	h.Write([]byte(t))
+	return string(h.Sum(nil))
 }
 
 // normalized returns v / |v|.

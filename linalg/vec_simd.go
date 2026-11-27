@@ -284,8 +284,8 @@ func Scale(x []float32, s float32) {
 
 // LayerNormRow writes o = (x - mean)/std * gamma, the moments being
 // computed in float64 in blocks of V lanes. It does not call ZeroUpper:
-// tried and measured without effect (BenchmarkReductions, LayerNormRow/384,
-// 750 ns with and without).
+// tried and measured without effect (750 ns a row of 384 with and
+// without).
 //
 //go:noinline
 func LayerNormRow(o, x, gamma []float32, eps float64) {
