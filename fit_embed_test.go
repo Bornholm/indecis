@@ -38,7 +38,7 @@ func TestChoiceStepDistillGradient(t *testing.T) {
 	for i := range teacher.enc.FinalNorm.W {
 		teacher.enc.FinalNorm.W[i] *= 1 + 0.5*float32(math.Sin(float64(i)))
 	}
-	if err := m.checkTeacher(teacher); err != nil {
+	if err := m.checkTeacherEncoder(teacher); err != nil {
 		t.Fatal(err)
 	}
 	b := ChoiceBatch{
@@ -256,8 +256,13 @@ func TestFitEmbeddingsTeacher(t *testing.T) {
 		}
 	}
 
+	// The teacher's questions play no part: one with another schema teaches.
+	other, err := New(bekkoDir(t), Schema{NewNoul("other", "")}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
 	active := opts
-	active.Teacher, active.DistillHidden, active.Distill = newModel(), 1, 0.5
+	active.Teacher, active.DistillHidden, active.Distill = other, 1, 0.5
 	var last float64
 	active.Progress = func(p Progress) { last = p.Loss }
 	if err := newModel().FitEmbeddings(context.Background(), b, active); err != nil {

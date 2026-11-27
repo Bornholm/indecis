@@ -145,6 +145,13 @@ func (m *Model) checkTeacher(t *Model) error {
 			return fmt.Errorf("indecis: question %q differs in the teacher", q.Name)
 		}
 	}
+	return m.checkTeacherEncoder(t)
+}
+
+// checkTeacherEncoder verifies that the teacher reads the model's token ids
+// into states of the same width: same tokenizer, same width. It is all
+// FitEmbeddings needs, the questions playing no part there.
+func (m *Model) checkTeacherEncoder(t *Model) error {
 	if t.enc.Cfg.Hidden != m.enc.Cfg.Hidden || t.enc.Cfg.Vocab != m.enc.Cfg.Vocab {
 		return fmt.Errorf("indecis: the teacher's encoder is not as wide as the model's")
 	}

@@ -73,7 +73,7 @@ func (m *Model) FitEmbeddings(ctx context.Context, batches []ChoiceBatch, opts T
 		return fmt.Errorf("indecis: Distill and DistillHidden require a Teacher")
 	}
 	if opts.Teacher != nil {
-		if err := m.checkTeacher(opts.Teacher); err != nil {
+		if err := m.checkTeacherEncoder(opts.Teacher); err != nil {
 			return err
 		}
 		if opts.Distill < 0 || opts.Distill > 1 || opts.DistillHidden < 0 || opts.DistillTemp < 0 {

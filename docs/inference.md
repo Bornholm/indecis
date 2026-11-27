@@ -18,7 +18,7 @@ The last two columns are the compacted model, measured on a performance core (`t
 
 On the 636-example hand-reviewed reference, the AUC stays at 0.972, and 0.970 for the compacted model. The AVX2 kernels change no metric of the reference.
 
-Clearing the upper AVX registers (`linalg.ZeroUpper`) before the scalar code that follows portable SIMD (last column) takes 7 to 15% off these latencies in int8 and 1 to 3% in float32, with identical metrics; on a25m in int8, 8 to 10% (256 tokens: 47.7 to 43.2 ms); on redaction (spans questions, int8), 33% at 14 tokens (1.05 to 0.70 ms) and 10% at 506 (31.3 to 28.3 ms). Medians of three runs on the same core, before and after alternated. In training, where the exact GELU runs in float64, a step goes from 5.2 to 1.06 s (a8m, 8 texts of 107 tokens, one core, on battery).
+Clearing the upper AVX registers (`linalg.ZeroUpper`) before the scalar code that follows portable SIMD (last column) takes 7 to 14% off these latencies in int8, measured against the previous code in the same session (15 tokens 1.01 to 0.87 ms, 256 tokens 14.8 to 13.75 ms; the previous column comes from an earlier session), and 1 to 3% in float32, with identical metrics; on a25m in int8, 8 to 10% (256 tokens: 47.7 to 43.2 ms); on redaction (spans questions, int8), 33% at 14 tokens (1.05 to 0.70 ms) and 10% at 506 (31.3 to 28.3 ms). Medians of three runs on the same core, before and after alternated. In training, where the exact GELU runs in float64, a step goes from 5.2 to 1.06 s (a8m, 8 texts of 107 tokens, one core, on battery).
 
 ## Settings
 
