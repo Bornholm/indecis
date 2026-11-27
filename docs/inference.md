@@ -6,19 +6,19 @@ indecis runs on CPU, in pure Go, without cgo. On one laptop core (Core Ultra 7 2
 
 Prompt-injection detector, a8m, one core, measured with `go run ./tools/infbench -model … -int8`:
 
-| | Training forward | Inference path, float32 | int8 and portable SIMD | int8, compacted model | AVX2 activation kernels, `tokenizer.bin` |
-| --- | --- | --- | --- | --- | --- |
-| 15 tokens | 10.7 ms | 4.9 ms | 1.5 ms | 1.5 ms | 1.1 ms |
-| 256 tokens | 79.8 ms | 57.4 ms | 23 ms | 23 ms | 14.7 ms |
-| Own memory, model ready | 486 MB | 53 MB | 30 MB | 18 MB | 13 MB |
-| Peak memory | 1,037 MB | 222 MB | 82 MB | 51 MB | 38 MB |
-| File | 289 MB | 289 MB | 289 MB | 58.5 MB | 58.5 MB + 4.4 MB |
+| | Training forward | Inference path, float32 | int8 and portable SIMD | int8, compacted model | AVX2 activation kernels, `tokenizer.bin` | `ZeroUpper` |
+| --- | --- | --- | --- | --- | --- | --- |
+| 15 tokens | 10.7 ms | 4.9 ms | 1.5 ms | 1.5 ms | 1.1 ms | 0.87 ms |
+| 256 tokens | 79.8 ms | 57.4 ms | 23 ms | 23 ms | 14.7 ms | 13.8 ms |
+| Own memory, model ready | 486 MB | 53 MB | 30 MB | 18 MB | 13 MB | 13 MB |
+| Peak memory | 1,037 MB | 222 MB | 82 MB | 51 MB | 38 MB | 38 MB |
+| File | 289 MB | 289 MB | 289 MB | 58.5 MB | 58.5 MB + 4.4 MB | 58.5 MB + 4.4 MB |
 
-The last column is the compacted model, measured on a performance core (`taskset -c 2`); on the same core, the previous code takes 1.6 ms and 19.4 ms. The full model (256,000 tokens) computes as fast and loads in 27 ms with its `tokenizer.bin`, against 470 ms by parsing its `tokenizer.json`; its own memory once ready drops from 28 to 15 MB, its peak from 76 to 45 MB. Spread over all cores, an 89-token text takes 2.5 ms instead of 5.5 ms on one core, a 34-token one 2.0 ms instead of 2.2. A 256-token text takes about 5 ms: there, the wait for the slowest core dominates, the low-power cores computing five times slower than the performance cores.
+The last two columns are the compacted model, measured on a performance core (`taskset -c 2`); on the same core, the previous code takes 1.6 ms and 19.4 ms. The full model (256,000 tokens) computes as fast and loads in 27 ms with its `tokenizer.bin`, against 470 ms by parsing its `tokenizer.json`; its own memory once ready drops from 28 to 15 MB, its peak from 76 to 45 MB. Spread over all cores, an 89-token text takes 2.5 ms instead of 5.5 ms on one core, a 34-token one 2.0 ms instead of 2.2. A 256-token text takes about 5 ms: there, the wait for the slowest core dominates, the low-power cores computing five times slower than the performance cores.
 
 On the 636-example hand-reviewed reference, the AUC stays at 0.972, and 0.970 for the compacted model. The AVX2 kernels change no metric of the reference.
 
-Clearing the upper AVX registers (`linalg.ZeroUpper`) before the scalar code that follows portable SIMD then took 11 to 13% off these latencies in int8 (15 to 256 tokens) and 4% in float32, with identical metrics; on a25m in int8, 8 to 11%. These gains were measured on battery, on the same core, before and after: the table keeps the measurements on mains power.
+Clearing the upper AVX registers (`linalg.ZeroUpper`) before the scalar code that follows portable SIMD (last column) takes 7 to 15% off these latencies in int8 and 1 to 3% in float32, with identical metrics; on a25m in int8, 8 to 10% (256 tokens: 47.7 to 43.2 ms); on redaction (spans questions, int8), 33% at 14 tokens (1.05 to 0.70 ms) and 10% at 506 (31.3 to 28.3 ms). Medians of three runs on the same core, before and after alternated. In training, where the exact GELU runs in float64, a step goes from 5.2 to 1.06 s (a8m, 8 texts of 107 tokens, one core, on battery).
 
 ## Settings
 
