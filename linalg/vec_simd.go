@@ -23,6 +23,8 @@ func AbsMax(x []float32) float32 {
 	}
 	var lanes [16]float32
 	acc.Store(lanes[:])
+	// No ZeroUpper here, unlike MaxOf: tried and measured without effect
+	// (infbench, int8, 256 tokens: 21.85 ms with it, 21.77 ms without).
 	var m float32
 	for _, v := range lanes[:V] {
 		m = max(m, v)
@@ -78,6 +80,7 @@ func QuantizeRowU8(dst []uint8, x []float32, inv float32) int32 {
 		}
 	}
 	acc.Store(tmp[:])
+	ZeroUpper() // scalar float code follows (see ZeroUpper)
 	var sum int32
 	for _, v := range tmp[:V] {
 		sum += v
@@ -251,6 +254,7 @@ func ExpShift(x []float32, m float32) float32 {
 	}
 	var lanes [16]float32
 	acc.Store(lanes[:])
+	ZeroUpper() // scalar float code follows (see ZeroUpper)
 	var sum float32
 	for _, v := range lanes[:V] {
 		sum += v
@@ -279,7 +283,9 @@ func Scale(x []float32, s float32) {
 }
 
 // LayerNormRow writes o = (x - mean)/std * gamma, the moments being
-// computed in float64 in blocks of V lanes.
+// computed in float64 in blocks of V lanes. It does not call ZeroUpper:
+// tried and measured without effect (750 ns a row of 384 with and
+// without).
 //
 //go:noinline
 func LayerNormRow(o, x, gamma []float32, eps float64) {
@@ -339,6 +345,7 @@ func MaxOf(x []float32) float32 {
 	}
 	var lanes [16]float32
 	acc.Store(lanes[:])
+	ZeroUpper() // scalar float code follows (see ZeroUpper)
 	for _, v := range lanes[:V] {
 		m = max(m, v)
 	}

@@ -19,7 +19,10 @@ import (
 // document) pairs: indecis train -search -backbone dir -train pairs.jsonl
 // -out model. Each line is an indecis.SearchPair: {"query", "document",
 // "query_id"?, "document_id"?, "negatives"?: [...]}.
-func trainSearch(backbone, globs, out string, maxLen, threads, batch, epochs int, lr float64, seed int64, int8Emb bool) error {
+//
+// With a teacher, the model also learns the teacher's embeddings (see
+// indecis.FitEmbeddings).
+func trainSearch(backbone, globs, out string, maxLen, threads, batch, epochs int, lr float64, seed int64, int8Emb bool, dist searchDistill) error {
 	pairs, err := readSearchPairs(globs)
 	if err != nil {
 		return err
@@ -35,6 +38,14 @@ func trainSearch(backbone, globs, out string, maxLen, threads, batch, epochs int
 	log.Printf("search mode: %d pairs, %d batches", len(pairs), len(batches))
 	to := indecis.DefaultTrainOptions()
 	to.Epochs, to.LR, to.Seed, to.Warmup = epochs, lr, seed, 0.1
+	if dist.teacher != "" {
+		t, err := indecis.Open(dist.teacher, indecis.WithMaxLen(maxLen), indecis.WithThreads(threads), indecis.WithInt8())
+		if err != nil {
+			return err
+		}
+		to.Teacher, to.Distill, to.DistillTemp, to.DistillHidden = t, dist.weight, dist.temp, dist.hidden
+		log.Printf("teacher %s: distill %g (temperature %g), alignment %g", dist.teacher, dist.weight, dist.temp, dist.hidden)
+	}
 	start := time.Now()
 	to.Progress = func(p indecis.Progress) {
 		if p.Step%20 == 0 || p.Step == p.Steps {
@@ -54,6 +65,13 @@ func trainSearch(backbone, globs, out string, maxLen, threads, batch, epochs int
 	}
 	log.Printf("model written to %s", out)
 	return nil
+}
+
+// searchDistill is the teacher of a search fine-tuning and its weights
+// (-teacher, -distill, -distill-temp, -distill-hidden).
+type searchDistill struct {
+	teacher              string
+	weight, temp, hidden float64
 }
 
 func readSearchPairs(globs string) ([]indecis.SearchPair, error) {

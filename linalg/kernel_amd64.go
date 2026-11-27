@@ -205,6 +205,9 @@ var ymm = cpuAVX2()
 // penalty: call it before a scalar-heavy loop that follows vector code.
 // It clears the registers of the current OS thread only: a goroutine
 // moved to another thread in between finds them as that thread left them.
+// In a long scalar loop, call it once per row rather than once before the
+// loop: the registers were measured dirty again in the middle of the
+// training's GELU loops, the goroutine having been descheduled in between.
 func ZeroUpper() {
 	if ymm {
 		zeroUpper()

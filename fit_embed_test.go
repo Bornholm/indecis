@@ -19,18 +19,61 @@ func TestChoiceStepGradient(t *testing.T) {
 		Correct:    [][]int{{0}, {1}, {2, 3}, {0}}, // two texts for Facturation
 	}
 	for _, symmetric := range []bool{false, true} {
-		checkChoiceGradient(t, m, b, symmetric)
+		checkChoiceGradient(t, m, b, symmetric, nil)
 	}
 }
 
-func checkChoiceGradient(t *testing.T, m *Model, b ChoiceBatch, symmetric bool) {
+// The distillation terms of FitEmbeddings (scores and alignment) follow
+// the finite differences too, alone and mixed with the contrastive loss.
+func TestChoiceStepDistillGradient(t *testing.T) {
+	m, err := New(bekkoDir(t), Schema{NewNoul("match", "")}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	teacher, err := New(bekkoDir(t), Schema{NewNoul("match", "")}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A teacher that differs from the model: its final norm perturbed.
+	for i := range teacher.enc.FinalNorm.W {
+		teacher.enc.FinalNorm.W[i] *= 1 + 0.5*float32(math.Sin(float64(i)))
+	}
+	if err := m.checkTeacherEncoder(teacher); err != nil {
+		t.Fatal(err)
+	}
+	b := ChoiceBatch{
+		Texts:      []string{"Ma facture de mars est fausse", "Le serveur ne répond plus", "Réunion jeudi à 10 h ?", "Facture payée deux fois"},
+		Candidates: []Candidate{{Name: "Facturation"}, {Name: "Support technique", Description: "pannes"}, {Name: "Agenda"}, {Name: "Juridique"}},
+		Correct:    [][]int{{0}, {1}, {2, 3}, {0}},
+	}
+	te, _ := teacher.Embed(context.Background(), b.Texts[0])
+	me, _ := m.Embed(context.Background(), b.Texts[0])
+	var cos float64
+	for k := range te[0] {
+		cos += float64(te[0][k]) * float64(me[0][k])
+	}
+	if cos > 0.999 {
+		t.Fatalf("cosine %.5f: the teacher does not differ from the model", cos)
+	}
+	for _, w := range []struct{ kl, temp, align float64 }{{1, 2, 0}, {0, 1, 1}, {0.5, 2, 1}} {
+		tc := newEmbedTeacher(teacher, w.kl, w.temp, w.align)
+		checkChoiceGradient(t, m, b, false, tc)
+	}
+}
+
+func checkChoiceGradient(t *testing.T, m *Model, b ChoiceBatch, symmetric bool, tc *embedTeacher) {
 	grads := m.enc.EnableGrad()
 	m.enc.ZeroGrad(grads)
-	m.choiceStep(b, DefaultEmbedScale, symmetric, grads)
+	if _, _, err := m.choiceStep(b, DefaultEmbedScale, symmetric, tc, grads); err != nil {
+		t.Fatal(err)
+	}
 	lossAt := func() float64 {
 		g := m.enc.EnableGrad()
 		m.enc.ZeroGrad(g)
-		l, _ := m.choiceStep(b, DefaultEmbedScale, symmetric, g)
+		l, _, err := m.choiceStep(b, DefaultEmbedScale, symmetric, tc, g)
+		if err != nil {
+			t.Fatal(err)
+		}
 		return l
 	}
 	w := m.enc.FinalNorm.W
@@ -49,7 +92,7 @@ func checkChoiceGradient(t *testing.T, m *Model, b ChoiceBatch, symmetric bool) 
 		w[i] = old
 		num := (up - down) / (2 * eps)
 		if math.Abs(num-float64(g[i])) > 0.05*math.Abs(num)+2e-4 {
-			t.Errorf("symmetric=%v, gamma[%d]: analytic %.5f, numeric %.5f", symmetric, i, g[i], num)
+			t.Errorf("symmetric=%v, distillation %v, gamma[%d]: analytic %.5f, numeric %.5f", symmetric, tc != nil, i, g[i], num)
 		}
 		if checked++; checked == 8 {
 			break
@@ -167,5 +210,80 @@ func TestDecideOpen(t *testing.T) {
 	}
 	if _, err := m.DecideOpen(ctx, []OpenQuestion{{Name: "x", Kind: Noul, Options: []Candidate{{Name: "a"}}}}, "t"); err == nil {
 		t.Error("noul with one criterion accepted")
+	}
+}
+
+// FitEmbeddings with a teacher: with both weights at zero, the teacher is
+// not run and the model trains exactly as without it; with a weight, the
+// training runs to its end and every distinct text is cached once.
+func TestFitEmbeddingsTeacher(t *testing.T) {
+	newModel := func() *Model {
+		m, err := New(bekkoDir(t), Schema{NewNoul("match", "")}, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+	b := []ChoiceBatch{{
+		Texts:      []string{"Ma facture de mars est fausse", "Le serveur ne répond plus"},
+		Candidates: []Candidate{{Name: "Facturation"}, {Name: "Support technique"}},
+		Correct:    [][]int{{0}, {1}},
+	}}
+	opts := DefaultTrainOptions()
+	opts.Epochs, opts.LR = 2, 1e-4
+	plain, idle := newModel(), newModel()
+	if err := plain.FitEmbeddings(context.Background(), b, opts); err != nil {
+		t.Fatal(err)
+	}
+	orphan := opts
+	orphan.DistillHidden = 1
+	if err := newModel().FitEmbeddings(context.Background(), b, orphan); err == nil {
+		t.Fatal("DistillHidden without a Teacher was accepted")
+	}
+	cold := opts
+	cold.Teacher, cold.DistillHidden, cold.DistillTemp = newModel(), 1, -1
+	if err := newModel().FitEmbeddings(context.Background(), b, cold); err == nil {
+		t.Fatal("a negative DistillTemp was accepted")
+	}
+	nan := opts
+	nan.Teacher, nan.DistillHidden = newModel(), math.NaN()
+	if err := newModel().FitEmbeddings(context.Background(), b, nan); err == nil {
+		t.Fatal("a NaN DistillHidden was accepted")
+	}
+	withIdle := opts
+	withIdle.Teacher = newModel()
+	if err := idle.FitEmbeddings(context.Background(), b, withIdle); err != nil {
+		t.Fatal(err)
+	}
+	for i, w := range plain.enc.FinalNorm.W {
+		if idle.enc.FinalNorm.W[i] != w {
+			t.Fatalf("gamma[%d]: %g with an idle teacher, %g without", i, idle.enc.FinalNorm.W[i], w)
+		}
+	}
+
+	// The teacher's questions play no part: one with another schema teaches.
+	other, err := New(bekkoDir(t), Schema{NewNoul("other", "")}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := opts
+	active.Teacher, active.DistillHidden, active.Distill = other, 1, 0.5
+	var last float64
+	active.Progress = func(p Progress) { last = p.Loss }
+	if err := newModel().FitEmbeddings(context.Background(), b, active); err != nil {
+		t.Fatal(err)
+	}
+	if math.IsNaN(last) || math.IsInf(last, 0) {
+		t.Fatalf("loss %g", last)
+	}
+	tc := newEmbedTeacher(active.Teacher, 0.5, 1, 1)
+	m := newModel()
+	for range 2 {
+		if _, _, err := m.choiceStep(b[0], DefaultEmbedScale, false, tc, m.enc.EnableGrad()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := tc.units.order.Len(); n != 4 {
+		t.Fatalf("%d texts cached, want 4 (2 texts, 2 options)", n)
 	}
 }

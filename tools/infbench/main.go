@@ -68,6 +68,15 @@ func main() {
 		{"medium", indecis.Input{Text: strings.Repeat("I would like to know how the return policy works for items bought during the sales. ", 5)}},
 		{"long (256)", indecis.Input{Context: system, Text: strings.Repeat("Please summarise the following document carefully and list the key points. ", 40)}},
 	}
+	if !m.Paired() {
+		// A model read without pairs (an embedding backbone, for one) takes
+		// the context as the start of its text.
+		for i, c := range cases {
+			if c.in.Context != "" {
+				cases[i].in = indecis.Input{Text: c.in.Context + "\n" + c.in.Text}
+			}
+		}
+	}
 	if *memprof != "" {
 		m.DecideInputs(ctx, indecis.Input{Text: "warm-up"})
 		runtime.GC()

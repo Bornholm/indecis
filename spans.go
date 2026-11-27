@@ -448,6 +448,7 @@ func (m *Model) infer(ctx context.Context, inputs []Input, batchSize int) ([]inf
 		// otherwise take a third of the time of a long text, on one core.
 		linalg.Parallel(len(keep), 256, func(lo, hi int) {
 			for _, k := range keep[lo:hi] {
+				linalg.ZeroUpper() // the heads are scalar float64; once per token, see ZeroUpper
 				x := states[k.row*H : (k.row+1)*H]
 				for qi, h := range m.heads {
 					if h.q.Kind == Spans {

@@ -25,6 +25,8 @@ Dense retrieval over the whole corpus (exact cosine), nDCG@10, at most 512 token
 | bekko a25m | 0.715 | 0.591 | 0.347 | 0.799 | 0.712 | 0.342 | 0.819 |
 | granite-311m | 0.713 | 0.655 | 0.309 | 0.759 | 0.717 | 0.334 | 0.807 |
 
+int8 costs a25m almost nothing: in float32, it scores 0.722 / 0.591 / 0.346 / 0.797, a mean of 0.614 against 0.613 in int8, while computing 3.1 to 3.5 times faster (15 to 256 tokens, one core). int8 is therefore the default worth keeping for a25m too; it still costs about 3.2 times a8m in int8.
+
 For comparison, in Python (sentence-transformers, float32), dense then hybrid:
 
 | Model | scifact | scifact-fr | nfcorpus | squad-fr | hybrid scifact | hybrid nfcorpus | hybrid squad-fr |
@@ -72,6 +74,22 @@ Each line of `pairs.jsonl` is a query and a relevant document, with optional ids
 ```
 
 In each batch, a query must prefer its document over the other queries' documents and the hard negatives (`SearchBatches`, then `FitEmbeddings`). Pairs of one query never share a batch, and a document relevant to a query is never counted as its negative. Keep the evaluation queries out of the training pairs.
+
+### Distilling a larger model
+
+`-teacher` adds a teacher of the same width and tokenizer, run in int8, to a search fine-tuning: `-distill` weighs the divergence between the teacher's and the model's similarity distributions over each batch (softened by `-distill-temp`), `-distill-hidden` the alignment of the two embeddings, 1 − cos.
+
+On the 13,746 synthetic queries, a8m distilled from the fine-tuned a25m (1 epoch, 36 min) gains little over a8m fine-tuned alone:
+
+| a8m, 1 epoch | scifact | scifact-fr | nfcorpus | squad-fr | mean |
+| --- | --- | --- | --- | --- | --- |
+| fine-tuned alone (two seeds) | 0.706 | 0.625 | 0.341 | 0.796 | 0.617 |
+| + similarities, temperature 1 (`-distill 0.5`) | 0.710 | 0.622 | 0.339 | 0.797 | 0.617 |
+| + similarities, temperature 4 (`-distill 0.9 -distill-temp 4`) | 0.702 | 0.637 | 0.341 | 0.795 | 0.619 |
+| + alignment (`-distill-hidden 1`) | 0.685 | 0.576 | 0.325 | 0.780 | 0.591 |
+| teacher: a25m fine-tuned | 0.727 | 0.665 | 0.346 | 0.813 | 0.638 |
+
+Aligning the embeddings hurts: a8m and a25m were trained apart, their spaces have little in common (mean cosine 0.31 between their embeddings of the same queries), and pulling one toward the other breaks it. The similarity distributions do not depend on the orientation of the space, but they add little to the labels: at temperature 4, 0.2 point on average (1.2 on scifact-fr), of the 2.1 points that separate the student from the teacher. When quality matters, a25m in int8 remains the better choice.
 
 ## Speed
 

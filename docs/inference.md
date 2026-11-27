@@ -6,17 +6,19 @@ indecis runs on CPU, in pure Go, without cgo. On one laptop core (Core Ultra 7 2
 
 Prompt-injection detector, a8m, one core, measured with `go run ./tools/infbench -model … -int8`:
 
-| | Training forward | Inference path, float32 | int8 and portable SIMD | int8, compacted model | AVX2 activation kernels, `tokenizer.bin` |
-| --- | --- | --- | --- | --- | --- |
-| 15 tokens | 10.7 ms | 4.9 ms | 1.5 ms | 1.5 ms | 1.1 ms |
-| 256 tokens | 79.8 ms | 57.4 ms | 23 ms | 23 ms | 14.7 ms |
-| Own memory, model ready | 486 MB | 53 MB | 30 MB | 18 MB | 13 MB |
-| Peak memory | 1,037 MB | 222 MB | 82 MB | 51 MB | 38 MB |
-| File | 289 MB | 289 MB | 289 MB | 58.5 MB | 58.5 MB + 4.4 MB |
+| | Training forward | Inference path, float32 | int8 and portable SIMD | int8, compacted model | AVX2 activation kernels, `tokenizer.bin` | `ZeroUpper` |
+| --- | --- | --- | --- | --- | --- | --- |
+| 15 tokens | 10.7 ms | 4.9 ms | 1.5 ms | 1.5 ms | 1.1 ms | 0.87 ms |
+| 256 tokens | 79.8 ms | 57.4 ms | 23 ms | 23 ms | 14.7 ms | 13.8 ms |
+| Own memory, model ready | 486 MB | 53 MB | 30 MB | 18 MB | 13 MB | 13 MB |
+| Peak memory | 1,037 MB | 222 MB | 82 MB | 51 MB | 38 MB | 38 MB |
+| File | 289 MB | 289 MB | 289 MB | 58.5 MB | 58.5 MB + 4.4 MB | 58.5 MB + 4.4 MB |
 
-The last column is the compacted model, measured on a performance core (`taskset -c 2`); on the same core, the previous code takes 1.6 ms and 19.4 ms. The full model (256,000 tokens) computes as fast and loads in 27 ms with its `tokenizer.bin`, against 470 ms by parsing its `tokenizer.json`; its own memory once ready drops from 28 to 15 MB, its peak from 76 to 45 MB. Spread over all cores, an 89-token text takes 2.5 ms instead of 5.5 ms on one core, a 34-token one 2.0 ms instead of 2.2. A 256-token text takes about 5 ms: there, the wait for the slowest core dominates, the low-power cores computing five times slower than the performance cores.
+The last two columns are the compacted model, measured on a performance core (`taskset -c 2`); on the same core, the previous code takes 1.6 ms and 19.4 ms. The full model (256,000 tokens) computes as fast and loads in 27 ms with its `tokenizer.bin`, against 470 ms by parsing its `tokenizer.json`; its own memory once ready drops from 28 to 15 MB, its peak from 76 to 45 MB. Spread over all cores, an 89-token text takes 2.5 ms instead of 5.5 ms on one core, a 34-token one 2.0 ms instead of 2.2. A 256-token text takes about 5 ms: there, the wait for the slowest core dominates, the low-power cores computing five times slower than the performance cores.
 
 On the 636-example hand-reviewed reference, the AUC stays at 0.972, and 0.970 for the compacted model. The AVX2 kernels change no metric of the reference.
+
+Clearing the upper AVX registers (`linalg.ZeroUpper`) before the scalar code that follows portable SIMD (last column) takes 7 to 14% off these latencies in int8, measured against the previous code in the same session (15 tokens 1.01 to 0.87 ms, 256 tokens 14.8 to 13.75 ms; the previous column comes from an earlier session), and 1 to 3% in float32, with identical metrics; on a25m in int8, 8 to 10% (256 tokens: 47.7 to 43.2 ms); on redaction (spans questions, int8), 33% at 14 tokens (1.05 to 0.70 ms) and 10% at 506 (31.3 to 28.3 ms). Medians of three runs on the same core, before and after alternated. In training, where the exact GELU runs in float64, a step goes from 5.2 to 1.06 s (a8m, 8 texts of 107 tokens, one core, on battery).
 
 ## Settings
 
@@ -72,7 +74,17 @@ Attention is computed in blocks, with a softmax updated block after block: memor
 | 1,024 | 149 ms | 82 ms | 268 ms |
 | 4,096 | 1.4 s | 0.65 s | 1.9 s |
 
-The global layers (one in three) stay quadratic in compute. Our models were fine-tuned on 256 tokens; beyond that, their quality has not been measured.
+The global layers (one in three) stay quadratic in compute.
+
+Reading further pays off in search, although the models were fine-tuned on 256 tokens. On long French Wikipedia articles (MLDR, 200 test questions against their 200 articles and 800 others, 5,000 words in the median), one embedding per article, int8, nDCG@10 by tokens read:
+
+| Tokens read | 256 | 512 | 1,024 | 2,048 | 4,096 | 8,192 |
+| --- | --- | --- | --- | --- | --- | --- |
+| a8m | 0.742 | 0.741 | 0.743 | 0.758 | 0.809 | **0.839** |
+| a25m | 0.758 | 0.749 | 0.757 | 0.781 | 0.827 | **0.851** |
+| a25m fine-tuned for search | 0.763 | 0.759 | 0.758 | 0.784 | 0.836 | **0.863** |
+
+Quality stays flat up to 1,024 tokens, then rises by about 10 points up to the model's limit of 8,192 tokens. The questions were written from one paragraph of their article: part of the gain may come from reading that paragraph rather than from understanding long texts better, which these numbers do not separate. Encoding the 1,000 articles at 8,192 tokens took about 10 minutes with a8m and 25 with a25m, on all cores, against under half a minute at 256.
 
 ## Server under load
 

@@ -103,6 +103,7 @@ func geluGrad(x float32) float32 {
 func gluForward(g, z []float32, n, inter int) {
 	linalg.Parallel(n, rowGrain, func(lo, hi int) {
 		for r := lo; r < hi; r++ {
+			linalg.ZeroUpper() // math.Erf and math.Exp are scalar float64
 			a := z[r*2*inter : r*2*inter+inter]
 			b := z[r*2*inter+inter : (r+1)*2*inter]
 			o := g[r*inter : (r+1)*inter]
@@ -117,6 +118,7 @@ func gluForward(g, z []float32, n, inter int) {
 func gluBackward(dz, dg, z []float32, n, inter int) {
 	linalg.Parallel(n, rowGrain, func(lo, hi int) {
 		for r := lo; r < hi; r++ {
+			linalg.ZeroUpper() // math.Erf and math.Exp are scalar float64
 			a := z[r*2*inter : r*2*inter+inter]
 			b := z[r*2*inter+inter : (r+1)*2*inter]
 			d := dg[r*inter : (r+1)*inter]

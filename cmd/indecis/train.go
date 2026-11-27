@@ -34,6 +34,10 @@ func runTrain(args []string) error {
 	seed := fs.Int64("seed", def.Seed, "seed")
 	threads := fs.Int("threads", 0, "cores (0: all)")
 	int8Emb := fs.Bool("int8-embeddings", false, "write the embeddings table in int8 (twice as small)")
+	teacher := fs.String("teacher", "", "-search: embedding model to distill (same tokenizer and width), run in int8")
+	distill := fs.Float64("distill", 0, "-search with -teacher: weight of the teacher's similarity distributions (KL), the contrastive loss weighing 1 − distill")
+	distillTemp := fs.Float64("distill-temp", 1, "-search with -teacher: temperature of the similarity distributions")
+	distillHidden := fs.Float64("distill-hidden", 0, "-search with -teacher: weight of the alignment 1 − cos(model, teacher)")
 	fs.Parse(args)
 	if *search {
 		if err := required(fs, "backbone", "train", "out"); err != nil {
@@ -45,7 +49,8 @@ func runTrain(args []string) error {
 			switch f.Name {
 			case "lr":
 				searchLR = *lr
-			case "backbone", "train", "out", "search", "max-len", "threads", "batch", "epochs", "seed", "int8-embeddings":
+			case "backbone", "train", "out", "search", "max-len", "threads", "batch", "epochs", "seed", "int8-embeddings",
+				"teacher", "distill", "distill-temp", "distill-hidden":
 			default:
 				ignored = append(ignored, "-"+f.Name)
 			}
@@ -53,7 +58,32 @@ func runTrain(args []string) error {
 		if len(ignored) > 0 {
 			return fmt.Errorf("train -search does not use %s", strings.Join(ignored, ", "))
 		}
-		return trainSearch(*backbone, *trainGlobs, *out, *maxLen, *threads, *batch, *epochs, searchLR, *seed, *int8Emb)
+		tempSet := false
+		fs.Visit(func(f *flag.Flag) { tempSet = tempSet || f.Name == "distill-temp" })
+		if *teacher == "" && (*distill != 0 || *distillHidden != 0 || tempSet) {
+			return fmt.Errorf("train -search: -distill, -distill-temp and -distill-hidden require -teacher")
+		}
+		if !(*distillTemp > 0) { // NaN fails too
+			return fmt.Errorf("train -search: -distill-temp must be positive")
+		}
+		if !(*distill >= 0 && *distill <= 1 && *distillHidden >= 0) {
+			return fmt.Errorf("train -search: -distill must lie in [0, 1] and -distill-hidden be non-negative")
+		}
+		if *teacher != "" && *distill == 0 && *distillHidden == 0 {
+			return fmt.Errorf("train -search: -teacher needs -distill or -distill-hidden, otherwise the teacher teaches nothing")
+		}
+		dist := searchDistill{teacher: *teacher, weight: *distill, temp: *distillTemp, hidden: *distillHidden}
+		return trainSearch(*backbone, *trainGlobs, *out, *maxLen, *threads, *batch, *epochs, searchLR, *seed, *int8Emb, dist)
+	}
+	var distillFlags []string
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "teacher", "distill", "distill-temp", "distill-hidden":
+			distillFlags = append(distillFlags, "-"+f.Name)
+		}
+	})
+	if len(distillFlags) > 0 {
+		return fmt.Errorf("train: %s require -search", strings.Join(distillFlags, ", "))
 	}
 	if err := required(fs, "backbone", "schema", "train", "out"); err != nil {
 		return err
