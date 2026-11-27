@@ -245,6 +245,11 @@ func TestFitEmbeddingsTeacher(t *testing.T) {
 	if err := newModel().FitEmbeddings(context.Background(), b, cold); err == nil {
 		t.Fatal("a negative DistillTemp was accepted")
 	}
+	nan := opts
+	nan.Teacher, nan.DistillHidden = newModel(), math.NaN()
+	if err := newModel().FitEmbeddings(context.Background(), b, nan); err == nil {
+		t.Fatal("a NaN DistillHidden was accepted")
+	}
 	withIdle := opts
 	withIdle.Teacher = newModel()
 	if err := idle.FitEmbeddings(context.Background(), b, withIdle); err != nil {

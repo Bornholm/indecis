@@ -63,10 +63,10 @@ func runTrain(args []string) error {
 		if *teacher == "" && (*distill != 0 || *distillHidden != 0 || tempSet) {
 			return fmt.Errorf("train -search: -distill, -distill-temp and -distill-hidden require -teacher")
 		}
-		if *distillTemp <= 0 {
+		if !(*distillTemp > 0) { // NaN fails too
 			return fmt.Errorf("train -search: -distill-temp must be positive")
 		}
-		if *distill < 0 || *distill > 1 || *distillHidden < 0 {
+		if !(*distill >= 0 && *distill <= 1 && *distillHidden >= 0) {
 			return fmt.Errorf("train -search: -distill must lie in [0, 1] and -distill-hidden be non-negative")
 		}
 		if *teacher != "" && *distill == 0 && *distillHidden == 0 {

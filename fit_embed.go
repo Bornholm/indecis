@@ -78,7 +78,8 @@ func (m *Model) FitEmbeddings(ctx context.Context, batches []ChoiceBatch, opts T
 		if err := m.checkTeacherEncoder(opts.Teacher); err != nil {
 			return err
 		}
-		if opts.Distill < 0 || opts.Distill > 1 || opts.DistillHidden < 0 || opts.DistillTemp < 0 {
+		// Written so that NaN, for which every comparison is false, fails.
+		if !(opts.Distill >= 0 && opts.Distill <= 1 && opts.DistillHidden >= 0 && opts.DistillTemp >= 0) {
 			return fmt.Errorf("indecis: Distill must lie in [0, 1], DistillHidden and DistillTemp be non-negative (DistillTemp 0: 1)")
 		}
 		if opts.Distill > 0 || opts.DistillHidden > 0 {
