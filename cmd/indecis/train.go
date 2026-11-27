@@ -58,8 +58,13 @@ func runTrain(args []string) error {
 		if len(ignored) > 0 {
 			return fmt.Errorf("train -search does not use %s", strings.Join(ignored, ", "))
 		}
-		if *teacher == "" && (*distill != 0 || *distillHidden != 0) {
-			return fmt.Errorf("train -search: -distill and -distill-hidden require -teacher")
+		tempSet := false
+		fs.Visit(func(f *flag.Flag) { tempSet = tempSet || f.Name == "distill-temp" })
+		if *teacher == "" && (*distill != 0 || *distillHidden != 0 || tempSet) {
+			return fmt.Errorf("train -search: -distill, -distill-temp and -distill-hidden require -teacher")
+		}
+		if *teacher != "" && *distill == 0 && *distillHidden == 0 {
+			return fmt.Errorf("train -search: -teacher needs -distill or -distill-hidden, otherwise the teacher teaches nothing")
 		}
 		dist := searchDistill{teacher: *teacher, weight: *distill, temp: *distillTemp, hidden: *distillHidden}
 		return trainSearch(*backbone, *trainGlobs, *out, *maxLen, *threads, *batch, *epochs, searchLR, *seed, *int8Emb, dist)

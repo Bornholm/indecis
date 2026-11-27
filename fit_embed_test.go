@@ -56,7 +56,7 @@ func TestChoiceStepDistillGradient(t *testing.T) {
 		t.Fatalf("cosine %.5f: the teacher does not differ from the model", cos)
 	}
 	for _, w := range []struct{ kl, temp, align float64 }{{1, 2, 0}, {0, 1, 1}, {0.5, 2, 1}} {
-		tc := &embedTeacher{t: teacher, kl: w.kl, temp: w.temp, align: w.align, units: map[string][]float32{}}
+		tc := newEmbedTeacher(teacher, w.kl, w.temp, w.align)
 		checkChoiceGradient(t, m, b, false, tc)
 	}
 }
@@ -64,11 +64,16 @@ func TestChoiceStepDistillGradient(t *testing.T) {
 func checkChoiceGradient(t *testing.T, m *Model, b ChoiceBatch, symmetric bool, tc *embedTeacher) {
 	grads := m.enc.EnableGrad()
 	m.enc.ZeroGrad(grads)
-	m.choiceStep(b, DefaultEmbedScale, symmetric, tc, grads)
+	if _, _, err := m.choiceStep(b, DefaultEmbedScale, symmetric, tc, grads); err != nil {
+		t.Fatal(err)
+	}
 	lossAt := func() float64 {
 		g := m.enc.EnableGrad()
 		m.enc.ZeroGrad(g)
-		l, _ := m.choiceStep(b, DefaultEmbedScale, symmetric, tc, g)
+		l, _, err := m.choiceStep(b, DefaultEmbedScale, symmetric, tc, g)
+		if err != nil {
+			t.Fatal(err)
+		}
 		return l
 	}
 	w := m.enc.FinalNorm.W
@@ -205,5 +210,60 @@ func TestDecideOpen(t *testing.T) {
 	}
 	if _, err := m.DecideOpen(ctx, []OpenQuestion{{Name: "x", Kind: Noul, Options: []Candidate{{Name: "a"}}}}, "t"); err == nil {
 		t.Error("noul with one criterion accepted")
+	}
+}
+
+// FitEmbeddings with a teacher: with both weights at zero, the teacher is
+// not run and the model trains exactly as without it; with a weight, the
+// training runs to its end and every distinct text is cached once.
+func TestFitEmbeddingsTeacher(t *testing.T) {
+	newModel := func() *Model {
+		m, err := New(bekkoDir(t), Schema{NewNoul("match", "")}, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+	b := []ChoiceBatch{{
+		Texts:      []string{"Ma facture de mars est fausse", "Le serveur ne répond plus"},
+		Candidates: []Candidate{{Name: "Facturation"}, {Name: "Support technique"}},
+		Correct:    [][]int{{0}, {1}},
+	}}
+	opts := DefaultTrainOptions()
+	opts.Epochs, opts.LR = 2, 1e-4
+	plain, idle := newModel(), newModel()
+	if err := plain.FitEmbeddings(context.Background(), b, opts); err != nil {
+		t.Fatal(err)
+	}
+	withIdle := opts
+	withIdle.Teacher = newModel()
+	if err := idle.FitEmbeddings(context.Background(), b, withIdle); err != nil {
+		t.Fatal(err)
+	}
+	for i, w := range plain.enc.FinalNorm.W {
+		if idle.enc.FinalNorm.W[i] != w {
+			t.Fatalf("gamma[%d]: %g with an idle teacher, %g without", i, idle.enc.FinalNorm.W[i], w)
+		}
+	}
+
+	active := opts
+	active.Teacher, active.DistillHidden, active.Distill = newModel(), 1, 0.5
+	var last float64
+	active.Progress = func(p Progress) { last = p.Loss }
+	if err := newModel().FitEmbeddings(context.Background(), b, active); err != nil {
+		t.Fatal(err)
+	}
+	if math.IsNaN(last) || math.IsInf(last, 0) {
+		t.Fatalf("loss %g", last)
+	}
+	tc := newEmbedTeacher(active.Teacher, 0.5, 1, 1)
+	m := newModel()
+	for range 2 {
+		if _, _, err := m.choiceStep(b[0], DefaultEmbedScale, false, tc, m.enc.EnableGrad()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := tc.units.order.Len(); n != 4 {
+		t.Fatalf("%d texts cached, want 4 (2 texts, 2 options)", n)
 	}
 }

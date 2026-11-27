@@ -75,9 +75,8 @@ func (m *Model) FitEmbeddings(ctx context.Context, batches []ChoiceBatch, opts T
 		if opts.Distill < 0 || opts.Distill > 1 || opts.DistillHidden < 0 {
 			return fmt.Errorf("indecis: Distill must lie in [0, 1] and DistillHidden be non-negative")
 		}
-		tc = &embedTeacher{t: opts.Teacher, kl: opts.Distill, temp: opts.DistillTemp, align: opts.DistillHidden, units: map[string][]float32{}}
-		if tc.temp <= 0 {
-			tc.temp = 1
+		if opts.Distill > 0 || opts.DistillHidden > 0 {
+			tc = newEmbedTeacher(opts.Teacher, opts.Distill, opts.DistillTemp, opts.DistillHidden)
 		}
 	}
 	scale := m.embedScale()
@@ -110,7 +109,10 @@ func (m *Model) FitEmbeddings(ctx context.Context, batches []ChoiceBatch, opts T
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			loss, n := m.choiceStep(batches[bi], scale, opts.Symmetric, tc, grads)
+			loss, n, err := m.choiceStep(batches[bi], scale, opts.Symmetric, tc, grads)
+			if err != nil {
+				return err
+			}
 			tokens += n
 			if opts.ClipNorm > 0 {
 				optim.ClipGradNorm(opts.ClipNorm, dense, sparse)
@@ -133,23 +135,39 @@ func (m *Model) FitEmbeddings(ctx context.Context, batches []ChoiceBatch, opts T
 }
 
 // embedTeacher is the teacher of FitEmbeddings and its weights (see
-// FitEmbeddings), with the embeddings it already computed.
+// FitEmbeddings), with the embeddings it computed most recently.
 type embedTeacher struct {
 	t               *Model
 	kl, temp, align float64
-	units           map[string][]float32 // normalized embedding of each text
+	units           *lru // normalized embedding of each text
+}
+
+// teacherCacheBytes bounds the teacher's embeddings kept between steps:
+// enough to read a corpus of tens of thousands of texts once per training,
+// not the whole of a larger one.
+const teacherCacheBytes = 128 << 20
+
+func newEmbedTeacher(t *Model, kl, temp, align float64) *embedTeacher {
+	if temp <= 0 {
+		temp = 1
+	}
+	n := max(1, teacherCacheBytes/(4*t.enc.Cfg.Hidden))
+	return &embedTeacher{t: t, kl: kl, temp: temp, align: align, units: newLRU(n)}
 }
 
 // embed returns the teacher's normalized embeddings of the texts, laid end
 // to end, from the token ids the model reads.
 func (tc *embedTeacher) embed(texts []string, seqs [][]int32) ([]float32, error) {
+	H := tc.t.enc.Cfg.Hidden
+	out := make([]float32, len(texts)*H)
 	var todo []int
 	for i, t := range texts {
-		if tc.units[t] == nil {
+		if u, ok := tc.units.get(t); ok {
+			copy(out[i*H:(i+1)*H], u)
+		} else {
 			todo = append(todo, i)
 		}
 	}
-	H := tc.t.enc.Cfg.Hidden
 	if len(todo) > 0 {
 		batch := make([][]int32, len(todo))
 		for k, i := range todo {
@@ -157,15 +175,13 @@ func (tc *embedTeacher) embed(texts []string, seqs [][]int32) ([]float32, error)
 		}
 		pooled, err := tc.t.enc.EncodeSeqs(batch)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("indecis: teacher: %w", err)
 		}
 		for k, i := range todo {
-			tc.units[texts[i]] = normalized(pooled[k*H : (k+1)*H])
+			u := normalized(pooled[k*H : (k+1)*H])
+			copy(out[i*H:(i+1)*H], u)
+			tc.units.put(texts[i], u)
 		}
-	}
-	out := make([]float32, 0, len(texts)*H)
-	for _, t := range texts {
-		out = append(out, tc.units[t]...)
 	}
 	return out, nil
 }
@@ -187,24 +203,17 @@ func normalized(v []float32) []float32 {
 // choiceStep computes the loss of a batch and accumulates the gradients of
 // the two passes (texts, options); tc, if not nil, adds the distillation
 // terms.
-func (m *Model) choiceStep(b ChoiceBatch, scale float64, symmetric bool, tc *embedTeacher, grads *modernbert.Grads) (float64, int) {
+func (m *Model) choiceStep(b ChoiceBatch, scale float64, symmetric bool, tc *embedTeacher, grads *modernbert.Grads) (float64, int, error) {
 	H := m.enc.Cfg.Hidden
 	var teacherUnits [2][]float32 // teacher embeddings of the texts, of the options
-	encode := func(texts []string) (modernbert.Batch, *modernbert.State, []float32, []float32) {
+	var teacherErr error
+	encode := func(side int, texts []string) (modernbert.Batch, *modernbert.State, []float32, []float32) {
 		seqs := make([][]int32, len(texts))
 		for i, t := range texts {
 			seqs[i] = m.tok.EncodeMax(t, m.maxLen)
 		}
-		if tc != nil {
-			u, err := tc.embed(texts, seqs)
-			if err != nil {
-				panic(err) // the ids come from the same tokenizer
-			}
-			if teacherUnits[0] == nil {
-				teacherUnits[0] = u
-			} else {
-				teacherUnits[1] = u
-			}
+		if tc != nil && teacherErr == nil {
+			teacherUnits[side], teacherErr = tc.embed(texts, seqs)
 		}
 		batch := modernbert.NewBatch(seqs, m.enc.Cfg.PadID)
 		s, err := m.enc.Forward(batch)
@@ -230,8 +239,11 @@ func (m *Model) choiceStep(b ChoiceBatch, scale float64, symmetric bool, tc *emb
 	for i, c := range b.Candidates {
 		ctxs[i] = CandidateContext(c)
 	}
-	tb, ts, a, an := encode(b.Texts)
-	cb, cs, c, cn := encode(ctxs)
+	tb, ts, a, an := encode(0, b.Texts)
+	cb, cs, c, cn := encode(1, ctxs)
+	if teacherErr != nil {
+		return 0, 0, teacherErr
+	}
 
 	nt, nc := len(b.Texts), len(ctxs)
 	// Scaled similarities, and excluded pairs: a correct option other than
@@ -391,7 +403,7 @@ func (m *Model) choiceStep(b ChoiceBatch, scale float64, symmetric bool, tc *emb
 	for _, n := range cb.Lens {
 		tokens += n
 	}
-	return loss, tokens
+	return loss, tokens, nil
 }
 
 // klLossGrad adds to dS (gradient with respect to the model's scaled
