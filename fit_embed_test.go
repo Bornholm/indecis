@@ -240,6 +240,11 @@ func TestFitEmbeddingsTeacher(t *testing.T) {
 	if err := newModel().FitEmbeddings(context.Background(), b, orphan); err == nil {
 		t.Fatal("DistillHidden without a Teacher was accepted")
 	}
+	cold := opts
+	cold.Teacher, cold.DistillHidden, cold.DistillTemp = newModel(), 1, -1
+	if err := newModel().FitEmbeddings(context.Background(), b, cold); err == nil {
+		t.Fatal("a negative DistillTemp was accepted")
+	}
 	withIdle := opts
 	withIdle.Teacher = newModel()
 	if err := idle.FitEmbeddings(context.Background(), b, withIdle); err != nil {

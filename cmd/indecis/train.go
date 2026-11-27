@@ -63,6 +63,9 @@ func runTrain(args []string) error {
 		if *teacher == "" && (*distill != 0 || *distillHidden != 0 || tempSet) {
 			return fmt.Errorf("train -search: -distill, -distill-temp and -distill-hidden require -teacher")
 		}
+		if *distillTemp <= 0 {
+			return fmt.Errorf("train -search: -distill-temp must be positive")
+		}
 		if *teacher != "" && *distill == 0 && *distillHidden == 0 {
 			return fmt.Errorf("train -search: -teacher needs -distill or -distill-hidden, otherwise the teacher teaches nothing")
 		}

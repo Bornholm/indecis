@@ -75,8 +75,8 @@ func (m *Model) FitEmbeddings(ctx context.Context, batches []ChoiceBatch, opts T
 		if err := m.checkTeacher(opts.Teacher); err != nil {
 			return err
 		}
-		if opts.Distill < 0 || opts.Distill > 1 || opts.DistillHidden < 0 {
-			return fmt.Errorf("indecis: Distill must lie in [0, 1] and DistillHidden be non-negative")
+		if opts.Distill < 0 || opts.Distill > 1 || opts.DistillHidden < 0 || opts.DistillTemp < 0 {
+			return fmt.Errorf("indecis: Distill must lie in [0, 1], DistillHidden and DistillTemp be non-negative (DistillTemp 0: 1)")
 		}
 		if opts.Distill > 0 || opts.DistillHidden > 0 {
 			tc = newEmbedTeacher(opts.Teacher, opts.Distill, opts.DistillTemp, opts.DistillHidden)
