@@ -25,6 +25,8 @@ Dense retrieval over the whole corpus (exact cosine), nDCG@10, at most 512 token
 | bekko a25m | 0.715 | 0.591 | 0.347 | 0.799 | 0.712 | 0.342 | 0.819 |
 | granite-311m | 0.713 | 0.655 | 0.309 | 0.759 | 0.717 | 0.334 | 0.807 |
 
+int8 costs a25m almost nothing: in float32, it scores 0.722 / 0.591 / 0.346 / 0.797, a mean of 0.614 against 0.613 in int8, while computing 3.1 to 3.5 times faster (15 to 256 tokens, one core). int8 is therefore the default worth keeping for a25m too; it still costs about 3.2 times a8m in int8.
+
 For comparison, in Python (sentence-transformers, float32), dense then hybrid:
 
 | Model | scifact | scifact-fr | nfcorpus | squad-fr | hybrid scifact | hybrid nfcorpus | hybrid squad-fr |
