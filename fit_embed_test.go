@@ -19,18 +19,56 @@ func TestChoiceStepGradient(t *testing.T) {
 		Correct:    [][]int{{0}, {1}, {2, 3}, {0}}, // two texts for Facturation
 	}
 	for _, symmetric := range []bool{false, true} {
-		checkChoiceGradient(t, m, b, symmetric)
+		checkChoiceGradient(t, m, b, symmetric, nil)
 	}
 }
 
-func checkChoiceGradient(t *testing.T, m *Model, b ChoiceBatch, symmetric bool) {
+// The distillation terms of FitEmbeddings (scores and alignment) follow
+// the finite differences too, alone and mixed with the contrastive loss.
+func TestChoiceStepDistillGradient(t *testing.T) {
+	m, err := New(bekkoDir(t), Schema{NewNoul("match", "")}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	teacher, err := New(bekkoDir(t), Schema{NewNoul("match", "")}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A teacher that differs from the model: its final norm perturbed.
+	for i := range teacher.enc.FinalNorm.W {
+		teacher.enc.FinalNorm.W[i] *= 1 + 0.5*float32(math.Sin(float64(i)))
+	}
+	if err := m.checkTeacher(teacher); err != nil {
+		t.Fatal(err)
+	}
+	b := ChoiceBatch{
+		Texts:      []string{"Ma facture de mars est fausse", "Le serveur ne répond plus", "Réunion jeudi à 10 h ?", "Facture payée deux fois"},
+		Candidates: []Candidate{{Name: "Facturation"}, {Name: "Support technique", Description: "pannes"}, {Name: "Agenda"}, {Name: "Juridique"}},
+		Correct:    [][]int{{0}, {1}, {2, 3}, {0}},
+	}
+	te, _ := teacher.Embed(context.Background(), b.Texts[0])
+	me, _ := m.Embed(context.Background(), b.Texts[0])
+	var cos float64
+	for k := range te[0] {
+		cos += float64(te[0][k]) * float64(me[0][k])
+	}
+	if cos > 0.999 {
+		t.Fatalf("cosine %.5f: the teacher does not differ from the model", cos)
+	}
+	for _, w := range []struct{ kl, temp, align float64 }{{1, 2, 0}, {0, 1, 1}, {0.5, 2, 1}} {
+		tc := &embedTeacher{t: teacher, kl: w.kl, temp: w.temp, align: w.align, units: map[string][]float32{}}
+		checkChoiceGradient(t, m, b, false, tc)
+	}
+}
+
+func checkChoiceGradient(t *testing.T, m *Model, b ChoiceBatch, symmetric bool, tc *embedTeacher) {
 	grads := m.enc.EnableGrad()
 	m.enc.ZeroGrad(grads)
-	m.choiceStep(b, DefaultEmbedScale, symmetric, grads)
+	m.choiceStep(b, DefaultEmbedScale, symmetric, tc, grads)
 	lossAt := func() float64 {
 		g := m.enc.EnableGrad()
 		m.enc.ZeroGrad(g)
-		l, _ := m.choiceStep(b, DefaultEmbedScale, symmetric, g)
+		l, _ := m.choiceStep(b, DefaultEmbedScale, symmetric, tc, g)
 		return l
 	}
 	w := m.enc.FinalNorm.W
@@ -49,7 +87,7 @@ func checkChoiceGradient(t *testing.T, m *Model, b ChoiceBatch, symmetric bool) 
 		w[i] = old
 		num := (up - down) / (2 * eps)
 		if math.Abs(num-float64(g[i])) > 0.05*math.Abs(num)+2e-4 {
-			t.Errorf("symmetric=%v, gamma[%d]: analytic %.5f, numeric %.5f", symmetric, i, g[i], num)
+			t.Errorf("symmetric=%v, distillation %v, gamma[%d]: analytic %.5f, numeric %.5f", symmetric, tc != nil, i, g[i], num)
 		}
 		if checked++; checked == 8 {
 			break

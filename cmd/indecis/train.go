@@ -34,6 +34,10 @@ func runTrain(args []string) error {
 	seed := fs.Int64("seed", def.Seed, "seed")
 	threads := fs.Int("threads", 0, "cores (0: all)")
 	int8Emb := fs.Bool("int8-embeddings", false, "write the embeddings table in int8 (twice as small)")
+	teacher := fs.String("teacher", "", "-search: embedding model to distill (same tokenizer and width), run in int8")
+	distill := fs.Float64("distill", 0, "-search with -teacher: weight of the teacher's similarity distributions (KL), the contrastive loss weighing 1 − distill")
+	distillTemp := fs.Float64("distill-temp", 1, "-search with -teacher: temperature of the similarity distributions")
+	distillHidden := fs.Float64("distill-hidden", 0, "-search with -teacher: weight of the alignment 1 − cos(model, teacher)")
 	fs.Parse(args)
 	if *search {
 		if err := required(fs, "backbone", "train", "out"); err != nil {
@@ -45,7 +49,8 @@ func runTrain(args []string) error {
 			switch f.Name {
 			case "lr":
 				searchLR = *lr
-			case "backbone", "train", "out", "search", "max-len", "threads", "batch", "epochs", "seed", "int8-embeddings":
+			case "backbone", "train", "out", "search", "max-len", "threads", "batch", "epochs", "seed", "int8-embeddings",
+				"teacher", "distill", "distill-temp", "distill-hidden":
 			default:
 				ignored = append(ignored, "-"+f.Name)
 			}
@@ -53,7 +58,11 @@ func runTrain(args []string) error {
 		if len(ignored) > 0 {
 			return fmt.Errorf("train -search does not use %s", strings.Join(ignored, ", "))
 		}
-		return trainSearch(*backbone, *trainGlobs, *out, *maxLen, *threads, *batch, *epochs, searchLR, *seed, *int8Emb)
+		if *teacher == "" && (*distill != 0 || *distillHidden != 0) {
+			return fmt.Errorf("train -search: -distill and -distill-hidden require -teacher")
+		}
+		dist := searchDistill{teacher: *teacher, weight: *distill, temp: *distillTemp, hidden: *distillHidden}
+		return trainSearch(*backbone, *trainGlobs, *out, *maxLen, *threads, *batch, *epochs, searchLR, *seed, *int8Emb, dist)
 	}
 	if err := required(fs, "backbone", "schema", "train", "out"); err != nil {
 		return err
