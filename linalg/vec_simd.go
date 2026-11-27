@@ -23,6 +23,8 @@ func AbsMax(x []float32) float32 {
 	}
 	var lanes [16]float32
 	acc.Store(lanes[:])
+	// No ZeroUpper here, unlike MaxOf: measured without effect on the int8
+	// path (BenchmarkReductions and infbench, 256 tokens).
 	var m float32
 	for _, v := range lanes[:V] {
 		m = max(m, v)
@@ -281,7 +283,8 @@ func Scale(x []float32, s float32) {
 }
 
 // LayerNormRow writes o = (x - mean)/std * gamma, the moments being
-// computed in float64 in blocks of V lanes.
+// computed in float64 in blocks of V lanes. It does not call ZeroUpper:
+// measured without effect (BenchmarkReductions, LayerNormRow/384).
 //
 //go:noinline
 func LayerNormRow(o, x, gamma []float32, eps float64) {
